@@ -74,12 +74,14 @@ git-local-override/
 **Important**: All scripts must work with Bash 3.2 (macOS default).
 
 Avoid:
+
 - `declare -A` (associative arrays) - Bash 4+ only
 - `${var,,}` (lowercase) - Bash 4+ only
 - `|&` (pipe stderr) - Bash 4+ only
 - `coproc` - Bash 4+ only
 
 Use instead:
+
 - Regular arrays and grep for lookups
 - `tr '[:upper:]' '[:lower:]'` for case conversion
 - `2>&1 |` for piping stderr
@@ -165,6 +167,7 @@ Longer description if needed.
 ```
 
 Types:
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation
@@ -247,6 +250,7 @@ cat README.md         # Should show local content again
 ### Bug Reports
 
 Include:
+
 1. **Environment**: OS, Bash version (`bash --version`), Git version
 2. **Steps to reproduce**: Exact commands run
 3. **Expected behavior**: What should happen
@@ -256,6 +260,7 @@ Include:
 ### Feature Requests
 
 Include:
+
 1. **Use case**: Why you need this feature
 2. **Proposed solution**: How it might work
 3. **Alternatives considered**: Other approaches

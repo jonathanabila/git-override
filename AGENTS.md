@@ -306,6 +306,7 @@ echo "DEBUG: file=$file" >&2
 5. Update the version comparison links at the bottom of the file
 
 Example (if current version is 0.0.2):
+
 ```markdown
 ## [0.0.3] - 2025-01-06
 
@@ -320,6 +321,7 @@ Example (if current version is 0.0.2):
 ```
 
 And update the links at the bottom:
+
 ```markdown
 [0.0.3]: https://github.com/jonathanabila/git-override/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/jonathanabila/git-override/compare/v0.0.1...v0.0.2

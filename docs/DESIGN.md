@@ -5,6 +5,7 @@
 > This document describes the **original v0.0.1 registry/allowlist architecture** which was replaced in v0.0.2. It is retained for historical context and to understand the evolution of the design.
 >
 > **Current architecture (v0.0.2+)** is config-driven:
+>
 > - No global registry or allowlist files
 > - Configuration via `.local-overrides.yaml` checked into each repository
 > - Self-contained per-repo (no global state)
@@ -15,6 +16,7 @@
 ## Problem Statement
 
 Users need to customize tracked files (e.g., `AGENTS.md`, `CLAUDE.md`) locally without:
+
 1. Accidentally committing their local changes
 2. Having local changes appear in `git status`/`git diff`
 3. Disrupting their normal git workflow
@@ -22,6 +24,7 @@ Users need to customize tracked files (e.g., `AGENTS.md`, `CLAUDE.md`) locally w
 ## Solution Overview
 
 A git hooks-based system using `post-checkout` and `pre-commit` hooks that:
+
 - Applies local overrides to the working tree after checkout operations
 - Restores original content before commits to prevent accidental commits
 - Maintains a registry of override files for O(1) lookup instead of filesystem scans
@@ -47,6 +50,7 @@ A git hooks-based system using `post-checkout` and `pre-commit` hooks that:
 ```
 
 Repository:
+
 ```
 .git/
 ├── hooks/
@@ -109,6 +113,7 @@ git-local-override allowlist list
 ### Why a Registry?
 
 Scanning the filesystem on every checkout is slow. Instead:
+
 - Maintain a simple text file listing paths with active overrides
 - Update registry only when user explicitly adds/removes overrides
 - Hooks read registry in O(n) where n = number of overrides (typically <10)
@@ -159,6 +164,7 @@ git-local-override sync
 **Trigger**: After `git checkout`, `git switch`, `git clone`, `git pull` (with checkout)
 
 **Algorithm**:
+
 ```
 1. Check if registry file exists for this repo
    - If not: exit 0 (no overrides configured)
@@ -182,6 +188,7 @@ git-local-override sync
 **Trigger**: Before `git commit`
 
 **Algorithm**:
+
 ```
 1. Check if registry file exists
    - If not: exit 0
@@ -202,6 +209,7 @@ git-local-override sync
 **Trigger**: After `git commit` completes
 
 **Algorithm**:
+
 ```
 1. Re-apply all overrides from registry (same as post-checkout)
 ```
@@ -259,6 +267,7 @@ fi
 ### Why Run First?
 
 Running our hook first ensures:
+
 1. Local overrides are applied before other hooks see the files
 2. Pre-commit restores originals before linters/formatters run on them
 3. Other hooks operate on the "real" committed content, not local overrides
@@ -358,6 +367,7 @@ The installer adds a pattern to ignore all local override files:
 ```
 
 This covers:
+
 - `AGENTS.local.md`
 - `CLAUDE.local.md`
 - `config.local.json`
