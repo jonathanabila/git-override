@@ -56,7 +56,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jonathanabila/git-override
-    rev: v1.0.0
+    rev: v0.0.2
     hooks:
       - id: local-override-pre-commit
       - id: local-override-post-commit

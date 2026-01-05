@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed install.sh global template hooks not including shared library
 - Simplified SCRIPT_DIR handling in hooks (lib always in same directory)
 
-## [2.0.0] - 2025-01-05
+## [0.0.2] - 2025-01-05
 
 ### Changed
 
@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Allows `git checkout HEAD -- file` to work for restoring originals
   - Fixes conflict between `restore` command and hook behavior
 
-## [1.0.0] - 2025-01-04
+## [0.0.1] - 2025-01-04
 
 ### Added
 
@@ -139,7 +139,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
-- **1.0.0** - Initial release with full feature set
+- **0.0.1** - Initial release with full feature set
+- **0.0.2** - Config-driven architecture
 
-[Unreleased]: https://github.com/jonathanabila/git-override/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/jonathanabila/git-override/releases/tag/v1.0.0
+[Unreleased]: https://github.com/jonathanabila/git-override/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/jonathanabila/git-override/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/jonathanabila/git-override/releases/tag/v0.0.1
