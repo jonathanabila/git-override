@@ -299,18 +299,28 @@ echo "DEBUG: file=$file" >&2
 
 **Important**: Every time you make changes to this project, update `CHANGELOG.md`:
 
-1. Add entries under `## [Unreleased]` section
+1. **Increment the version** - Do NOT use `[Unreleased]`. Instead, bump the patch version (e.g., 0.0.2 → 0.0.3) and add a new section at the top with today's date
 2. Use categories: `Added`, `Changed`, `Fixed`, `Removed`, `Deprecated`, `Security`
 3. Follow [Keep a Changelog](https://keepachangelog.com/) format
 4. Be specific about what changed and why
+5. Update the version comparison links at the bottom of the file
 
-Example:
+Example (if current version is 0.0.2):
 ```markdown
-## [Unreleased]
+## [0.0.3] - 2025-01-06
 
 ### Added
 - New `foo` command for doing X
 
 ### Fixed
 - Bug where Y happened when Z
+
+## [0.0.2] - 2025-01-05
+...
+```
+
+And update the links at the bottom:
+```markdown
+[0.0.3]: https://github.com/jonathanabila/git-override/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/jonathanabila/git-override/compare/v0.0.1...v0.0.2
 ```
