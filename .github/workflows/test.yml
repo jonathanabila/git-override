@@ -60,7 +60,7 @@ jobs:
         run: make test
 
       - name: Install pre-commit
-        run: pip3 install pre-commit
+        run: brew install pre-commit
 
       - name: Run integration tests
         run: |
