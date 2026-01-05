@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-01-05
+
+### Added
+
+- CI status badge in README for build visibility
+- `.gitattributes` for cross-platform line ending consistency
+
 ## [0.0.4] - 2025-01-05
 
 ### Added
@@ -170,7 +177,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **0.0.2** - Config-driven architecture
 - **0.0.3** - Docker-based testing infrastructure and CI
 - **0.0.4** - Community health files for public release
+- **0.0.5** - CI badge and .gitattributes for resilience
 
+[0.0.5]: https://github.com/jonathanabila/git-override/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/jonathanabila/git-override/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/jonathanabila/git-override/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/jonathanabila/git-override/compare/v0.0.1...v0.0.2

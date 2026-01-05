@@ -6,6 +6,7 @@
     <a href="https://github.com/jonathanabila/git-override/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
     <a href="https://github.com/jonathanabila/git-override/releases"><img src="https://img.shields.io/github/v/release/jonathanabila/git-override" alt="Release"></a>
     <a href="https://github.com/jonathanabila/git-override/stargazers"><img src="https://img.shields.io/github/stars/jonathanabila/git-override" alt="Stars"></a>
+    <a href="https://github.com/jonathanabila/git-override/actions/workflows/test.yml"><img src="https://github.com/jonathanabila/git-override/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
     <a href="https://github.com/jonathanabila/git-override/issues"><img src="https://img.shields.io/github/issues/jonathanabila/git-override" alt="Issues"></a>
   </p>
 
