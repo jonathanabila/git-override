@@ -1,5 +1,7 @@
 # git-local-override
 
+> **Note**: The GitHub repository is named [`git-override`](https://github.com/jonathanabila/git-override), but the tool/CLI is called `git-local-override`.
+
 **Maintain local modifications to tracked files without committing them.**
 
 git-local-override lets you customize tracked files (like `CLAUDE.md`, `AGENTS.md`, or config files) locally while keeping git's view of those files unchanged. Your local modifications stay on your machine, invisible to git status and safe from accidental commits.
@@ -72,12 +74,17 @@ pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type po
 #### Option 2: Standalone (Quick Setup)
 
 ```bash
-# Install hooks to current repository
+# Install hooks to current repository (uses latest from main branch)
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
 
 # Or install globally (affects all new repos)
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --global
 ```
+
+> **Tip**: For reproducible installs, pin to a specific version tag:
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.0.2/scripts/install.sh | bash
+> ```
 
 ### Create Your Overrides
 
@@ -271,6 +278,23 @@ files:
   - path/to/your/file.md
 ```
 
+## What Gets Installed
+
+When you run the installer, here's what gets created or modified:
+
+| Location | What | Purpose |
+|----------|------|---------|
+| `.git/hooks/pre-commit` | Hook script | Restores originals before commit |
+| `.git/hooks/post-commit` | Hook script | Re-applies overrides after commit |
+| `.git/hooks/post-checkout` | Hook script | Applies overrides after checkout |
+| `.git/hooks/local-override-lib.sh` | Shared library | Common functions for hooks |
+| `.git/hooks/*.chained` | Backup | Your existing hooks (preserved) |
+| `~/.config/git/ignore` | Gitignore patterns | Ignores `*.local.*` files globally |
+
+With `--global` flag, hooks are also installed to the git template directory (`~/.config/git/template/hooks/`) so new repositories get them automatically.
+
+With `--cli` flag, the CLI tool is installed to `~/.local/bin/git-local-override`.
+
 ## Global Gitignore
 
 The install script adds patterns to your global gitignore so `.local.*` files never show in git status:
@@ -285,7 +309,8 @@ The install script adds patterns to your global gitignore so `.local.*` files ne
 
 - Bash 3.2+ (macOS default) or Bash 4+
 - Git 2.0+
-- Standard Unix tools: `grep`, `cp`
+- Standard Unix tools: `grep`, `cp`, `mv`, `mkdir`, `chmod`, `dirname`, `basename`
+- `curl` (for remote installation only)
 
 ## Development
 

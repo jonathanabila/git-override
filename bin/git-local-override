@@ -8,6 +8,16 @@
 # The main functionality is provided by git hooks (installed separately).
 # This CLI provides utility commands for managing override files.
 #
+# WHY CLI IS SEPARATE FROM HOOKS:
+# The CLI is optional - hooks work independently. This allows users who only
+# need basic functionality to skip CLI installation entirely. The CLI adds
+# convenience commands (add, remove, list, status) but isn't required.
+#
+# NOTE ON CODE DUPLICATION:
+# read_config() and get_local_path() are duplicated from local-override-lib.sh.
+# This is intentional: the CLI must work standalone without the hooks installed,
+# so it cannot source the lib file (which lives in .git/hooks/).
+#
 set -euo pipefail
 
 # Colors for output (if terminal supports it)

@@ -1,5 +1,17 @@
 # Local Override System - Hooks Solution
 
+> **⚠️ HISTORICAL DOCUMENT - v0.0.1 Architecture**
+>
+> This document describes the **original v0.0.1 registry/allowlist architecture** which was replaced in v0.0.2. It is retained for historical context and to understand the evolution of the design.
+>
+> **Current architecture (v0.0.2+)** is config-driven:
+> - No global registry or allowlist files
+> - Configuration via `.local-overrides.yaml` checked into each repository
+> - Self-contained per-repo (no global state)
+> - See [README.md](../README.md) and [AGENTS.md](../AGENTS.md) for current documentation.
+
+---
+
 ## Problem Statement
 
 Users need to customize tracked files (e.g., `AGENTS.md`, `CLAUDE.md`) locally without:

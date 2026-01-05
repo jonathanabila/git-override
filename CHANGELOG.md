@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Native macOS tests (with real bash 3.2)
   - Shellcheck linting
 
+### Changed
+
+- **Documentation overhaul** for accuracy and clarity:
+  - Added obsolete warning banner to `docs/DESIGN.md` (describes v0.0.1 architecture)
+  - Updated `CONTRIBUTING.md` project structure to match actual layout
+  - Updated `CONTRIBUTING.md` test paths from `sandbox/` to `tests/`
+  - Removed references to obsolete CLI commands (`init`, `allowlist`, `sync`) in `CONTRIBUTING.md`
+  - Fixed clone instructions in `CONTRIBUTING.md` to clarify repo vs directory name
+  - Added repo name vs tool name clarification in `README.md`
+  - Added "What Gets Installed" section in `README.md`
+  - Added version pinning guidance for curl installs in `README.md`
+  - Updated requirements list in `README.md` with complete dependencies
+  - Enhanced inline "why" comments in core scripts for maintainability
+
 ### Fixed
 
 - Fixed `((count++))` arithmetic causing script exit with `set -e` when count is 0

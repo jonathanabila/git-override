@@ -14,6 +14,20 @@
 #   --repo      Install to current repository only (default)
 #   --cli       Also install the CLI tool to ~/.local/bin
 #
+# INSTALLATION MODES:
+# - --repo: Installs hooks directly to .git/hooks/ in current repository.
+#   Best for single-repo usage or when different repos need different versions.
+#
+# - --global: Installs to git's template directory (~/.config/git/template/hooks/).
+#   Git copies these to .git/hooks/ on every `git init` or `git clone`.
+#   Best for teams where all repos should have hooks automatically.
+#
+# WHY GLOBAL GITIGNORE:
+# We add *.local.* patterns to the global gitignore so that:
+# 1. Local override files never appear in `git status`
+# 2. They can't be accidentally staged or committed
+# 3. Users don't need to modify each repo's .gitignore
+#
 set -euo pipefail
 
 # Colors
@@ -97,7 +111,9 @@ install_hooks_to_dir() {
                 continue
             fi
 
-            # Chain existing hook
+            # HOOK CHAINING: Preserve existing hooks by renaming to .chained
+            # Our hook runs first, then calls the chained hook with same args.
+            # This ensures compatibility with other tools (husky, pre-commit, etc.)
             mv "$hook_file" "$hook_file.chained"
             info "Preserved existing $hook_type hook as $hook_type.chained"
         fi

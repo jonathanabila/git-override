@@ -5,8 +5,16 @@
 # Shared library for git-local-override hooks.
 # This file is sourced by the hook scripts.
 #
-# Config file: .local-overrides (plain text, one file per line)
-# or .local-overrides.yaml (YAML format with 'files:' key)
+# WHY THIS EXISTS:
+# All three hooks (pre-commit, post-commit, post-checkout) need the same
+# core functions. Duplicating code would make maintenance harder and risk
+# divergence. This shared library is copied alongside the hooks during install.
+#
+# CONFIG FORMAT:
+# We support two formats for backwards compatibility and user preference:
+# - .local-overrides.yaml (YAML with 'files:' key) - preferred, more explicit
+# - .local-overrides (plain text, one file per line) - simpler for small configs
+# YAML is checked first; plain text is the fallback.
 #
 
 # Get repo root
@@ -17,6 +25,12 @@ get_repo_root() {
 # Convert path to local override path
 # e.g., AGENTS.md -> AGENTS.local.md
 #       Makefile -> Makefile.local
+#
+# WHY .local NAMING:
+# The ".local" infix (before extension) was chosen because:
+# 1. It's visually obvious which file is the override
+# 2. A single gitignore pattern (*.local.*) catches all override files
+# 3. It sorts alphabetically next to the original file
 get_local_path() {
     local path="$1"
     local dir basename ext

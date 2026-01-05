@@ -18,35 +18,44 @@ Be respectful, inclusive, and constructive. We're all here to build something us
 
 ```bash
 # Clone the repository
+# Note: Repo is named 'git-override' but the tool is 'git-local-override'
 git clone https://github.com/jonathanabila/git-override.git
-cd git-local-override
+cd git-override
 
 # Run the test suite
 make test
 
-# Install locally for testing
-make install
+# Install hooks to a test repository
+./scripts/install.sh --repo
 ```
 
 ## Project Structure
 
 ```
 git-local-override/
-├── git-local-override              # Main CLI tool (bash)
-├── local-override-post-checkout    # Post-checkout hook script
-├── local-override-pre-commit       # Pre-commit hook script
-├── local-override-post-commit      # Post-commit hook script
-├── install-local-override.sh       # Global installer
-├── uninstall-local-override.sh     # Global uninstaller
-├── sandbox/                        # Test environment
-│   ├── run-tests.sh               # Test suite
-│   └── test-wrapper.sh            # Test helper
-├── README.md
-├── CONTRIBUTING.md
-├── CHANGELOG.md
-├── LICENSE
-├── Makefile
-└── .gitignore
+├── bin/                          # CLI tool
+│   └── git-local-override        # Main command-line interface
+├── hooks/                        # Git hook scripts
+│   ├── local-override-lib.sh     # Shared library functions
+│   ├── local-override-post-checkout
+│   ├── local-override-pre-commit
+│   └── local-override-post-commit
+├── scripts/                      # Installation scripts
+│   ├── install.sh
+│   └── uninstall.sh
+├── tests/                        # Test suite
+│   ├── run-tests.sh              # Main test runner
+│   └── integration/              # Integration tests
+├── docs/                         # Additional documentation
+│   └── DESIGN.md                 # Historical design (v0.0.1)
+├── .pre-commit-hooks.yaml        # Pre-commit integration definitions
+├── .pre-commit-config.yaml       # Pre-commit hooks for this repo
+├── Makefile                      # Build automation
+├── README.md                     # User documentation
+├── CONTRIBUTING.md               # Contributor guidelines
+├── CHANGELOG.md                  # Version history
+├── AGENTS.md                     # AI agent instructions
+└── LICENSE                       # MIT license
 ```
 
 ## Development Guidelines
@@ -92,19 +101,19 @@ git checkout HEAD -- "$path" 2>/dev/null || true
 
 ### Testing
 
-All changes should include tests. The test suite is in `sandbox/run-tests.sh`.
+All changes should include tests. The test suite is in `tests/run-tests.sh`.
 
 ```bash
 # Run all tests
 make test
 
 # Run tests with verbose output
-cd sandbox && bash -x ./run-tests.sh
+bash -x tests/run-tests.sh
 ```
 
 #### Writing Tests
 
-Add tests to `sandbox/run-tests.sh`:
+Add tests to `tests/run-tests.sh`:
 
 ```bash
 test_your_feature() {
@@ -186,10 +195,13 @@ Types:
 ### Test Installation
 
 ```bash
-# Test install
-make install
+# Install hooks to current repo
+./scripts/install.sh --repo
 
-# Verify
+# Or install CLI tool globally
+./scripts/install.sh --cli
+
+# Verify CLI (if installed)
 which git-local-override
 git-local-override help
 ```
@@ -203,9 +215,14 @@ git init
 echo "# Test" > README.md
 git add . && git commit -m "Initial"
 
-# Test the tool
-git-local-override init
-git-local-override allowlist add '*.md'
+# Install hooks (from cloned repo)
+/path/to/git-local-override/scripts/install.sh --repo
+
+# Create config file
+git-local-override init-config
+# Edit .local-overrides.yaml to add README.md
+
+# Create local override
 git-local-override add README.md
 cat README.local.md  # Should exist
 ```
@@ -215,6 +232,9 @@ cat README.local.md  # Should exist
 ```bash
 # Modify local file
 echo "# Local changes" > README.local.md
+
+# Apply override to see local content
+git-local-override apply
 
 # Verify hook behavior
 git add README.md
