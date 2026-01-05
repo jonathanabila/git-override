@@ -1,57 +1,82 @@
-# git-local-override
+<div align="center">
+  <h1>🔒 git-local-override</h1>
+  <p><strong>Keep your local changes invisible to git—forever clean status, zero accidental commits.</strong></p>
+
+  <p>
+    <a href="https://github.com/jonathanabila/git-override/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+    <a href="https://github.com/jonathanabila/git-override/releases"><img src="https://img.shields.io/github/v/release/jonathanabila/git-override" alt="Release"></a>
+    <a href="https://github.com/jonathanabila/git-override/stargazers"><img src="https://img.shields.io/github/stars/jonathanabila/git-override" alt="Stars"></a>
+    <a href="https://github.com/jonathanabila/git-override/issues"><img src="https://img.shields.io/github/issues/jonathanabila/git-override" alt="Issues"></a>
+  </p>
+
+  <p>
+    <a href="#-quick-start">Quick Start</a> •
+    <a href="#%EF%B8%8F-how-it-works">How It Works</a> •
+    <a href="#-configuration">Configuration</a> •
+    <a href="#%EF%B8%8F-cli-commands">CLI Commands</a> •
+    <a href="#-troubleshooting">Troubleshooting</a>
+  </p>
+</div>
+
+<br>
 
 > **Note**: The GitHub repository is named [`git-override`](https://github.com/jonathanabila/git-override), but the tool/CLI is called `git-local-override`.
 
-**Maintain local modifications to tracked files without committing them.**
+---
 
-git-local-override lets you customize tracked files (like `CLAUDE.md`, `AGENTS.md`, or config files) locally while keeping git's view of those files unchanged. Your local modifications stay on your machine, invisible to git status and safe from accidental commits.
+## ✨ What It Does
 
-## The Problem
+git-local-override lets you customize tracked files (like `CLAUDE.md`, `AGENTS.md`, or config files) **locally** while keeping git's view unchanged. Your modifications stay on your machine—invisible to `git status` and safe from accidental commits.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Your Workflow                       │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│   CLAUDE.md          ←  What git sees (original)        │
+│   CLAUDE.local.md    ←  What you edit (your version)    │
+│                                                         │
+│   ┌─────────────┐    ┌─────────────┐                    │
+│   │  You See    │    │  Git Sees   │                    │
+│   ├─────────────┤    ├─────────────┤                    │
+│   │ Your local  │    │  Original   │                    │
+│   │  content    │    │  content    │                    │
+│   │             │    │             │                    │
+│   │ Clean       │    │ No pending  │                    │
+│   │ git status  │    │  changes    │                    │
+│   └─────────────┘    └─────────────┘                    │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🚨 The Problem
 
 You want to customize a tracked file for your local environment:
+
 - Add personal instructions to `CLAUDE.md` or `AGENTS.md`
 - Tweak configuration files for local development
 - Override settings without affecting the team
 
-But git makes this painful:
-- The file shows up in `git status` constantly
-- Risk of accidentally committing your local changes
-- `git stash` and `.gitignore` workarounds are fragile
+**But git makes this painful:**
 
-## The Solution
+- ❌ The file shows up in `git status` constantly
+- ❌ Risk of accidentally committing your local changes
+- ❌ `git stash` and `.gitignore` workarounds are fragile
 
-git-local-override uses git hooks to transparently manage local file overrides:
+---
 
-```
-CLAUDE.md          <- What git sees (original content)
-CLAUDE.local.md    <- What you edit (your local version)
-```
+## 🚀 Quick Start
 
-| You see | Git sees |
-|---------|----------|
-| Your local content | Original tracked content |
-| Clean `git status` | No modifications |
-| Safe commits | Original content committed |
+### Install (One Command)
 
-## Quick Start
-
-### For Repository Maintainers
-
-Add a `.local-overrides.yaml` to your repository listing files that users can override:
-
-```yaml
-# .local-overrides.yaml
-files:
-  - CLAUDE.md
-  - AGENTS.md
-  - config/settings.json
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
 ```
 
-Commit this file to your repository.
-
-### For Users
-
-#### Option 1: Pre-commit (Recommended for Teams)
+<details>
+<summary>📦 Alternative: Pre-commit (Recommended for Teams)</summary>
 
 Add to your `.pre-commit-config.yaml`:
 
@@ -65,47 +90,65 @@ repos:
       - id: local-override-post-checkout
 ```
 
-Then install the hooks:
+Then install:
 
 ```bash
 pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout
 ```
 
-#### Option 2: Standalone (Quick Setup)
+</details>
+
+<details>
+<summary>🌐 Global Installation (All Repos)</summary>
 
 ```bash
-# Install hooks to current repository (uses latest from main branch)
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
-
-# Or install globally (affects all new repos)
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --global
 ```
 
-> **Tip**: For reproducible installs, pin to a specific version tag:
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.0.2/scripts/install.sh | bash
-> ```
+</details>
 
-### Create Your Overrides
+<details>
+<summary>📌 Pin to Specific Version</summary>
 
 ```bash
-# Create a local version of the file you want to customize
-cp CLAUDE.md CLAUDE.local.md
-
-# Edit your local version
-vim CLAUDE.local.md
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.0.2/scripts/install.sh | bash
 ```
 
-That's it! Your local changes are now active and protected from commits.
+</details>
 
-## How It Works
+### Set Up Your Repository
+
+**Step 1:** Create a config file listing files that can be overridden:
+
+```yaml
+# .local-overrides.yaml
+files:
+  - CLAUDE.md
+  - AGENTS.md
+  - config/settings.json
+```
+
+**Step 2:** Create your local override:
+
+```bash
+cp CLAUDE.md CLAUDE.local.md
+vim CLAUDE.local.md  # Make your changes
+```
+
+**That's it!** Your local changes are now active and protected from commits.
+
+---
+
+## ⚙️ How It Works
+
+The magic happens through git hooks that run automatically:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Your Workflow                            │
+│                        Commit Workflow                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│   1. Edit CLAUDE.local.md                                       │
+│   1. You edit CLAUDE.local.md with your changes                 │
 │              │                                                  │
 │              ▼                                                  │
 │   2. git commit ─────────────────────────────────────────────┐  │
@@ -130,7 +173,7 @@ That's it! Your local changes are now active and protected from commits.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Hook Actions
+### Hook Summary
 
 | Git Operation | Hook | What Happens |
 |---------------|------|--------------|
@@ -139,7 +182,9 @@ That's it! Your local changes are now active and protected from commits.
 | `git commit` | pre-commit | Restores originals, stages them |
 | After commit | post-commit | Re-applies local overrides |
 
-## Configuration
+---
+
+## 📝 Configuration
 
 ### Config File Format
 
@@ -151,10 +196,11 @@ files:
   - CLAUDE.md
   - AGENTS.md
   - config/settings.json
-  - backend/services/*/config.yaml
+  - backend/services/*/config.yaml  # Glob patterns supported
 ```
 
-Or use plain text format `.local-overrides`:
+<details>
+<summary>Plain text format alternative</summary>
 
 ```
 # .local-overrides
@@ -163,6 +209,8 @@ AGENTS.md
 config/settings.json
 ```
 
+</details>
+
 ### File Naming Convention
 
 Local override files use `.local` inserted before the extension:
@@ -170,62 +218,74 @@ Local override files use `.local` inserted before the extension:
 | Original File | Local Override |
 |---------------|----------------|
 | `CLAUDE.md` | `CLAUDE.local.md` |
-| `AGENTS.md` | `AGENTS.local.md` |
 | `config.json` | `config.local.json` |
 | `settings.yaml` | `settings.local.yaml` |
 | `Makefile` | `Makefile.local` |
 
-## CLI Tool (Optional)
+---
 
-The CLI provides utility commands for managing overrides. Install it with:
+## 🛠️ CLI Commands
+
+The optional CLI provides utility commands. Install with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 ```
 
-### Commands
+| Command | Description |
+|---------|-------------|
+| `git-local-override add <path>` | Create a local override file |
+| `git-local-override remove [-d] <path>` | Remove override (`-d` deletes local file) |
+| `git-local-override list` | List configured overrides and status |
+| `git-local-override status` | Show detailed system status |
+| `git-local-override apply` | Manually apply all overrides |
+| `git-local-override restore` | Manually restore all originals |
+| `git-local-override init-config` | Create a `.local-overrides.yaml` template |
+| `git-local-override help` | Show help |
 
-```bash
-git-local-override add <path>           # Create a local override file
-git-local-override remove [-d] <path>   # Remove override (-d deletes local file)
-git-local-override list                 # List configured overrides and status
-git-local-override status               # Show detailed system status
-git-local-override apply                # Manually apply all overrides
-git-local-override restore              # Manually restore all originals
-git-local-override init-config          # Create a .local-overrides.yaml template
-git-local-override help                 # Show help
-```
+---
 
-## Advanced Usage
+## 🔧 Advanced Usage
 
-### Escape Hatch
+<details>
+<summary><strong>Escape Hatch: Commit Local Changes Intentionally</strong></summary>
 
-Need to commit your local changes intentionally? Use git's standard bypass:
+Need to commit your local changes? Use git's standard bypass:
 
 ```bash
 git commit --no-verify -m "Include local changes this time"
 ```
 
-### Manually Apply/Restore
+</details>
+
+<details>
+<summary><strong>Manual Apply/Restore</strong></summary>
 
 ```bash
 # Apply all local overrides now
 git-local-override apply
 
-# Restore all originals now (useful for debugging)
+# Restore all originals (useful for debugging)
 git-local-override restore
 ```
 
-### Existing Hooks
+</details>
 
-git-local-override preserves your existing hooks by chaining them:
+<details>
+<summary><strong>Existing Hooks Preserved</strong></summary>
+
+git-local-override chains with your existing hooks:
 
 ```bash
 .git/hooks/pre-commit           # Our wrapper
 .git/hooks/pre-commit.chained   # Your original hook (called after ours)
 ```
 
-## Architecture
+</details>
+
+---
+
+## 📁 Architecture
 
 ```
 <your-repo>/
@@ -239,7 +299,9 @@ git-local-override preserves your existing hooks by chaining them:
     └── local-override-lib.sh   # Shared functions
 ```
 
-## Performance
+---
+
+## ⚡ Performance
 
 Hooks are optimized for speed:
 
@@ -249,9 +311,12 @@ Hooks are optimized for speed:
 | 10 overrides, post-checkout | < 50ms | ~30ms |
 | 100 staged files, 10 overrides | < 100ms | ~25ms |
 
-## Troubleshooting
+---
 
-### Local changes not appearing
+## 🔍 Troubleshooting
+
+<details>
+<summary><strong>Local changes not appearing</strong></summary>
 
 Re-apply overrides manually:
 
@@ -259,7 +324,10 @@ Re-apply overrides manually:
 git-local-override apply
 ```
 
-### Hooks not running
+</details>
+
+<details>
+<summary><strong>Hooks not running</strong></summary>
 
 Check status:
 
@@ -269,7 +337,10 @@ git-local-override status
 
 If hooks show "not installed", reinstall them.
 
-### File not being overridden
+</details>
+
+<details>
+<summary><strong>File not being overridden</strong></summary>
 
 Make sure the file is listed in `.local-overrides.yaml`:
 
@@ -278,9 +349,11 @@ files:
   - path/to/your/file.md
 ```
 
-## What Gets Installed
+</details>
 
-When you run the installer, here's what gets created or modified:
+---
+
+## 📦 What Gets Installed
 
 | Location | What | Purpose |
 |----------|------|---------|
@@ -291,30 +364,25 @@ When you run the installer, here's what gets created or modified:
 | `.git/hooks/*.chained` | Backup | Your existing hooks (preserved) |
 | `~/.config/git/ignore` | Gitignore patterns | Ignores `*.local.*` files globally |
 
-With `--global` flag, hooks are also installed to the git template directory (`~/.config/git/template/hooks/`) so new repositories get them automatically.
+With `--global`: Also installs to `~/.config/git/template/hooks/` for new repos.
 
-With `--cli` flag, the CLI tool is installed to `~/.local/bin/git-local-override`.
+With `--cli`: Installs CLI to `~/.local/bin/git-local-override`.
 
-## Global Gitignore
+---
 
-The install script adds patterns to your global gitignore so `.local.*` files never show in git status:
+## 📋 Requirements
 
-```
-# ~/.config/git/ignore
-*.local.*
-*.local
-```
-
-## Requirements
-
-- Bash 3.2+ (macOS default) or Bash 4+
-- Git 2.0+
+- **Bash** 3.2+ (macOS default) or Bash 4+
+- **Git** 2.0+
 - Standard Unix tools: `grep`, `cp`, `mv`, `mkdir`, `chmod`, `dirname`, `basename`
 - `curl` (for remote installation only)
 
-## Development
+---
 
-### Repository Structure
+## 👨‍💻 Development
+
+<details>
+<summary><strong>Repository Structure</strong></summary>
 
 ```
 git-local-override/
@@ -335,14 +403,20 @@ git-local-override/
     └── DESIGN.md
 ```
 
-### Running Tests
+</details>
+
+<details>
+<summary><strong>Running Tests</strong></summary>
 
 ```bash
 make test           # Run test suite
 make clean          # Clean test artifacts
 ```
 
-### Code Quality
+</details>
+
+<details>
+<summary><strong>Code Quality</strong></summary>
 
 ```bash
 # Install pre-commit hooks for development
@@ -354,14 +428,34 @@ make lint           # Shellcheck
 make fmt            # Auto-format with shfmt
 ```
 
-## Contributing
+</details>
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+---
 
-## License
+## 🤝 Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+---
+
+## 📄 License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## Acknowledgments
+---
+
+## 💡 Acknowledgments
 
 Inspired by the need to maintain local AI assistant configurations (`CLAUDE.md`, `AGENTS.md`) without polluting git history or risking accidental commits.
+
+---
+
+<div align="center">
+  <p>
+    <a href="https://github.com/jonathanabila/git-override/issues">Report Bug</a> •
+    <a href="https://github.com/jonathanabila/git-override/issues">Request Feature</a>
+  </p>
+  <p>
+    ⭐ Star this repo if you find it useful!
+  </p>
+</div>
