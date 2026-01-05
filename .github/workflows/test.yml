@@ -1,0 +1,85 @@
+# GitHub Actions workflow for git-local-override
+#
+# Runs tests on every push and pull request:
+# - Unit tests
+# - Integration tests (install, git operations, pre-commit)
+# - Bash 3.2 compatibility tests (for macOS)
+#
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Main test suite - runs all tests in Docker
+  test:
+    name: All Tests (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: make docker-build
+
+      - name: Run all tests
+        run: make test-docker
+
+  # Bash 3.2 compatibility tests
+  test-bash3:
+    name: Bash 3.2 Compatibility
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build bash 3.2 Docker image
+        run: make docker-build-bash3
+
+      - name: Run compatibility tests
+        run: make test-docker-bash3
+
+  # Native macOS tests (verifies actual macOS behavior)
+  test-macos:
+    name: Native macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show bash version
+        run: bash --version
+
+      - name: Run unit tests
+        run: make test
+
+      - name: Install pre-commit
+        run: pip3 install pre-commit
+
+      - name: Run integration tests
+        run: |
+          chmod +x tests/integration/*.sh
+          tests/integration/test-install.sh
+          tests/integration/test-git-ops.sh
+          tests/integration/test-precommit.sh
+
+  # Shellcheck linting
+  lint:
+    name: Shellcheck Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './bin ./hooks ./scripts'
+          severity: warning

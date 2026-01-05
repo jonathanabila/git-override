@@ -260,7 +260,7 @@ cmd_list() {
 
         if [[ -f "$repo_root/$local_path" ]]; then
             status="${GREEN}[active]${NC}"
-            ((active++))
+            ((active++)) || true
         else
             status="${YELLOW}[no local file]${NC}"
         fi
@@ -269,7 +269,7 @@ cmd_list() {
         if [[ -f "$repo_root/$local_path" ]]; then
             echo -e "    -> $local_path"
         fi
-        ((count++))
+        ((count++)) || true
     done < <(read_config "$repo_root")
 
     echo ""
@@ -346,7 +346,7 @@ cmd_apply() {
         if [[ -f "$full_local_path" && -f "$full_path" ]]; then
             cp "$full_local_path" "$full_path"
             echo "  Applied: $path"
-            ((count++))
+            ((count++)) || true
         fi
     done < <(read_config "$repo_root")
 
@@ -375,7 +375,7 @@ cmd_restore() {
             if git -C "$repo_root" ls-files --error-unmatch "$path" &>/dev/null; then
                 git -C "$repo_root" checkout HEAD -- "$path" 2>/dev/null || true
                 echo "  Restored: $path"
-                ((count++))
+                ((count++)) || true
             fi
         fi
     done < <(read_config "$repo_root")

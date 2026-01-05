@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Docker-based testing infrastructure** for isolated, reproducible tests:
+  - `make test-docker` - Run all tests in Docker container
+  - `make test-docker-bash3` - Run tests on Alpine for compatibility testing
+  - Dockerfile for Ubuntu 22.04 with git, bash, pre-commit
+  - Dockerfile for Alpine (lightweight compatibility testing)
+
+- **Integration test suites**:
+  - Install/uninstall tests - Verify install.sh and uninstall.sh work correctly
+  - Git operations tests - Test real git commit, checkout, branch operations
+  - Pre-commit framework tests - Verify hooks work through pre-commit
+
+- **GitHub Actions CI workflow** (`.github/workflows/test.yml`):
+  - Docker-based tests on Ubuntu
+  - Native macOS tests (with real bash 3.2)
+  - Shellcheck linting
+
+### Fixed
+
+- Fixed `((count++))` arithmetic causing script exit with `set -e` when count is 0
+- Fixed install.sh global template hooks not including shared library
+- Simplified SCRIPT_DIR handling in hooks (lib always in same directory)
+
 ## [2.0.0] - 2025-01-05
 
 ### Changed

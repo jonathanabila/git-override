@@ -86,12 +86,9 @@ install_hooks_to_dir() {
         local hook_file="$hooks_dir/$hook_type"
         local our_hook="local-override-$hook_type"
 
-        # Get our hook content
+        # Get our hook content (lib is in same dir, so SCRIPT_DIR works as-is)
         local hook_content
         hook_content="$(get_hook_content "$our_hook")"
-
-        # Update SCRIPT_DIR to point to lib location
-        hook_content="${hook_content//\"\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")\" \&\& pwd)\"/\"$lib_dir\"}"
 
         if [[ -f "$hook_file" ]]; then
             # Check if already installed
@@ -142,7 +139,8 @@ install_to_repo() {
 # Install to git template directory (affects new clones)
 install_to_template() {
     local template_dir="${XDG_CONFIG_HOME:-$HOME/.config}/git/template/hooks"
-    local lib_dir="${XDG_CONFIG_HOME:-$HOME/.config}/git/hooks"
+    # Put lib in the same directory as hooks so it gets copied with git init
+    local lib_dir="$template_dir"
 
     info "Installing hooks to git template: $template_dir"
     install_hooks_to_dir "$template_dir" "$lib_dir"

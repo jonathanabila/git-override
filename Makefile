@@ -7,7 +7,9 @@
 #   make clean      - Clean test artifacts
 #   make help       - Show this help
 
-.PHONY: install uninstall test clean help check-bash lint
+.PHONY: install uninstall test clean help check-bash lint \
+       test-docker test-docker-bash3 test-docker-unit test-docker-install \
+       test-docker-gitops test-docker-precommit docker-build docker-build-bash3
 
 # Default target
 .DEFAULT_GOAL := help
@@ -63,7 +65,45 @@ clean: clean-test ## Clean all generated files
 
 clean-test: ## Clean test artifacts only
 	@rm -rf $(SRC_TESTS)/test-repo $(SRC_TESTS)/test-config
+	@rm -rf $(SRC_TESTS)/integration/test-workspace
+	@rm -rf $(SRC_TESTS)/integration/test-gitops
+	@rm -rf $(SRC_TESTS)/integration/test-precommit
 	@echo "Test artifacts cleaned."
+
+#------------------------------------------------------------------------------
+# Docker Testing
+#------------------------------------------------------------------------------
+
+DOCKER_IMAGE := git-local-override-test
+DOCKER_IMAGE_BASH3 := git-local-override-test:bash3
+
+docker-build: ## Build the Docker test image
+	@echo "Building Docker test image..."
+	@docker build -t $(DOCKER_IMAGE) -f $(SRC_TESTS)/docker/Dockerfile .
+
+docker-build-bash3: ## Build the bash 3.2 compatibility test image
+	@echo "Building bash 3.2 compatibility test image..."
+	@docker build -t $(DOCKER_IMAGE_BASH3) -f $(SRC_TESTS)/docker/Dockerfile.bash3 .
+
+test-docker: docker-build ## Run all tests in Docker
+	@echo "Running all tests in Docker..."
+	@docker run --rm $(DOCKER_IMAGE) all
+
+test-docker-bash3: docker-build-bash3 ## Run tests with bash 3.2 (macOS compatibility)
+	@echo "Running tests with bash 3.2..."
+	@docker run --rm $(DOCKER_IMAGE_BASH3) unit install gitops
+
+test-docker-unit: docker-build ## Run unit tests in Docker
+	@docker run --rm $(DOCKER_IMAGE) unit
+
+test-docker-install: docker-build ## Run install/uninstall tests in Docker
+	@docker run --rm $(DOCKER_IMAGE) install
+
+test-docker-gitops: docker-build ## Run git operations tests in Docker
+	@docker run --rm $(DOCKER_IMAGE) gitops
+
+test-docker-precommit: docker-build ## Run pre-commit tests in Docker
+	@docker run --rm $(DOCKER_IMAGE) precommit
 
 #------------------------------------------------------------------------------
 # Quality
@@ -147,7 +187,9 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Examples:"
-	@echo "  make install      # Install globally"
-	@echo "  make test         # Run tests"
-	@echo "  make lint         # Check for issues"
-	@echo "  make uninstall    # Remove installation"
+	@echo "  make install          # Install globally"
+	@echo "  make test             # Run tests locally"
+	@echo "  make test-docker      # Run all tests in Docker"
+	@echo "  make test-docker-bash3 # Test bash 3.2 compatibility"
+	@echo "  make lint             # Check for issues"
+	@echo "  make uninstall        # Remove installation"

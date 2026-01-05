@@ -1,0 +1,36 @@
+# Dockerfile for bash compatibility testing
+#
+# This uses Alpine's bash but runs tests in a way that helps catch
+# bash 4+ features that would break on macOS.
+#
+# The real bash 3.2 compatibility testing happens on macOS in GitHub Actions.
+#
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    bash \
+    git \
+    curl
+
+# Configure git for testing
+RUN git config --global user.email "test@example.com" \
+    && git config --global user.name "Test User" \
+    && git config --global init.defaultBranch main
+
+# Create test user
+RUN adduser -D -s /bin/bash testuser
+USER testuser
+WORKDIR /home/testuser
+
+# Copy project files
+COPY --chown=testuser:testuser . /home/testuser/project
+
+WORKDIR /home/testuser/project
+
+# Set up PATH
+ENV PATH="/home/testuser/.local/bin:${PATH}"
+
+# Entry point - run without pre-commit tests (no pre-commit in alpine)
+ENTRYPOINT ["./tests/docker/entrypoint.sh"]
+CMD ["unit", "install", "gitops"]
