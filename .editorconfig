@@ -1,0 +1,29 @@
+# EditorConfig helps maintain consistent coding styles across editors
+# See: https://editorconfig.org
+
+root = true
+
+# Default settings for all files
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# Shell scripts use 4-space indentation
+[*.sh]
+indent_size = 4
+
+# Makefiles require tabs
+[Makefile]
+indent_style = tab
+
+# YAML files use 2-space indentation (explicit)
+[*.{yml,yaml}]
+indent_size = 2
+
+# Markdown files may have trailing spaces for line breaks
+[*.md]
+trim_trailing_whitespace = false

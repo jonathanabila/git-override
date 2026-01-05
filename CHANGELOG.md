@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4] - 2025-01-05
+
+### Added
+
+- **Community health files** for open-source project management:
+  - `CODE_OF_CONDUCT.md` - Contributor Covenant v2.1 code of conduct
+  - `.github/ISSUE_TEMPLATE/bug_report.md` - Structured bug report template
+  - `.github/ISSUE_TEMPLATE/feature_request.md` - Feature request template
+  - `.github/ISSUE_TEMPLATE/config.yml` - Issue template configuration
+  - `.github/CODEOWNERS` - Automatic code review assignments
+  - `.github/dependabot.yml` - Automated dependency updates for GitHub Actions
+  - `.editorconfig` - Consistent coding styles across editors
+
 ## [0.0.3] - 2025-01-05
 
 ### Added
@@ -156,7 +169,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **0.0.1** - Initial release with full feature set
 - **0.0.2** - Config-driven architecture
 - **0.0.3** - Docker-based testing infrastructure and CI
+- **0.0.4** - Community health files for public release
 
+[0.0.4]: https://github.com/jonathanabila/git-override/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/jonathanabila/git-override/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/jonathanabila/git-override/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/jonathanabila/git-override/releases/tag/v0.0.1

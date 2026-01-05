@@ -1,0 +1,5 @@
+# Code owners are automatically requested for review when someone opens a PR
+# that modifies code that they own.
+
+# Global owner for everything in the repository
+* @jonathanabila

@@ -1,0 +1,23 @@
+# Dependabot configuration for keeping GitHub Actions up to date
+# See: https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+
+version: 2
+updates:
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      # Check for updates weekly on Mondays
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      # Prefix commit messages for Actions updates
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    # Group all Actions updates into a single PR
+    groups:
+      github-actions:
+        patterns:
+          - "*"
