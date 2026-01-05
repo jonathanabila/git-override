@@ -117,5 +117,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **1.0.0** - Initial release with full feature set
 
-[Unreleased]: https://github.com/your-org/git-local-override/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/your-org/git-local-override/releases/tag/v1.0.0
+[Unreleased]: https://github.com/jonathanabila/git-override/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jonathanabila/git-override/releases/tag/v1.0.0

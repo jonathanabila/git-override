@@ -31,7 +31,7 @@ error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 # Determine if running from cloned repo or via curl
 SCRIPT_DIR=""
 PROJECT_DIR=""
-REMOTE_BASE="https://raw.githubusercontent.com/your-org/git-local-override/main"
+REMOTE_BASE="https://raw.githubusercontent.com/jonathanabila/git-override/main"
 
 if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

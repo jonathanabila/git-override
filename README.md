@@ -55,7 +55,7 @@ Add to your `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: https://github.com/your-org/git-local-override
+  - repo: https://github.com/jonathanabila/git-override
     rev: v1.0.0
     hooks:
       - id: local-override-pre-commit
@@ -73,10 +73,10 @@ pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type po
 
 ```bash
 # Install hooks to current repository
-curl -fsSL https://raw.githubusercontent.com/your-org/git-local-override/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
 
 # Or install globally (affects all new repos)
-curl -fsSL https://raw.githubusercontent.com/your-org/git-local-override/main/scripts/install.sh | bash -s -- --global
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --global
 ```
 
 ### Create Your Overrides
@@ -173,7 +173,7 @@ Local override files use `.local` inserted before the extension:
 The CLI provides utility commands for managing overrides. Install it with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-org/git-local-override/main/scripts/install.sh | bash -s -- --cli
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 ```
 
 ### Commands

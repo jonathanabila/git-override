@@ -4,7 +4,7 @@
 # Example usage in .pre-commit-config.yaml:
 #
 #   repos:
-#     - repo: https://github.com/your-org/git-local-override
+#     - repo: https://github.com/jonathanabila/git-override
 #       rev: v1.0.0
 #       hooks:
 #         - id: local-override-pre-commit

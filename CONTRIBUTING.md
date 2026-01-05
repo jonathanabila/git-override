@@ -18,7 +18,7 @@ Be respectful, inclusive, and constructive. We're all here to build something us
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/git-local-override.git
+git clone https://github.com/jonathanabila/git-override.git
 cd git-local-override
 
 # Run the test suite
