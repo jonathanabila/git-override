@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#
+# local-override-pre-commit
+#
+# Restores original content for overridden files before commit.
+# This ensures commits contain the original tracked content, not local overrides.
+#
+# This hook reads .local-overrides.yaml (or .local-overrides) from the repo root
+# and restores originals for any staged files that have local overrides.
+#
+# Performance target: <100ms for typical commits
+#
+set -euo pipefail
+
+# Find the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the shared library
+# shellcheck source=local-override-lib.sh
+source "$SCRIPT_DIR/local-override-lib.sh"
+
+main() {
+    local repo_root
+    repo_root="$(get_repo_root)" || exit 0
+
+    # Quick exit if no config file
+    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+        exit 0
+    fi
+
+    # Get list of staged files
+    local staged_files
+    staged_files=$(git -C "$repo_root" diff --cached --name-only 2>/dev/null) || exit 0
+
+    # Quick exit if nothing staged
+    [[ -z "$staged_files" ]] && exit 0
+
+    # Process each configured file
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        [[ -z "$path" ]] && continue
+
+        local local_path
+        local_path="$(get_local_path "$path")"
+        local full_local_path="$repo_root/$local_path"
+
+        # Only process if local override exists
+        [[ -f "$full_local_path" ]] || continue
+
+        # Check if this file is staged (use grep for bash 3 compatibility)
+        if echo "$staged_files" | grep -qxF "$path"; then
+            # Check if file exists in HEAD (not a new file)
+            if git -C "$repo_root" cat-file -e "HEAD:$path" 2>/dev/null; then
+                # Restore original from git
+                git -C "$repo_root" show "HEAD:$path" > "$repo_root/$path"
+
+                # Re-stage the restored file
+                git -C "$repo_root" add "$path"
+            fi
+            # If file doesn't exist in HEAD, it's a new file - let it be committed as-is
+        fi
+    done < <(read_config "$repo_root")
+
+    # The post-commit hook will re-apply overrides after commit completes
+
+    exit 0
+}
+
+main "$@"

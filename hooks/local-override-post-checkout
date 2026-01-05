@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#
+# local-override-post-checkout
+#
+# Applies local overrides to the working tree after checkout operations.
+# Called by git after: checkout, switch, clone, pull (with checkout)
+#
+# This hook reads .local-overrides.yaml (or .local-overrides) from the repo root
+# and applies any .local. files that exist for the configured paths.
+#
+# Arguments (from git):
+#   $1 - Previous HEAD ref
+#   $2 - New HEAD ref
+#   $3 - Flag: 1 if checkout was a branch checkout, 0 if file checkout
+#
+# Performance target: <50ms for 10 overrides
+#
+set -euo pipefail
+
+# Find the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the shared library
+# shellcheck source=local-override-lib.sh
+source "$SCRIPT_DIR/local-override-lib.sh"
+
+main() {
+    # Only apply on branch checkouts (3rd arg = 1), not file checkouts (3rd arg = 0)
+    # This allows `git checkout HEAD -- file` to work for restoring originals
+    local is_branch_checkout="${3:-1}"
+    if [[ "$is_branch_checkout" == "0" ]]; then
+        exit 0
+    fi
+
+    local repo_root
+    repo_root="$(get_repo_root)" || exit 0
+
+    # Quick exit if no config file
+    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+        exit 0
+    fi
+
+    # Apply each override
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        [[ -z "$path" ]] && continue
+
+        local local_path
+        local_path="$(get_local_path "$path")"
+        local full_path="$repo_root/$path"
+        local full_local_path="$repo_root/$local_path"
+
+        # Check if both original and local files exist
+        if [[ -f "$full_local_path" && -f "$full_path" ]]; then
+            # Apply override: copy local content to original file
+            cp "$full_local_path" "$full_path"
+        fi
+    done < <(read_config "$repo_root")
+
+    exit 0
+}
+
+main "$@"

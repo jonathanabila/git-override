@@ -1,0 +1,41 @@
+# Pre-commit hook definitions for git-local-override
+# Users add this repo to their .pre-commit-config.yaml to use these hooks
+#
+# Example usage in .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/your-org/git-local-override
+#       rev: v1.0.0
+#       hooks:
+#         - id: local-override-pre-commit
+#         - id: local-override-post-commit
+#         - id: local-override-post-checkout
+#
+# Then run: pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout
+
+- id: local-override-pre-commit
+  name: Restore originals before commit
+  description: Restores original tracked content for files with local overrides before committing
+  entry: hooks/local-override-pre-commit
+  language: script
+  stages: [pre-commit]
+  always_run: true
+  pass_filenames: false
+
+- id: local-override-post-commit
+  name: Re-apply local overrides after commit
+  description: Re-applies local override content after commit completes
+  entry: hooks/local-override-post-commit
+  language: script
+  stages: [post-commit]
+  always_run: true
+  pass_filenames: false
+
+- id: local-override-post-checkout
+  name: Apply local overrides after checkout
+  description: Applies local override content after checkout/pull/switch operations
+  entry: hooks/local-override-post-checkout
+  language: script
+  stages: [post-checkout]
+  always_run: true
+  pass_filenames: false

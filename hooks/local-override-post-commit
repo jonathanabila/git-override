@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# local-override-post-commit
+#
+# Re-applies local overrides after a commit completes.
+# This restores your local content that was temporarily replaced during commit.
+#
+# This hook reads .local-overrides.yaml (or .local-overrides) from the repo root
+# and re-applies any local overrides after the commit.
+#
+# Performance target: <50ms
+#
+set -euo pipefail
+
+# Find the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the shared library
+# shellcheck source=local-override-lib.sh
+source "$SCRIPT_DIR/local-override-lib.sh"
+
+main() {
+    local repo_root
+    repo_root="$(get_repo_root)" || exit 0
+
+    # Quick exit if no config file
+    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+        exit 0
+    fi
+
+    # Re-apply each override (same logic as post-checkout)
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        [[ -z "$path" ]] && continue
+
+        local local_path
+        local_path="$(get_local_path "$path")"
+        local full_path="$repo_root/$path"
+        local full_local_path="$repo_root/$local_path"
+
+        # Check if both original and local files exist
+        if [[ -f "$full_local_path" && -f "$full_path" ]]; then
+            # Apply override: copy local content to original file
+            cp "$full_local_path" "$full_path"
+        fi
+    done < <(read_config "$repo_root")
+
+    exit 0
+}
+
+main "$@"

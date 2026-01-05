@@ -1,0 +1,90 @@
+# Pre-commit hooks for git-local-override
+# See https://pre-commit.com for more information
+# Install: pip install pre-commit && pre-commit install
+#
+# For local overrides, also run:
+#   pre-commit install --hook-type post-commit --hook-type post-checkout
+
+repos:
+  # Dogfood: Use our own local-override hooks
+  - repo: local
+    hooks:
+      - id: local-override-pre-commit
+        name: Restore originals before commit
+        entry: hooks/local-override-pre-commit
+        language: script
+        stages: [pre-commit]
+        always_run: true
+        pass_filenames: false
+      - id: local-override-post-commit
+        name: Re-apply local overrides after commit
+        entry: hooks/local-override-post-commit
+        language: script
+        stages: [post-commit]
+        always_run: true
+        pass_filenames: false
+      - id: local-override-post-checkout
+        name: Apply local overrides after checkout
+        entry: hooks/local-override-post-checkout
+        language: script
+        stages: [post-checkout]
+        always_run: true
+        pass_filenames: false
+
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=100']
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  # Shell script linting with shellcheck
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        args: ['--shell=bash', '--severity=warning']
+        files: |
+          (?x)^(
+            bin/git-local-override|
+            hooks/local-override-.*|
+            scripts/.*\.sh|
+            tests/.*\.sh
+          )$
+
+  # Shell script formatting with shfmt
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.7.0-4
+    hooks:
+      - id: shfmt
+        args: ['-i', '4', '-ci', '-bn']
+        files: |
+          (?x)^(
+            bin/git-local-override|
+            hooks/local-override-.*|
+            scripts/.*\.sh|
+            tests/.*\.sh
+          )$
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.38.0
+    hooks:
+      - id: markdownlint
+        args: ['--fix', '--disable', 'MD013', 'MD033', 'MD041', '--']
+        files: '\.md$'
+
+# Configuration for CI
+ci:
+  autofix_prs: true
+  autoupdate_schedule: monthly

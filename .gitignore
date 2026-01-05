@@ -1,0 +1,24 @@
+# Test artifacts
+tests/test-repo/
+tests/test-config/
+
+# Local override files (practice what we preach!)
+*.local.*
+*.local
+
+# macOS
+.DS_Store
+._*
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

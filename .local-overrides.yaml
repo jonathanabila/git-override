@@ -1,0 +1,10 @@
+# Local Override Configuration for git-local-override
+#
+# This project dogfoods its own local-override system.
+# Files listed here can have .local. versions for personal customization.
+#
+# Example: AGENTS.md -> AGENTS.local.md
+
+files:
+  - AGENTS.md
+  - CLAUDE.md

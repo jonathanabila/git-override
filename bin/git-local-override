@@ -1,0 +1,505 @@
+#!/usr/bin/env bash
+#
+# git-local-override - Utility for managing local file overrides
+#
+# This tool helps manage local modifications to tracked files.
+# Configuration is stored in .local-overrides.yaml in your repository.
+#
+# The main functionality is provided by git hooks (installed separately).
+# This CLI provides utility commands for managing override files.
+#
+set -euo pipefail
+
+# Colors for output (if terminal supports it)
+if [[ -t 1 ]]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+fi
+
+#------------------------------------------------------------------------------
+# Utility Functions
+#------------------------------------------------------------------------------
+
+die() {
+    echo -e "${RED}Error:${NC} $*" >&2
+    exit 1
+}
+
+warn() {
+    echo -e "${YELLOW}Warning:${NC} $*" >&2
+}
+
+info() {
+    echo -e "${BLUE}Info:${NC} $*"
+}
+
+success() {
+    echo -e "${GREEN}Success:${NC} $*"
+}
+
+# Get the root directory of the current git repository
+get_repo_root() {
+    git rev-parse --show-toplevel 2>/dev/null || die "Not in a git repository"
+}
+
+# Convert a file path to its local override path
+# e.g., AGENTS.md -> AGENTS.local.md
+#       Makefile -> Makefile.local
+get_local_path() {
+    local path="$1"
+    local dir basename ext
+
+    dir="$(dirname "$path")"
+    basename="$(basename "$path")"
+
+    if [[ "$basename" == *.* ]]; then
+        ext="${basename##*.}"
+        basename="${basename%.*}"
+        if [[ "$dir" == "." ]]; then
+            echo "${basename}.local.${ext}"
+        else
+            echo "${dir}/${basename}.local.${ext}"
+        fi
+    else
+        if [[ "$dir" == "." ]]; then
+            echo "${basename}.local"
+        else
+            echo "${dir}/${basename}.local"
+        fi
+    fi
+}
+
+# Normalize a path to be relative to repo root
+normalize_path() {
+    local path="$1"
+    local repo_root
+    repo_root="$(get_repo_root)"
+
+    # If path is absolute, make it relative to repo root
+    if [[ "$path" == /* ]]; then
+        path="${path#$repo_root/}"
+    fi
+
+    # Remove leading ./ if present
+    path="${path#./}"
+
+    echo "$path"
+}
+
+# Read config file and output list of override-able files
+read_config() {
+    local repo_root="$1"
+    local config_file=""
+
+    if [[ -f "$repo_root/.local-overrides.yaml" ]]; then
+        config_file="$repo_root/.local-overrides.yaml"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(.+)$ ]]; then
+                local file="${BASH_REMATCH[1]}"
+                file="${file#\"}"
+                file="${file%\"}"
+                file="${file#\'}"
+                file="${file%\'}"
+                file="${file#"${file%%[![:space:]]*}"}"
+                file="${file%"${file##*[![:space:]]}"}"
+                [[ -n "$file" ]] && echo "$file"
+            fi
+        done < "$config_file"
+    elif [[ -f "$repo_root/.local-overrides" ]]; then
+        config_file="$repo_root/.local-overrides"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -n "$line" ]] && echo "$line"
+        done < "$config_file"
+    fi
+}
+
+# Check if file is in config
+is_in_config() {
+    local path="$1"
+    local repo_root="$2"
+
+    while IFS= read -r config_path || [[ -n "$config_path" ]]; do
+        if [[ "$config_path" == "$path" ]]; then
+            return 0
+        fi
+    done < <(read_config "$repo_root")
+
+    return 1
+}
+
+#------------------------------------------------------------------------------
+# Commands
+#------------------------------------------------------------------------------
+
+cmd_add() {
+    local path="${1:-}"
+
+    if [[ -z "$path" ]]; then
+        die "Usage: git-local-override add <path>"
+    fi
+
+    local repo_root
+    repo_root="$(get_repo_root)"
+    path="$(normalize_path "$path")"
+
+    local full_path="$repo_root/$path"
+
+    # Check if file exists
+    if [[ ! -f "$full_path" ]]; then
+        die "File does not exist: $path"
+    fi
+
+    # Check if file is in config
+    if ! is_in_config "$path" "$repo_root"; then
+        warn "'$path' is not in .local-overrides.yaml"
+        echo "  Add it to .local-overrides.yaml to enable override:"
+        echo "    files:"
+        echo "      - $path"
+        echo ""
+    fi
+
+    local local_path
+    local_path="$(get_local_path "$path")"
+    local full_local_path="$repo_root/$local_path"
+
+    # Create the local override file if it doesn't exist
+    if [[ ! -f "$full_local_path" ]]; then
+        cp "$full_path" "$full_local_path"
+        info "Created local override file: $local_path"
+    else
+        info "Local override file already exists: $local_path"
+    fi
+
+    # Apply the override (copy local content to original)
+    cp "$full_local_path" "$full_path"
+
+    success "Override active for: $path"
+    echo "  Edit your local version: $local_path"
+    echo "  Git will see the original content, you see your local version"
+}
+
+cmd_remove() {
+    local path="${1:-}"
+    local delete_file=false
+
+    if [[ "$path" == "--delete" || "$path" == "-d" ]]; then
+        delete_file=true
+        path="${2:-}"
+    fi
+
+    if [[ -z "$path" ]]; then
+        die "Usage: git-local-override remove [-d|--delete] <path>"
+    fi
+
+    local repo_root
+    repo_root="$(get_repo_root)"
+    path="$(normalize_path "$path")"
+
+    local local_path
+    local_path="$(get_local_path "$path")"
+    local full_path="$repo_root/$path"
+    local full_local_path="$repo_root/$local_path"
+
+    # Restore original content from git
+    if git -C "$repo_root" ls-files --error-unmatch "$path" &>/dev/null; then
+        git -C "$repo_root" checkout HEAD -- "$path" 2>/dev/null || true
+        info "Restored original content: $path"
+    fi
+
+    # Optionally delete the local file
+    if [[ "$delete_file" == true && -f "$full_local_path" ]]; then
+        rm "$full_local_path"
+        info "Deleted local override file: $local_path"
+    elif [[ -f "$full_local_path" ]]; then
+        info "Local override file preserved: $local_path"
+        echo "  Use -d/--delete to also remove the local file"
+    fi
+
+    success "Override removed for: $path"
+}
+
+cmd_list() {
+    local repo_root
+    repo_root="$(get_repo_root)"
+
+    # Check for config file
+    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+        echo "No .local-overrides.yaml found in repository"
+        echo ""
+        echo "Create one to define which files can be overridden:"
+        echo "  files:"
+        echo "    - CLAUDE.md"
+        echo "    - AGENTS.md"
+        return 0
+    fi
+
+    echo "Configured overrides in $(basename "$repo_root"):"
+    echo ""
+
+    local count=0
+    local active=0
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        [[ -z "$path" ]] && continue
+
+        local local_path
+        local_path="$(get_local_path "$path")"
+        local status=""
+
+        if [[ -f "$repo_root/$local_path" ]]; then
+            status="${GREEN}[active]${NC}"
+            ((active++))
+        else
+            status="${YELLOW}[no local file]${NC}"
+        fi
+
+        echo -e "  $path  $status"
+        if [[ -f "$repo_root/$local_path" ]]; then
+            echo -e "    -> $local_path"
+        fi
+        ((count++))
+    done < <(read_config "$repo_root")
+
+    echo ""
+    echo "Total: $count configured, $active active"
+}
+
+cmd_status() {
+    local repo_root
+    repo_root="$(get_repo_root)"
+
+    echo "Local Override Status"
+    echo "====================="
+    echo ""
+    echo "Repository: $repo_root"
+    echo ""
+
+    # Check for config file
+    if [[ -f "$repo_root/.local-overrides.yaml" ]]; then
+        echo -e "Config:     ${GREEN}.local-overrides.yaml${NC}"
+    elif [[ -f "$repo_root/.local-overrides" ]]; then
+        echo -e "Config:     ${GREEN}.local-overrides${NC}"
+    else
+        echo -e "Config:     ${YELLOW}not found${NC}"
+        echo ""
+        echo "Create .local-overrides.yaml to configure overrides:"
+        echo "  files:"
+        echo "    - CLAUDE.md"
+        return 0
+    fi
+
+    # Check if hooks are installed
+    local hooks_installed=true
+    for hook_type in post-checkout pre-commit post-commit; do
+        local hook_file="$repo_root/.git/hooks/$hook_type"
+        if [[ ! -f "$hook_file" ]] || ! grep -q "local-override" "$hook_file" 2>/dev/null; then
+            hooks_installed=false
+            break
+        fi
+    done
+
+    if [[ "$hooks_installed" == true ]]; then
+        echo -e "Hooks:      ${GREEN}installed${NC}"
+    else
+        echo -e "Hooks:      ${YELLOW}not installed${NC}"
+        echo ""
+        echo "Install hooks with one of:"
+        echo "  - pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout"
+        echo "  - curl -fsSL https://.../install.sh | bash"
+    fi
+
+    echo ""
+    cmd_list
+}
+
+cmd_apply() {
+    local repo_root
+    repo_root="$(get_repo_root)"
+
+    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+        die "No .local-overrides.yaml found"
+    fi
+
+    info "Applying all overrides..."
+
+    local count=0
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        [[ -z "$path" ]] && continue
+
+        local local_path
+        local_path="$(get_local_path "$path")"
+        local full_path="$repo_root/$path"
+        local full_local_path="$repo_root/$local_path"
+
+        if [[ -f "$full_local_path" && -f "$full_path" ]]; then
+            cp "$full_local_path" "$full_path"
+            echo "  Applied: $path"
+            ((count++))
+        fi
+    done < <(read_config "$repo_root")
+
+    success "Applied $count override(s)"
+}
+
+cmd_restore() {
+    local repo_root
+    repo_root="$(get_repo_root)"
+
+    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+        die "No .local-overrides.yaml found"
+    fi
+
+    info "Restoring all originals..."
+
+    local count=0
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        [[ -z "$path" ]] && continue
+
+        local local_path
+        local_path="$(get_local_path "$path")"
+
+        # Only restore if there's a local override
+        if [[ -f "$repo_root/$local_path" ]]; then
+            if git -C "$repo_root" ls-files --error-unmatch "$path" &>/dev/null; then
+                git -C "$repo_root" checkout HEAD -- "$path" 2>/dev/null || true
+                echo "  Restored: $path"
+                ((count++))
+            fi
+        fi
+    done < <(read_config "$repo_root")
+
+    success "Restored $count file(s)"
+}
+
+cmd_init_config() {
+    local repo_root
+    repo_root="$(get_repo_root)"
+
+    local config_file="$repo_root/.local-overrides.yaml"
+
+    if [[ -f "$config_file" ]]; then
+        info "Config file already exists: $config_file"
+        return 0
+    fi
+
+    cat > "$config_file" << 'EOF'
+# Local Override Configuration
+# List files that can have local overrides
+#
+# Users create <file>.local.<ext> versions to customize these files
+# locally without committing their changes.
+#
+# Example: CLAUDE.md -> CLAUDE.local.md
+
+files:
+  - CLAUDE.md
+  - AGENTS.md
+EOF
+
+    success "Created: $config_file"
+    echo ""
+    echo "Edit this file to list the files you want to allow overrides for."
+    echo "Then commit it to your repository."
+}
+
+cmd_help() {
+    cat << 'EOF'
+git-local-override - Manage local file overrides
+
+USAGE:
+    git-local-override <command> [options]
+
+COMMANDS:
+    add <path>              Create a local override file for a tracked file
+    remove [-d] <path>      Remove an override (-d to delete local file too)
+    list                    List all configured overrides
+    status                  Show detailed status
+    apply                   Manually apply all overrides
+    restore                 Manually restore all originals from git
+    init-config             Create a .local-overrides.yaml template
+    help                    Show this help message
+
+EXAMPLES:
+    # Create a local override for CLAUDE.md
+    git-local-override add CLAUDE.md
+
+    # Edit your local version
+    vim CLAUDE.local.md
+
+    # See what's configured
+    git-local-override list
+
+    # Manually apply overrides (hooks do this automatically)
+    git-local-override apply
+
+    # Restore originals (hooks do this before commits)
+    git-local-override restore
+
+HOW IT WORKS:
+    1. Repository maintainer creates .local-overrides.yaml listing override-able files
+    2. Users create .local. versions of files they want to customize
+    3. Git hooks automatically:
+       - Show local content in working tree
+       - Commit original content
+       - Restore local content after commits
+
+    Example file mapping:
+      CLAUDE.md      -> CLAUDE.local.md
+      config.json    -> config.local.json
+      Makefile       -> Makefile.local
+
+INSTALLATION:
+    Hooks can be installed via:
+
+    Pre-commit (recommended for teams):
+      Add to .pre-commit-config.yaml:
+        repos:
+          - repo: https://github.com/your-org/git-local-override
+            rev: v1.0.0
+            hooks:
+              - id: local-override-pre-commit
+              - id: local-override-post-commit
+              - id: local-override-post-checkout
+
+      Then run:
+        pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout
+
+    Standalone:
+      curl -fsSL https://.../install.sh | bash
+EOF
+}
+
+#------------------------------------------------------------------------------
+# Main
+#------------------------------------------------------------------------------
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        add)            cmd_add "$@" ;;
+        remove|rm)      cmd_remove "$@" ;;
+        list|ls)        cmd_list "$@" ;;
+        status)         cmd_status "$@" ;;
+        apply)          cmd_apply "$@" ;;
+        restore)        cmd_restore "$@" ;;
+        init-config)    cmd_init_config "$@" ;;
+        help|--help|-h) cmd_help ;;
+        *)              die "Unknown command: $cmd. Run 'git-local-override help' for usage." ;;
+    esac
+}
+
+main "$@"
