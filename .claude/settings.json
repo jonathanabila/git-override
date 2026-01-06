@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(make test:*)",
+      "Bash(make clean:*)",
+      "Bash(make test-docker:*)",
+      "Bash(make test-docker-bash3:*)",
+      "Bash(./tests/run-tests.sh:*)",
+      "Bash(shellcheck:*)",
+      "Bash(pre-commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git reset --hard:*)"
+    ]
+  }
+}
