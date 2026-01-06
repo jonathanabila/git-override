@@ -76,9 +76,10 @@ setup() {
 }
 
 create_config() {
-    # Create a .local-overrides.yaml config file
+    # Create a .local-overrides.yaml config file with required pattern
     cat > .local-overrides.yaml << 'EOF'
 # Test configuration
+pattern: ".local"
 files:
   - CLAUDE.md
   - AGENTS.md
@@ -365,8 +366,8 @@ EOF
     # Create local file
     echo "# PLAIN TEXT CONFIG TEST" > CLAUDE.local.md
 
-    # Apply should work
-    git-local-override apply
+    # Apply should work (ignore warnings)
+    git-local-override apply 2>/dev/null
 
     if grep -q "PLAIN TEXT CONFIG TEST" CLAUDE.md; then
         pass "Plain text config format works"
@@ -375,7 +376,9 @@ EOF
     fi
 
     # Clean up
-    rm .local-overrides
+    rm -f .local-overrides
+    rm -f CLAUDE.local.md
+    git checkout HEAD -- CLAUDE.md 2>/dev/null || true
     create_config
 }
 
@@ -443,8 +446,161 @@ test_hooks_check_for_config() {
         fail "Hooks modified files without config"
     fi
 
-    # Restore config for other tests
+    # Clean up and restore config for other tests
+    rm -f CLAUDE.local.md
     create_config
+}
+
+test_custom_pattern() {
+    info "Testing custom pattern naming..."
+    cd "$TEST_REPO"
+
+    # Create config with custom pattern
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".override"
+files:
+  - CLAUDE.md
+EOF
+
+    # Create override file with custom pattern
+    echo "# CUSTOM OVERRIDE PATTERN CONTENT" > CLAUDE.override.md
+
+    # Run post-checkout hook
+    .git/hooks/post-checkout "" "" "1"
+
+    if grep -q "CUSTOM OVERRIDE PATTERN CONTENT" CLAUDE.md; then
+        pass "Custom pattern works"
+    else
+        fail "Custom pattern did not work"
+    fi
+
+    # Restore for other tests
+    rm -f CLAUDE.override.md
+    git checkout HEAD -- CLAUDE.md 2>/dev/null || true
+    create_config
+}
+
+test_per_file_override() {
+    info "Testing per-file explicit override..."
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - CLAUDE.md
+  - path: config.json
+    override: config.myoverride.json
+EOF
+
+    # Create explicit override file
+    echo '{"key": "custom_explicit"}' > config.myoverride.json
+
+    # Run post-checkout
+    .git/hooks/post-checkout "" "" "1"
+
+    if grep -q "custom_explicit" config.json; then
+        pass "Per-file explicit override works"
+    else
+        fail "Per-file explicit override did not work"
+    fi
+
+    # Restore
+    rm -f config.myoverride.json
+    git checkout HEAD -- config.json
+    create_config
+}
+
+test_missing_pattern_error() {
+    info "Testing error for missing pattern..."
+    cd "$TEST_REPO"
+
+    # Create legacy config without pattern
+    cat > .local-overrides.yaml << 'EOF'
+files:
+  - CLAUDE.md
+EOF
+
+    echo "# LEGACY TEST" > CLAUDE.local.md
+
+    # Run hook and capture stderr
+    local output
+    output=$(.git/hooks/post-checkout "" "" "1" 2>&1)
+
+    if [[ "$output" == *"pattern"* ]]; then
+        pass "Error/warning shown for missing pattern"
+    else
+        fail "No error for missing pattern"
+    fi
+
+    # Should still work with default .local pattern (backwards compat)
+    info "Testing backwards compatibility with missing pattern..."
+    if grep -q "LEGACY TEST" CLAUDE.md; then
+        pass "Backwards compatibility maintained with default .local"
+    else
+        fail "Backwards compatibility broken"
+    fi
+
+    rm -f CLAUDE.local.md
+    git checkout HEAD -- CLAUDE.md 2>/dev/null || true
+    create_config
+}
+
+test_pattern_without_dot() {
+    info "Testing pattern without leading dot..."
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: "custom"
+files:
+  - CLAUDE.md
+EOF
+
+    echo "# NO DOT PATTERN" > CLAUDE.custom.md
+
+    .git/hooks/post-checkout "" "" "1"
+
+    if grep -q "NO DOT PATTERN" CLAUDE.md; then
+        pass "Pattern without leading dot works"
+    else
+        fail "Pattern without leading dot failed"
+    fi
+
+    rm -f CLAUDE.custom.md
+    git checkout HEAD -- CLAUDE.md 2>/dev/null || true
+    create_config
+}
+
+test_init_config_has_pattern() {
+    info "Testing init-config creates config with pattern..."
+    cd "$TEST_REPO"
+
+    rm -f .local-overrides.yaml
+
+    git-local-override init-config
+
+    if grep -q "^pattern:" .local-overrides.yaml; then
+        pass "init-config creates config with pattern field"
+    else
+        fail "init-config missing pattern field"
+    fi
+
+    # Restore
+    create_config
+}
+
+test_list_shows_pattern() {
+    info "Testing list command shows pattern..."
+    cd "$TEST_REPO"
+    create_config
+
+    local output
+    output=$(git-local-override list)
+
+    if [[ "$output" == *"Pattern:"* && "$output" == *".local"* ]]; then
+        pass "List command shows pattern"
+    else
+        fail "List command does not show pattern"
+    fi
 }
 
 #------------------------------------------------------------------------------
@@ -483,6 +639,14 @@ main() {
     test_no_override_when_no_local_file
     test_file_not_in_config_warning
     test_hooks_check_for_config
+
+    # Custom naming tests
+    test_custom_pattern
+    test_per_file_override
+    test_missing_pattern_error
+    test_pattern_without_dot
+    test_init_config_has_pattern
+    test_list_shows_pattern
 
     echo ""
     echo "========================================"

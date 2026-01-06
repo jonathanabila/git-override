@@ -40,12 +40,32 @@ main() {
         exit 0
     fi
 
-    # Apply each override
-    while IFS= read -r path || [[ -n "$path" ]]; do
-        [[ -z "$path" ]] && continue
+    # Read pattern (may be empty for legacy configs)
+    local pattern
+    pattern="$(read_pattern "$repo_root")"
 
-        local local_path
-        local_path="$(get_local_path "$path")"
+    # Validate config and warn if pattern is missing
+    if ! validate_config "$repo_root"; then
+        # For backwards compatibility, continue with .local default
+        pattern=".local"
+    fi
+
+    # Apply each override
+    local entry path override_path local_path
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+
+        # Parse entry: "path|override_path"
+        path="${entry%%|*}"
+        override_path="${entry#*|}"
+
+        # Determine local file path
+        if [[ -n "$override_path" ]]; then
+            local_path="$override_path"
+        else
+            local_path="$(get_local_path "$path" "$pattern")"
+        fi
+
         local full_path="$repo_root/$path"
         local full_local_path="$repo_root/$local_path"
 

@@ -49,10 +49,11 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 
 ### Step 2: Create the config file
 
-Create `.local-overrides.yaml` in the repository root listing files the user wants to override:
+Create `.local-overrides.yaml` in the repository root with the required `pattern:` field:
 
 ```yaml
 # .local-overrides.yaml
+pattern: ".local"   # Required: suffix for override files
 files:
   - CLAUDE.md
   - AGENTS.md
@@ -61,16 +62,16 @@ files:
 
 ### Step 3: Create local override files
 
-For each file the user wants to customize, copy it to the `.local` version:
+For each file the user wants to customize, copy it using the configured pattern (e.g., `.local`):
 
 ```bash
 # Example: cp CLAUDE.md CLAUDE.local.md
-cp <original-file> <file>.local.<ext>
+cp <original-file> <file>.<pattern>.<ext>
 ```
 
-The naming convention inserts `.local` before the extension:
-- `CLAUDE.md` → `CLAUDE.local.md`
-- `config.json` → `config.local.json`
+The naming convention inserts the pattern before the extension:
+- `CLAUDE.md` → `CLAUDE.local.md` (with pattern: ".local")
+- `config.json` → `config.override.json` (with pattern: ".override")
 - `Makefile` → `Makefile.local`
 
 ### Step 4: Add gitignore pattern
@@ -189,10 +190,11 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.0.2/s
 
 ### Set Up Your Repository
 
-**Step 1:** Create a config file listing files that can be overridden:
+**Step 1:** Create a config file with the required `pattern:` field:
 
 ```yaml
 # .local-overrides.yaml
+pattern: ".local"   # Required: determines override file naming
 files:
   - CLAUDE.md
   - AGENTS.md
@@ -259,39 +261,65 @@ The magic happens through git hooks that run automatically:
 
 ### Config File Format
 
-Create `.local-overrides.yaml` in your repository root:
+Create `.local-overrides.yaml` in your repository root with the required `pattern:` field:
 
 ```yaml
 # .local-overrides.yaml
+pattern: ".local"   # Required: suffix for override files
 files:
   - CLAUDE.md
   - AGENTS.md
   - config/settings.json
-  - backend/services/*/config.yaml  # Glob patterns supported
+```
+
+### Custom Override Naming
+
+You can use any pattern for override files:
+
+```yaml
+# Use .override instead of .local
+pattern: ".override"
+files:
+  - CLAUDE.md       # → CLAUDE.override.md
+  - config.json     # → config.override.json
+```
+
+### Per-File Explicit Overrides
+
+For individual files that need a specific override name:
+
+```yaml
+pattern: ".local"
+files:
+  - CLAUDE.md                      # → CLAUDE.local.md (uses pattern)
+  - path: config.json              # Explicit override:
+    override: config.mylocal.json  # → config.mylocal.json
 ```
 
 <details>
-<summary>Plain text format alternative</summary>
+<summary>Plain text format (legacy)</summary>
 
 ```
-# .local-overrides
+# .local-overrides (deprecated - use YAML with pattern: instead)
 CLAUDE.md
 AGENTS.md
 config/settings.json
 ```
 
+**Note:** Plain text format does not support custom patterns and will use `.local` as default.
+
 </details>
 
 ### File Naming Convention
 
-Local override files use `.local` inserted before the extension:
+Override files use the configured pattern inserted before the extension:
 
-| Original File | Local Override |
-|---------------|----------------|
-| `CLAUDE.md` | `CLAUDE.local.md` |
-| `config.json` | `config.local.json` |
-| `settings.yaml` | `settings.local.yaml` |
-| `Makefile` | `Makefile.local` |
+| Pattern | Original File | Local Override |
+|---------|---------------|----------------|
+| `.local` | `CLAUDE.md` | `CLAUDE.local.md` |
+| `.override` | `CLAUDE.md` | `CLAUDE.override.md` |
+| `.custom` | `config.json` | `config.custom.json` |
+| `.local` | `Makefile` | `Makefile.local` |
 
 ---
 

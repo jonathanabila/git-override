@@ -104,6 +104,7 @@ EOF
 
     # Create local-overrides config
     cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
 files:
   - CLAUDE.md
 EOF
@@ -327,6 +328,7 @@ test_precommit_skip_without_config() {
 
     # Restore config for other tests
     cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
 files:
   - CLAUDE.md
 EOF
@@ -367,6 +369,7 @@ EOF
 
     # Create local-overrides config
     cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
 files:
   - CLAUDE.md
 EOF

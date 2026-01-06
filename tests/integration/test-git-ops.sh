@@ -69,6 +69,7 @@ setup_repo() {
 
     # Create config file
     cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
 files:
   - CLAUDE.md
   - config.yaml
@@ -407,11 +408,12 @@ test_hooks_skip_without_config() {
 
     # Restore config
     cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
 files:
   - CLAUDE.md
   - config.yaml
 EOF
-    git-local-override apply
+    git-local-override apply 2>/dev/null || true
 }
 
 #------------------------------------------------------------------------------

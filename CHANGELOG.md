@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Custom override file naming** via required `pattern:` field in config
+  - Configure any pattern: `.local`, `.override`, `.custom`, etc.
+  - Pattern determines override file naming: `CLAUDE.md` → `CLAUDE.{pattern}.md`
+- **Per-file explicit override naming** with `path:` and `override:` syntax
+  - Individual files can specify exact override filename
+  - Example: `path: config.json` with `override: config.mylocal.json`
+- **Config validation** with helpful error messages
+  - Warns when `pattern:` field is missing from YAML config
+  - Warns when using legacy plain text config format
+
+### Changed
+
+- Config format now requires `pattern:` field for new configurations
+- `get_local_path()` function now accepts pattern as second parameter
+- `read_config()` now outputs `path|override_path` format for per-file support
+- `list` command now displays the configured pattern
+- `status` command now shows pattern information
+- `init-config` command generates config with required `pattern:` field
+- Help text updated with new config format documentation
+
+### Deprecated
+
+- Plain text `.local-overrides` format (shows warning, use YAML instead)
+- YAML config without `pattern:` field (shows error, falls back to `.local`)
+
 ## [0.0.6] - 2026-01-06
 
 ### Added
