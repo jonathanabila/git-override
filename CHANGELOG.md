@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub Actions release workflow for automated versioning and releases
 - Release script (`scripts/release.sh`) for changelog version assignment
+- "For AI Assistants" section in README with step-by-step installation instructions for LLM agents
 
 ### Changed
 

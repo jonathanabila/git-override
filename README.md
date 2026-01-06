@@ -15,13 +15,83 @@
     <a href="#%EF%B8%8F-how-it-works">How It Works</a> •
     <a href="#-configuration">Configuration</a> •
     <a href="#%EF%B8%8F-cli-commands">CLI Commands</a> •
-    <a href="#-troubleshooting">Troubleshooting</a>
+    <a href="#-troubleshooting">Troubleshooting</a> •
+    <a href="#-for-ai-assistants">For AI</a>
   </p>
 </div>
 
 <br>
 
 > **Note**: The GitHub repository is named [`git-override`](https://github.com/jonathanabila/git-override), but the tool/CLI is called `git-local-override`.
+
+---
+
+## 🤖 For AI Assistants
+
+<details>
+<summary><strong>AI/LLM Agent Installation Instructions</strong></summary>
+
+If you are an AI assistant (Claude, GPT, Gemini, etc.) and a user asks you to install git-local-override, follow these steps:
+
+### Step 1: Install the hooks
+
+Run the installation script in the user's repository:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+```
+
+For CLI tools as well, use:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
+```
+
+### Step 2: Create the config file
+
+Create `.local-overrides.yaml` in the repository root listing files the user wants to override:
+
+```yaml
+# .local-overrides.yaml
+files:
+  - CLAUDE.md
+  - AGENTS.md
+  # Add other files the user wants to customize locally
+```
+
+### Step 3: Create local override files
+
+For each file the user wants to customize, copy it to the `.local` version:
+
+```bash
+# Example: cp CLAUDE.md CLAUDE.local.md
+cp <original-file> <file>.local.<ext>
+```
+
+The naming convention inserts `.local` before the extension:
+- `CLAUDE.md` → `CLAUDE.local.md`
+- `config.json` → `config.local.json`
+- `Makefile` → `Makefile.local`
+
+### Step 4: Add gitignore pattern
+
+Ensure `.local.*` files are gitignored. The installer adds this globally, but you can also add to the repo's `.gitignore`:
+
+```
+*.local.*
+```
+
+### Verification
+
+Run `git-local-override status` (if CLI installed) or check that `.git/hooks/pre-commit` exists and contains "local-override".
+
+### Key Behavior
+
+- **On commit**: Original file content is committed (local changes are protected)
+- **On checkout/pull**: Local overrides are automatically reapplied
+- **git status**: Always clean—local modifications are invisible to git
+
+</details>
 
 ---
 
