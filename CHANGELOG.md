@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- GitHub Actions release workflow for automated versioning and releases
+- Release script (`scripts/release.sh`) for changelog version assignment
+
+### Changed
+
+- Changelog now uses `[Unreleased]` section to avoid merge conflicts in parallel PRs
+- Updated CLAUDE.md with new changelog instructions
+
 ## [0.0.5] - 2026-01-05
 
 ### Added

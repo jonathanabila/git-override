@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.0.6)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Invalid version format. Use semantic versioning (e.g., 0.0.6)"
+            exit 1
+          fi
+
+      - name: Check version doesn't exist
+        run: |
+          if git tag | grep -q "^v${{ inputs.version }}$"; then
+            echo "Error: Tag v${{ inputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Check for unreleased changes
+        run: |
+          if ! grep -A2 "## \[Unreleased\]" CHANGELOG.md | grep -q "^###"; then
+            echo "Error: No changes found in [Unreleased] section"
+            exit 1
+          fi
+
+      - name: Update changelog
+        run: |
+          chmod +x scripts/release.sh
+          ./scripts/release.sh "${{ inputs.version }}"
+
+      - name: Extract release notes
+        id: release_notes
+        run: |
+          # Extract the content for this version (between this version header and the next)
+          awk '/^## \[${{ inputs.version }}\]/{found=1; next} /^## \[/{if(found) exit} found{print}' CHANGELOG.md > release_notes.md
+          echo "Release notes:"
+          cat release_notes.md
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore(release): v${{ inputs.version }}"
+          git tag "v${{ inputs.version }}"
+          git push origin main --tags
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: v${{ inputs.version }}
+          body_path: release_notes.md
+          generate_release_notes: false
