@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Troubleshooting guide for curl install users**: Documents that users who install via curl (not pre-commit) need to re-run the install script when new hooks are added to the project
 - **Custom override file naming** via required `pattern:` field in config
   - Configure any pattern: `.local`, `.override`, `.custom`, etc.
   - Pattern determines override file naming: `CLAUDE.md` → `CLAUDE.{pattern}.md`

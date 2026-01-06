@@ -450,6 +450,21 @@ files:
 
 </details>
 
+<details>
+<summary><strong>New hooks not working after project update (curl install)</strong></summary>
+
+If you installed using the curl method (not pre-commit) and the project adds new hooks in an update, you need to re-run the install script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+```
+
+This is because the curl method installs hooks directly to `.git/hooks/` at install time. Unlike pre-commit, which manages hooks dynamically, the curl method requires manual reinstallation to pick up new hooks.
+
+**Note:** If you're using pre-commit for installation, hooks are updated automatically when you run `pre-commit install` or when pre-commit auto-updates.
+
+</details>
+
 ---
 
 ## 📦 What Gets Installed
