@@ -106,7 +106,9 @@ EOF
     cat > .local-overrides.yaml << 'EOF'
 pattern: ".local"
 files:
-  - CLAUDE.md
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
 EOF
 
     git add .pre-commit-config.yaml .local-overrides.yaml
@@ -330,7 +332,9 @@ test_precommit_skip_without_config() {
     cat > .local-overrides.yaml << 'EOF'
 pattern: ".local"
 files:
-  - CLAUDE.md
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
 EOF
 }
 
@@ -371,7 +375,9 @@ EOF
     cat > .local-overrides.yaml << 'EOF'
 pattern: ".local"
 files:
-  - CLAUDE.md
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
 EOF
 
     git add .pre-commit-config.yaml .local-overrides.yaml

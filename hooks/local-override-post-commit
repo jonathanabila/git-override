@@ -5,8 +5,8 @@
 # Re-applies local overrides after a commit completes.
 # This restores your local content that was temporarily replaced during commit.
 #
-# This hook reads .local-overrides.yaml (or .local-overrides) from the repo root
-# and re-applies any local overrides after the commit.
+# This hook reads .local-overrides.yaml from the repo root and re-applies
+# any local overrides after the commit.
 #
 # Performance target: <50ms
 #
@@ -24,43 +24,31 @@ main() {
     repo_root="$(get_repo_root)" || exit 0
 
     # Quick exit if no config file
-    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
         exit 0
     fi
 
-    # Read pattern (may be empty for legacy configs)
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
-
-    # Validate config and warn if pattern is missing
+    # Validate config
     if ! validate_config "$repo_root"; then
-        # For backwards compatibility, continue with .local default
-        pattern=".local"
+        exit 1
     fi
 
     # Re-apply each override (same logic as post-checkout)
-    local entry path override_path local_path
+    local entry target override
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
-        # Parse entry: "path|override_path"
-        path="${entry%%|*}"
-        override_path="${entry#*|}"
+        # Parse entry: "target|override"
+        target="${entry%%|*}"
+        override="${entry#*|}"
 
-        # Determine local file path
-        if [[ -n "$override_path" ]]; then
-            local_path="$override_path"
-        else
-            local_path="$(get_local_path "$path" "$pattern")"
-        fi
+        local full_target="$repo_root/$target"
+        local full_override="$repo_root/$override"
 
-        local full_path="$repo_root/$path"
-        local full_local_path="$repo_root/$local_path"
-
-        # Check if both original and local files exist
-        if [[ -f "$full_local_path" && -f "$full_path" ]]; then
-            # Apply override: copy local content to original file
-            cp "$full_local_path" "$full_path"
+        # Check if both target and override files exist
+        if [[ -f "$full_override" && -f "$full_target" ]]; then
+            # Apply override: copy override content to target file
+            cp "$full_override" "$full_target"
         fi
     done < <(read_config "$repo_root")
 

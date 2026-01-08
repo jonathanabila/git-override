@@ -5,8 +5,11 @@
 # Restores original content for overridden files before commit.
 # This ensures commits contain the original tracked content, not local overrides.
 #
-# This hook reads .local-overrides.yaml (or .local-overrides) from the repo root
-# and restores originals for any staged files that have local overrides.
+# This hook reads .local-overrides.yaml from the repo root and restores
+# originals for any staged files that have local overrides.
+#
+# IMPORTANT: If ANY target in a group is staged, ALL targets in that group
+# are restored. This ensures consistency for multi-target overrides.
 #
 # Performance target: <100ms for typical commits
 #
@@ -24,7 +27,7 @@ main() {
     repo_root="$(get_repo_root)" || exit 0
 
     # Quick exit if no config file
-    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
         exit 0
     fi
 
@@ -35,50 +38,59 @@ main() {
     # Quick exit if nothing staged
     [[ -z "$staged_files" ]] && exit 0
 
-    # Read pattern (may be empty for legacy configs)
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
-
-    # Validate config and warn if pattern is missing
+    # Validate config
     if ! validate_config "$repo_root"; then
-        # For backwards compatibility, continue with .local default
-        pattern=".local"
+        exit 1
     fi
 
-    # Process each configured file
-    local entry path override_path local_path
+    # First pass: find which override files have staged targets
+    # We need to restore ALL targets for each such override file
+    local overrides_to_restore=""
+    local entry target override
+
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
-        # Parse entry: "path|override_path"
-        path="${entry%%|*}"
-        override_path="${entry#*|}"
+        target="${entry%%|*}"
+        override="${entry#*|}"
 
-        # Determine local file path
-        if [[ -n "$override_path" ]]; then
-            local_path="$override_path"
-        else
-            local_path="$(get_local_path "$path" "$pattern")"
-        fi
-
-        local full_local_path="$repo_root/$local_path"
-
-        # Only process if local override exists
-        [[ -f "$full_local_path" ]] || continue
-
-        # Check if this file is staged (use grep for bash 3 compatibility)
-        if echo "$staged_files" | grep -qxF "$path"; then
-            # Check if file exists in HEAD (not a new file)
-            if git -C "$repo_root" cat-file -e "HEAD:$path" 2>/dev/null; then
-                # Restore original from git
-                git -C "$repo_root" show "HEAD:$path" > "$repo_root/$path"
-
-                # Re-stage the restored file
-                git -C "$repo_root" add "$path"
+        # Check if this target is staged
+        if echo "$staged_files" | grep -qxF "$target"; then
+            # Check if override file exists
+            if [[ -f "$repo_root/$override" ]]; then
+                # Add to list if not already present
+                if ! echo "$overrides_to_restore" | grep -qxF "$override"; then
+                    overrides_to_restore="$overrides_to_restore
+$override"
+                fi
             fi
-            # If file doesn't exist in HEAD, it's a new file - let it be committed as-is
         fi
     done < <(read_config "$repo_root")
+
+    # Quick exit if no overrides need restoring
+    [[ -z "$overrides_to_restore" ]] && exit 0
+
+    # Second pass: for each override file to restore, restore ALL its targets
+    local override_file
+    while IFS= read -r override_file || [[ -n "$override_file" ]]; do
+        [[ -z "$override_file" ]] && continue
+
+        # Get all targets for this override file
+        local target_file
+        while IFS= read -r target_file || [[ -n "$target_file" ]]; do
+            [[ -z "$target_file" ]] && continue
+
+            # Check if file exists in HEAD (not a new file)
+            if git -C "$repo_root" cat-file -e "HEAD:$target_file" 2>/dev/null; then
+                # Restore original from git
+                git -C "$repo_root" show "HEAD:$target_file" > "$repo_root/$target_file"
+
+                # Re-stage the restored file
+                git -C "$repo_root" add "$target_file"
+            fi
+            # If file doesn't exist in HEAD, it's a new file - let it be committed as-is
+        done < <(get_targets_for_override "$repo_root" "$override_file")
+    done <<< "$overrides_to_restore"
 
     # The post-commit hook will re-apply overrides after commit completes
 

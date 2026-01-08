@@ -71,8 +71,12 @@ setup_repo() {
     cat > .local-overrides.yaml << 'EOF'
 pattern: ".local"
 files:
-  - CLAUDE.md
-  - config.yaml
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: config.local.yaml
+    replaces:
+      - config.yaml
 EOF
 
     git add .local-overrides.yaml
@@ -410,8 +414,12 @@ test_hooks_skip_without_config() {
     cat > .local-overrides.yaml << 'EOF'
 pattern: ".local"
 files:
-  - CLAUDE.md
-  - config.yaml
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: config.local.yaml
+    replaces:
+      - config.yaml
 EOF
     git-local-override apply 2>/dev/null || true
 }

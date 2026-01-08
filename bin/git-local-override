@@ -14,7 +14,7 @@
 # convenience commands (add, remove, list, status) but isn't required.
 #
 # NOTE ON CODE DUPLICATION:
-# read_config() and get_local_path() are duplicated from local-override-lib.sh.
+# read_config() is duplicated from local-override-lib.sh.
 # This is intentional: the CLI must work standalone without the hooks installed,
 # so it cannot source the lib file (which lives in .git/hooks/).
 #
@@ -90,41 +90,9 @@ read_pattern() {
     done < "$config_file"
 }
 
-# Validate config file format
-# Returns 0 if valid, 1 if invalid (missing required fields)
-# Outputs warning/error messages to stderr
-validate_config() {
-    local repo_root="$1"
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
-
-    # Check if using plain text format (legacy, no pattern support)
-    if [[ -f "$repo_root/.local-overrides" && ! -f "$repo_root/.local-overrides.yaml" ]]; then
-        warn "Plain text .local-overrides does not support patterns."
-        echo "  Migrate to .local-overrides.yaml with 'pattern:' field." >&2
-        return 1
-    fi
-
-    # Check if YAML config exists but pattern is missing
-    if [[ -f "$repo_root/.local-overrides.yaml" && -z "$pattern" ]]; then
-        warn "Missing required 'pattern:' field in .local-overrides.yaml"
-        echo "  Add a pattern field at the top of your config:" >&2
-        echo "    pattern: \".local\"" >&2
-        echo "    files:" >&2
-        echo "      - CLAUDE.md" >&2
-        return 1
-    fi
-
-    return 0
-}
-
 # Convert path to local override path using specified pattern
+# Used by the 'add' command to generate default override filenames
 # e.g., get_local_path "AGENTS.md" ".override" -> AGENTS.override.md
-#       get_local_path "Makefile" ".local" -> Makefile.local
-#
-# Arguments:
-#   $1 - original file path
-#   $2 - pattern to use (e.g., ".override", ".local") - defaults to ".local"
 get_local_path() {
     local path="$1"
     local pattern="${2:-.local}"
@@ -153,6 +121,46 @@ get_local_path() {
     fi
 }
 
+# Validate config file format
+# Returns 0 if valid, 1 if invalid
+validate_config() {
+    local repo_root="$1"
+    local config_file="$repo_root/.local-overrides.yaml"
+
+    # Check if config exists
+    if [[ ! -f "$config_file" ]]; then
+        return 0  # No config is valid (nothing to do)
+    fi
+
+    # Check for required pattern field
+    local pattern
+    pattern="$(read_pattern "$repo_root")"
+    if [[ -z "$pattern" ]]; then
+        warn "Missing required 'pattern:' field in .local-overrides.yaml"
+        echo "  Add a pattern field at the top of your config:" >&2
+        echo "    pattern: \".local\"" >&2
+        return 1
+    fi
+
+    # Check for duplicate target files
+    local seen_targets=""
+    local entry target override
+
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+        target="${entry%%|*}"
+
+        # Check if target was already seen
+        if echo "$seen_targets" | grep -qxF "$target"; then
+            die "Duplicate target file '$target' in config - each file can only appear in one 'replaces:' list"
+        fi
+        seen_targets="$seen_targets
+$target"
+    done < <(read_config "$repo_root")
+
+    return 0
+}
+
 # Normalize a path to be relative to repo root
 normalize_path() {
     local path="$1"
@@ -170,136 +178,112 @@ normalize_path() {
     echo "$path"
 }
 
-# Read config file and output list of override-able files
+# Read config file and output list of target|override pairs
+# Output format: target|override (one line per target file)
 #
-# Output format: path|override_path
-#   - For simple entries: "CLAUDE.md|" (empty override_path)
-#   - For explicit overrides: "config.json|config.mylocal.json"
+# Example config:
+#   files:
+#     - override: AGENTS.local.md
+#       replaces:
+#         - AGENTS.md
+#         - CLAUDE.md
 #
-# YAML supports two formats:
-#   Simple: - CLAUDE.md
-#   Explicit: - path: config.json
-#               override: config.mylocal.json
+# Example output:
+#   AGENTS.md|AGENTS.local.md
+#   CLAUDE.md|AGENTS.local.md
+#
 read_config() {
     local repo_root="$1"
-    local config_file=""
+    local config_file="$repo_root/.local-overrides.yaml"
+
+    [[ -f "$config_file" ]] || return 0
+
     local in_files_section=false
-    local pending_path=""
+    local in_replaces_section=false
+    local current_override=""
+    local line
 
-    # Check for config files in order of preference
-    if [[ -f "$repo_root/.local-overrides.yaml" ]]; then
-        config_file="$repo_root/.local-overrides.yaml"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" == \#* ]] && continue
 
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            # Skip empty lines and comments
-            [[ -z "$line" || "$line" == \#* ]] && continue
-
-            # Check for files: section start
-            if [[ "$line" =~ ^files:[[:space:]]*$ ]]; then
-                in_files_section=true
-                continue
-            fi
-
-            # Skip pattern: line
-            if [[ "$line" =~ ^pattern: ]]; then
-                continue
-            fi
-
-            # Stop if we hit another top-level key (non-indented, ends with :)
-            if [[ "$line" =~ ^[a-z_]+:[[:space:]]*$ && ! "$line" =~ ^[[:space:]] ]]; then
-                in_files_section=false
-                continue
-            fi
-
-            [[ "$in_files_section" != true ]] && continue
-
-            # Handle per-file override: "  - path: config.json"
-            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+path:[[:space:]]+(.+)$ ]]; then
-                # Emit any pending path without override first
-                if [[ -n "$pending_path" ]]; then
-                    echo "${pending_path}|"
-                fi
-                pending_path="${BASH_REMATCH[1]}"
-                # Clean up quotes and whitespace
-                pending_path="${pending_path#\"}"
-                pending_path="${pending_path%\"}"
-                pending_path="${pending_path#\'}"
-                pending_path="${pending_path%\'}"
-                pending_path="${pending_path#"${pending_path%%[![:space:]]*}"}"
-                pending_path="${pending_path%"${pending_path##*[![:space:]]}"}"
-                continue
-            fi
-
-            # Handle override: line (must follow path: line)
-            if [[ -n "$pending_path" && "$line" =~ ^[[:space:]]+override:[[:space:]]+(.+)$ ]]; then
-                local override="${BASH_REMATCH[1]}"
-                override="${override#\"}"
-                override="${override%\"}"
-                override="${override#\'}"
-                override="${override%\'}"
-                override="${override#"${override%%[![:space:]]*}"}"
-                override="${override%"${override##*[![:space:]]}"}"
-                echo "${pending_path}|${override}"
-                pending_path=""
-                continue
-            fi
-
-            # Handle simple list entry: "  - CLAUDE.md"
-            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(.+)$ ]]; then
-                # Emit any pending path without override first
-                if [[ -n "$pending_path" ]]; then
-                    echo "${pending_path}|"
-                    pending_path=""
-                fi
-
-                local file="${BASH_REMATCH[1]}"
-                # Skip if this is a path: entry (already handled above)
-                if [[ "$file" =~ ^path: ]]; then
-                    continue
-                fi
-                file="${file#\"}"
-                file="${file%\"}"
-                file="${file#\'}"
-                file="${file%\'}"
-                file="${file#"${file%%[![:space:]]*}"}"
-                file="${file%"${file##*[![:space:]]}"}"
-                [[ -n "$file" ]] && echo "${file}|"
-            fi
-        done < "$config_file"
-
-        # Emit any trailing pending path
-        if [[ -n "$pending_path" ]]; then
-            echo "${pending_path}|"
+        # Check for files: section start
+        if [[ "$line" =~ ^files:[[:space:]]*$ ]]; then
+            in_files_section=true
+            in_replaces_section=false
+            continue
         fi
 
-    elif [[ -f "$repo_root/.local-overrides" ]]; then
-        config_file="$repo_root/.local-overrides"
-        # Plain text - one file per line (no explicit override support)
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            # Skip empty lines and comments
-            [[ -z "$line" || "$line" == \#* ]] && continue
-            # Trim whitespace
-            line="${line#"${line%%[![:space:]]*}"}"
-            line="${line%"${line##*[![:space:]]}"}"
-            [[ -n "$line" ]] && echo "${line}|"
-        done < "$config_file"
-    fi
-    # No config file = no overrides
+        # Skip pattern: line
+        if [[ "$line" =~ ^pattern: ]]; then
+            continue
+        fi
+
+        # Stop if we hit another top-level key (non-indented, ends with :)
+        if [[ "$line" =~ ^[a-z_]+:[[:space:]]*$ && ! "$line" =~ ^[[:space:]] ]]; then
+            in_files_section=false
+            in_replaces_section=false
+            continue
+        fi
+
+        [[ "$in_files_section" != true ]] && continue
+
+        # Handle override: line "  - override: AGENTS.local.md"
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+override:[[:space:]]+(.+)$ ]]; then
+            current_override="${BASH_REMATCH[1]}"
+            # Clean up quotes and whitespace
+            current_override="${current_override#\"}"
+            current_override="${current_override%\"}"
+            current_override="${current_override#\'}"
+            current_override="${current_override%\'}"
+            current_override="${current_override#"${current_override%%[![:space:]]*}"}"
+            current_override="${current_override%"${current_override##*[![:space:]]}"}"
+            in_replaces_section=false
+            continue
+        fi
+
+        # Handle replaces: section start
+        if [[ -n "$current_override" && "$line" =~ ^[[:space:]]+replaces:[[:space:]]*$ ]]; then
+            in_replaces_section=true
+            continue
+        fi
+
+        # Handle target files in replaces section "      - AGENTS.md"
+        if [[ "$in_replaces_section" == true && "$line" =~ ^[[:space:]]+-[[:space:]]+(.+)$ ]]; then
+            local target="${BASH_REMATCH[1]}"
+            # Clean up quotes and whitespace
+            target="${target#\"}"
+            target="${target%\"}"
+            target="${target#\'}"
+            target="${target%\'}"
+            target="${target#"${target%%[![:space:]]*}"}"
+            target="${target%"${target##*[![:space:]]}"}"
+            [[ -n "$target" ]] && echo "${target}|${current_override}"
+            continue
+        fi
+
+        # If we encounter a new list item without replaces, reset state
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]]; then
+            in_replaces_section=false
+            current_override=""
+        fi
+    done < "$config_file"
 }
 
-# Check if file is in config and get its override path if any
+# Check if file is in config and get its override path
 # Returns 0 if found, 1 if not found
-# If found, outputs "path|override_path" to stdout
-is_in_config() {
-    local path="$1"
+# If found, outputs "override_path" to stdout
+get_override_for_target() {
+    local target_path="$1"
     local repo_root="$2"
 
-    local entry config_path
+    local entry target override
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
-        config_path="${entry%%|*}"
-        if [[ "$config_path" == "$path" ]]; then
-            echo "$entry"
+        target="${entry%%|*}"
+        override="${entry#*|}"
+        if [[ "$target" == "$target_path" ]]; then
+            echo "$override"
             return 0
         fi
     done < <(read_config "$repo_root")
@@ -307,22 +291,39 @@ is_in_config() {
     return 1
 }
 
-# Get override path for a file (either explicit or pattern-based)
-# Arguments:
-#   $1 - file path
-#   $2 - config entry (path|override_path format)
-#   $3 - pattern
-get_override_path() {
-    local path="$1"
-    local entry="$2"
-    local pattern="$3"
+# Get all targets for a specific override file
+get_targets_for_override() {
+    local repo_root="$1"
+    local override_file="$2"
 
-    local override_path="${entry#*|}"
-    if [[ -n "$override_path" ]]; then
-        echo "$override_path"
-    else
-        get_local_path "$path" "$pattern"
-    fi
+    local entry target override
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+        target="${entry%%|*}"
+        override="${entry#*|}"
+        if [[ "$override" == "$override_file" ]]; then
+            echo "$target"
+        fi
+    done < <(read_config "$repo_root")
+}
+
+# Get unique override files from config
+get_override_files() {
+    local repo_root="$1"
+    local seen=""
+
+    local entry override
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+        override="${entry#*|}"
+        [[ -z "$override" ]] && continue
+
+        if ! echo "$seen" | grep -qxF "$override"; then
+            echo "$override"
+            seen="$seen
+$override"
+        fi
+    done < <(read_config "$repo_root")
 }
 
 #------------------------------------------------------------------------------
@@ -347,44 +348,46 @@ cmd_add() {
         die "File does not exist: $path"
     fi
 
-    # Read pattern and validate config
+    # Read pattern
     local pattern
     pattern="$(read_pattern "$repo_root")"
-    if ! validate_config "$repo_root"; then
-        # For backwards compatibility, continue with .local default
-        pattern=".local"
+    [[ -z "$pattern" ]] && pattern=".local"
+
+    # Check if file is already in config
+    local override_path
+    local in_config=false
+    if override_path=$(get_override_for_target "$path" "$repo_root"); then
+        in_config=true
+    else
+        # Generate default override filename using pattern
+        override_path="$(get_local_path "$path" "$pattern")"
     fi
 
-    # Check if file is in config and get entry
-    local config_entry local_path
-    if config_entry=$(is_in_config "$path" "$repo_root"); then
-        local_path="$(get_override_path "$path" "$config_entry" "$pattern")"
+    local full_override_path="$repo_root/$override_path"
+
+    # Create the override file if it doesn't exist
+    if [[ ! -f "$full_override_path" ]]; then
+        # Ensure parent directory exists
+        mkdir -p "$(dirname "$full_override_path")"
+        cp "$full_path" "$full_override_path"
+        success "Created override file: $override_path"
     else
-        warn "'$path' is not in .local-overrides.yaml"
-        echo "  Add it to .local-overrides.yaml to enable override:"
-        echo "    pattern: \"$pattern\""
-        echo "    files:"
+        info "Override file already exists: $override_path"
+    fi
+
+    if [[ "$in_config" == true ]]; then
+        # Apply the override
+        cp "$full_override_path" "$full_path"
+        success "Override active for: $path"
+        echo "  Edit your override file: $override_path"
+    else
+        info "To enable this override, add to .local-overrides.yaml:"
+        echo ""
+        echo "  - override: $override_path"
+        echo "    replaces:"
         echo "      - $path"
         echo ""
-        local_path="$(get_local_path "$path" "$pattern")"
     fi
-
-    local full_local_path="$repo_root/$local_path"
-
-    # Create the local override file if it doesn't exist
-    if [[ ! -f "$full_local_path" ]]; then
-        cp "$full_path" "$full_local_path"
-        info "Created local override file: $local_path"
-    else
-        info "Local override file already exists: $local_path"
-    fi
-
-    # Apply the override (copy local content to original)
-    cp "$full_local_path" "$full_path"
-
-    success "Override active for: $path"
-    echo "  Edit your local version: $local_path"
-    echo "  Git will see the original content, you see your local version"
 }
 
 cmd_remove() {
@@ -404,23 +407,14 @@ cmd_remove() {
     repo_root="$(get_repo_root)"
     path="$(normalize_path "$path")"
 
-    # Read pattern and validate config
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
-    if ! validate_config "$repo_root"; then
-        pattern=".local"
-    fi
-
-    # Get override path from config or use pattern
-    local config_entry local_path
-    if config_entry=$(is_in_config "$path" "$repo_root"); then
-        local_path="$(get_override_path "$path" "$config_entry" "$pattern")"
-    else
-        local_path="$(get_local_path "$path" "$pattern")"
+    # Get override path from config
+    local override_path
+    if ! override_path=$(get_override_for_target "$path" "$repo_root"); then
+        die "'$path' is not in .local-overrides.yaml"
     fi
 
     local full_path="$repo_root/$path"
-    local full_local_path="$repo_root/$local_path"
+    local full_override_path="$repo_root/$override_path"
 
     # Restore original content from git
     if git -C "$repo_root" ls-files --error-unmatch "$path" &>/dev/null; then
@@ -428,15 +422,16 @@ cmd_remove() {
         info "Restored original content: $path"
     fi
 
-    # Optionally delete the local file
-    if [[ "$delete_file" == true && -f "$full_local_path" ]]; then
-        rm "$full_local_path"
-        info "Deleted local override file: $local_path"
-    elif [[ -f "$full_local_path" ]]; then
-        info "Local override file preserved: $local_path"
-        echo "  Use -d/--delete to also remove the local file"
+    # Optionally delete the override file
+    if [[ "$delete_file" == true && -f "$full_override_path" ]]; then
+        rm "$full_override_path"
+        info "Deleted override file: $override_path"
+    elif [[ -f "$full_override_path" ]]; then
+        info "Override file preserved: $override_path"
+        echo "  Use -d/--delete to also remove the override file"
     fi
 
+    info "Remember to remove '$path' from the 'replaces:' list in .local-overrides.yaml"
     success "Override removed for: $path"
 }
 
@@ -445,66 +440,62 @@ cmd_list() {
     repo_root="$(get_repo_root)"
 
     # Check for config file
-    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
         echo "No .local-overrides.yaml found in repository"
         echo ""
-        echo "Create one to define which files can be overridden:"
-        echo "  pattern: \".local\""
-        echo "  files:"
-        echo "    - CLAUDE.md"
-        echo "    - AGENTS.md"
+        echo "Create one with: git-local-override init-config"
         return 0
     fi
 
-    # Read pattern and validate config
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
+    # Validate config
     if ! validate_config "$repo_root"; then
-        pattern=".local"
+        return 1
     fi
 
-    echo "Configured overrides in $(basename "$repo_root"):"
-    echo "Pattern: $pattern"
+    local pattern
+    pattern="$(read_pattern "$repo_root")"
+
+    echo "Configured overrides (pattern: $pattern):"
     echo ""
 
-    local count=0
-    local active=0
-    local entry path override_path local_path
-    while IFS= read -r entry || [[ -n "$entry" ]]; do
-        [[ -z "$entry" ]] && continue
+    local total_overrides=0
+    local active_overrides=0
 
-        # Parse entry: "path|override_path"
-        path="${entry%%|*}"
-        override_path="${entry#*|}"
-
-        # Determine local file path
-        if [[ -n "$override_path" ]]; then
-            local_path="$override_path"
-        else
-            local_path="$(get_local_path "$path" "$pattern")"
-        fi
+    # Group by override file
+    local override_file
+    while IFS= read -r override_file || [[ -n "$override_file" ]]; do
+        [[ -z "$override_file" ]] && continue
 
         local status=""
-        if [[ -f "$repo_root/$local_path" ]]; then
+        if [[ -f "$repo_root/$override_file" ]]; then
             status="${GREEN}[active]${NC}"
-            ((active++)) || true
+            ((active_overrides++)) || true
         else
-            status="${YELLOW}[no local file]${NC}"
+            status="${YELLOW}[no file]${NC}"
         fi
 
-        echo -e "  $path  $status"
-        if [[ -f "$repo_root/$local_path" ]]; then
-            echo -e "    -> $local_path"
-        fi
-        # Show if using explicit override
-        if [[ -n "$override_path" ]]; then
-            echo -e "    ${BLUE}(explicit override)${NC}"
-        fi
-        ((count++)) || true
-    done < <(read_config "$repo_root")
+        # Get all targets for this override
+        local targets=""
+        local target_count=0
+        local target
+        while IFS= read -r target || [[ -n "$target" ]]; do
+            [[ -z "$target" ]] && continue
+            if [[ -n "$targets" ]]; then
+                targets="$targets, $target"
+            else
+                targets="$target"
+            fi
+            ((target_count++)) || true
+        done < <(get_targets_for_override "$repo_root" "$override_file")
 
-    echo ""
-    echo "Total: $count configured, $active active"
+        ((total_overrides += target_count)) || true
+
+        echo -e "  ${BLUE}$override_file${NC} $status"
+        echo "    -> $targets"
+        echo ""
+    done < <(get_override_files "$repo_root")
+
+    echo "Total: $total_overrides target(s), $active_overrides active override file(s)"
 }
 
 cmd_status() {
@@ -527,16 +518,10 @@ cmd_status() {
         else
             echo -e "Pattern:    ${YELLOW}not set (required)${NC}"
         fi
-    elif [[ -f "$repo_root/.local-overrides" ]]; then
-        echo -e "Config:     ${YELLOW}.local-overrides${NC} (legacy format)"
-        echo -e "Pattern:    ${YELLOW}.local (default)${NC}"
     else
         echo -e "Config:     ${YELLOW}not found${NC}"
         echo ""
-        echo "Create .local-overrides.yaml to configure overrides:"
-        echo "  pattern: \".local\""
-        echo "  files:"
-        echo "    - CLAUDE.md"
+        echo "Create config with: git-local-override init-config"
         return 0
     fi
 
@@ -569,41 +554,31 @@ cmd_apply() {
     local repo_root
     repo_root="$(get_repo_root)"
 
-    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
         die "No .local-overrides.yaml found"
     fi
 
-    # Read pattern and validate config
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
+    # Validate config
     if ! validate_config "$repo_root"; then
-        pattern=".local"
+        exit 1
     fi
 
     info "Applying all overrides..."
 
     local count=0
-    local entry path override_path local_path
+    local entry target override
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
-        # Parse entry: "path|override_path"
-        path="${entry%%|*}"
-        override_path="${entry#*|}"
+        target="${entry%%|*}"
+        override="${entry#*|}"
 
-        # Determine local file path
-        if [[ -n "$override_path" ]]; then
-            local_path="$override_path"
-        else
-            local_path="$(get_local_path "$path" "$pattern")"
-        fi
+        local full_target="$repo_root/$target"
+        local full_override="$repo_root/$override"
 
-        local full_path="$repo_root/$path"
-        local full_local_path="$repo_root/$local_path"
-
-        if [[ -f "$full_local_path" && -f "$full_path" ]]; then
-            cp "$full_local_path" "$full_path"
-            echo "  Applied: $path"
+        if [[ -f "$full_override" && -f "$full_target" ]]; then
+            cp "$full_override" "$full_target"
+            echo "  Applied: $target <- $override"
             ((count++)) || true
         fi
     done < <(read_config "$repo_root")
@@ -615,40 +590,30 @@ cmd_restore() {
     local repo_root
     repo_root="$(get_repo_root)"
 
-    if [[ ! -f "$repo_root/.local-overrides.yaml" && ! -f "$repo_root/.local-overrides" ]]; then
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
         die "No .local-overrides.yaml found"
     fi
 
-    # Read pattern and validate config
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
+    # Validate config
     if ! validate_config "$repo_root"; then
-        pattern=".local"
+        exit 1
     fi
 
     info "Restoring all originals..."
 
     local count=0
-    local entry path override_path local_path
+    local entry target override
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
-        # Parse entry: "path|override_path"
-        path="${entry%%|*}"
-        override_path="${entry#*|}"
+        target="${entry%%|*}"
+        override="${entry#*|}"
 
-        # Determine local file path
-        if [[ -n "$override_path" ]]; then
-            local_path="$override_path"
-        else
-            local_path="$(get_local_path "$path" "$pattern")"
-        fi
-
-        # Only restore if there's a local override
-        if [[ -f "$repo_root/$local_path" ]]; then
-            if git -C "$repo_root" ls-files --error-unmatch "$path" &>/dev/null; then
-                git -C "$repo_root" checkout HEAD -- "$path" 2>/dev/null || true
-                echo "  Restored: $path"
+        # Only restore if there's an override file
+        if [[ -f "$repo_root/$override" ]]; then
+            if git -C "$repo_root" ls-files --error-unmatch "$target" &>/dev/null; then
+                git -C "$repo_root" checkout HEAD -- "$target" 2>/dev/null || true
+                echo "  Restored: $target"
                 ((count++)) || true
             fi
         fi
@@ -671,20 +636,27 @@ cmd_init_config() {
     cat > "$config_file" << 'EOF'
 # Local Override Configuration
 #
-# pattern: Required. The suffix used for override files.
+# pattern: Required. Used by CLI to generate default override filenames.
 #          Example: ".local" means CLAUDE.md -> CLAUDE.local.md
 #
-# files: List of files that can have local overrides.
-#        Simple format: just the filename
-#        Advanced format: path + explicit override name
+# files: List of override entries. Each entry has:
+#        - override: The local file that contains your custom content
+#        - replaces: List of tracked files this override replaces
+#
+# One override file can replace multiple tracked files (1:many).
 
 pattern: ".local"
 files:
-  - CLAUDE.md
-  - AGENTS.md
-  # Example of explicit override naming:
-  # - path: config.json
-  #   override: config.mylocal.json
+  # Example: CLAUDE.local.md replaces CLAUDE.md
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+
+  # Example: One file replacing multiple targets
+  # - override: AGENTS.local.md
+  #   replaces:
+  #     - AGENTS.md
+  #     - CLAUDE.md
 EOF
 
     success "Created: $config_file"
@@ -702,7 +674,7 @@ USAGE:
 
 COMMANDS:
     add <path>              Create a local override file for a tracked file
-    remove [-d] <path>      Remove an override (-d to delete local file too)
+    remove [-d] <path>      Remove an override (-d to delete override file too)
     list                    List all configured overrides
     status                  Show detailed status
     apply                   Manually apply all overrides
@@ -711,10 +683,13 @@ COMMANDS:
     help                    Show this help message
 
 EXAMPLES:
+    # Initialize config
+    git-local-override init-config
+
     # Create a local override for CLAUDE.md
     git-local-override add CLAUDE.md
 
-    # Edit your local version (using the configured pattern)
+    # Edit your local version
     vim CLAUDE.local.md
 
     # See what's configured
@@ -727,27 +702,31 @@ EXAMPLES:
     git-local-override restore
 
 CONFIG FORMAT:
-    The .local-overrides.yaml requires a 'pattern:' field:
+    The .local-overrides.yaml uses override/replaces format:
 
-      pattern: ".local"      # Required: suffix for override files
+      pattern: ".local"         # Required: used to generate override names
       files:
-        - CLAUDE.md          # -> CLAUDE.local.md
-        - AGENTS.md          # -> AGENTS.local.md
-        - path: config.json  # Explicit override name:
-          override: config.mylocal.json
+        - override: CLAUDE.local.md
+          replaces:
+            - CLAUDE.md
 
-    The pattern determines the override file naming:
-      pattern: ".local"    -> CLAUDE.local.md
-      pattern: ".override" -> CLAUDE.override.md
-      pattern: ".custom"   -> CLAUDE.custom.md
+        # One override can replace multiple files:
+        - override: AGENTS.local.md
+          replaces:
+            - AGENTS.md
+            - CLAUDE.md
 
 HOW IT WORKS:
-    1. Repository maintainer creates .local-overrides.yaml with pattern and files
-    2. Users create override files using the configured pattern
+    1. Repository maintainer creates .local-overrides.yaml
+    2. Users create override files (e.g., CLAUDE.local.md)
     3. Git hooks automatically:
        - Show local content in working tree
        - Commit original content
        - Restore local content after commits
+
+    With multi-target overrides, one file can replace many:
+    - AGENTS.local.md can replace both AGENTS.md and CLAUDE.md
+    - When committing, all targets are restored together
 
 INSTALLATION:
     Hooks can be installed via:

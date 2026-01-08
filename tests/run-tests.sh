@@ -76,14 +76,20 @@ setup() {
 }
 
 create_config() {
-    # Create a .local-overrides.yaml config file with required pattern
+    # Create a .local-overrides.yaml config file with new format
     cat > .local-overrides.yaml << 'EOF'
 # Test configuration
 pattern: ".local"
 files:
-  - CLAUDE.md
-  - AGENTS.md
-  - backend/services/foo/AGENTS.md
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+  - override: backend/services/foo/AGENTS.local.md
+    replaces:
+      - backend/services/foo/AGENTS.md
 EOF
 }
 
@@ -113,7 +119,12 @@ test_init_config() {
     git-local-override init-config
 
     if [[ -f ".local-overrides.yaml" ]]; then
-        pass "init-config creates config file"
+        # Check it has the new format
+        if grep -q "override:" .local-overrides.yaml && grep -q "replaces:" .local-overrides.yaml; then
+            pass "init-config creates config with new format"
+        else
+            fail "init-config created config with wrong format"
+        fi
     else
         fail "init-config did not create config file"
     fi
@@ -141,7 +152,8 @@ test_add_override() {
     cd "$TEST_REPO"
     create_config
 
-    git-local-override add CLAUDE.md
+    # Add creates the local file but tells user to update config
+    git-local-override add CLAUDE.md 2>/dev/null || true
 
     if [[ -f "CLAUDE.local.md" ]]; then
         pass "Local file created: CLAUDE.local.md"
@@ -212,7 +224,7 @@ test_list_overrides() {
     local output
     output=$(git-local-override list)
 
-    if [[ "$output" == *"CLAUDE.md"* && "$output" == *"[active]"* ]]; then
+    if [[ "$output" == *"CLAUDE.local.md"* && "$output" == *"[active]"* ]]; then
         pass "List shows active overrides"
     else
         echo "Output was: $output"
@@ -261,7 +273,7 @@ test_nested_override() {
     cd "$TEST_REPO"
     create_config
 
-    git-local-override add backend/services/foo/AGENTS.md
+    git-local-override add backend/services/foo/AGENTS.md 2>/dev/null || true
 
     if [[ -f "backend/services/foo/AGENTS.local.md" ]]; then
         pass "Nested local file created"
@@ -350,38 +362,6 @@ test_status_command() {
     fi
 }
 
-test_plain_text_config() {
-    info "Testing plain text config format..."
-
-    cd "$TEST_REPO"
-
-    # Remove YAML config, create plain text
-    rm -f .local-overrides.yaml
-    cat > .local-overrides << 'EOF'
-# Plain text config
-CLAUDE.md
-AGENTS.md
-EOF
-
-    # Create local file
-    echo "# PLAIN TEXT CONFIG TEST" > CLAUDE.local.md
-
-    # Apply should work (ignore warnings)
-    git-local-override apply 2>/dev/null
-
-    if grep -q "PLAIN TEXT CONFIG TEST" CLAUDE.md; then
-        pass "Plain text config format works"
-    else
-        fail "Plain text config format failed"
-    fi
-
-    # Clean up
-    rm -f .local-overrides
-    rm -f CLAUDE.local.md
-    git checkout HEAD -- CLAUDE.md 2>/dev/null || true
-    create_config
-}
-
 test_no_override_when_no_local_file() {
     info "Testing no override when local file missing..."
 
@@ -405,21 +385,24 @@ test_no_override_when_no_local_file() {
     fi
 }
 
-test_file_not_in_config_warning() {
-    info "Testing warning for file not in config..."
+test_file_not_in_config_error() {
+    info "Testing guidance for file not in config..."
 
     cd "$TEST_REPO"
     create_config
 
-    # Try to add a file not in config
+    # Try to add a file not in config - should show guidance
     local output
     output=$(git-local-override add config.json 2>&1) || true
 
-    if [[ "$output" == *"not in .local-overrides.yaml"* ]]; then
-        pass "Warning shown for file not in config"
+    if [[ "$output" == *"To enable"* && "$output" == *"override:"* ]]; then
+        pass "Guidance shown for file not in config"
     else
-        fail "No warning for file not in config"
+        fail "No guidance for file not in config"
     fi
+
+    # Clean up
+    rm -f config.local.json
 }
 
 test_hooks_check_for_config() {
@@ -459,7 +442,9 @@ test_custom_pattern() {
     cat > .local-overrides.yaml << 'EOF'
 pattern: ".override"
 files:
-  - CLAUDE.md
+  - override: CLAUDE.override.md
+    replaces:
+      - CLAUDE.md
 EOF
 
     # Create override file with custom pattern
@@ -480,33 +465,79 @@ EOF
     create_config
 }
 
-test_per_file_override() {
-    info "Testing per-file explicit override..."
+test_multi_target_override() {
+    info "Testing multi-target override (1:many)..."
     cd "$TEST_REPO"
 
+    # Create config with one override replacing multiple files
     cat > .local-overrides.yaml << 'EOF'
 pattern: ".local"
 files:
-  - CLAUDE.md
-  - path: config.json
-    override: config.myoverride.json
+  - override: COMBINED.local.md
+    replaces:
+      - CLAUDE.md
+      - AGENTS.md
 EOF
 
-    # Create explicit override file
-    echo '{"key": "custom_explicit"}' > config.myoverride.json
+    # Create single override file
+    echo "# COMBINED CONTENT FOR BOTH FILES" > COMBINED.local.md
 
-    # Run post-checkout
+    # Run post-checkout hook
     .git/hooks/post-checkout "" "" "1"
 
-    if grep -q "custom_explicit" config.json; then
-        pass "Per-file explicit override works"
+    # Check both files were updated
+    if grep -q "COMBINED CONTENT" CLAUDE.md && grep -q "COMBINED CONTENT" AGENTS.md; then
+        pass "Multi-target override applied to all targets"
     else
-        fail "Per-file explicit override did not work"
+        fail "Multi-target override did not apply to all targets"
+    fi
+
+    # Restore for other tests
+    rm -f COMBINED.local.md
+    git checkout HEAD -- CLAUDE.md AGENTS.md 2>/dev/null || true
+    create_config
+}
+
+test_multi_target_pre_commit_restores_all() {
+    info "Testing pre-commit restores ALL targets when one is staged..."
+    cd "$TEST_REPO"
+
+    # Create config with multi-target override
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: COMBINED.local.md
+    replaces:
+      - CLAUDE.md
+      - AGENTS.md
+EOF
+
+    # Create and apply override
+    echo "# COMBINED LOCAL CONTENT" > COMBINED.local.md
+    .git/hooks/post-checkout "" "" "1"
+
+    # Verify both have local content
+    if ! grep -q "COMBINED LOCAL CONTENT" CLAUDE.md || ! grep -q "COMBINED LOCAL CONTENT" AGENTS.md; then
+        fail "Setup failed - override not applied to both targets"
+        return
+    fi
+
+    # Stage ONLY CLAUDE.md
+    git add CLAUDE.md
+
+    # Run pre-commit hook - should restore BOTH files
+    .git/hooks/pre-commit
+
+    # Check both files have original content restored
+    if grep -q "Original CLAUDE.md content" CLAUDE.md && grep -q "Original AGENTS.md in root" AGENTS.md; then
+        pass "Pre-commit restored all targets in group when one was staged"
+    else
+        fail "Pre-commit did not restore all targets in group"
     fi
 
     # Restore
-    rm -f config.myoverride.json
-    git checkout HEAD -- config.json
+    rm -f COMBINED.local.md
+    git checkout HEAD -- CLAUDE.md AGENTS.md 2>/dev/null || true
     create_config
 }
 
@@ -514,30 +545,25 @@ test_missing_pattern_error() {
     info "Testing error for missing pattern..."
     cd "$TEST_REPO"
 
-    # Create legacy config without pattern
+    # Create config without pattern
     cat > .local-overrides.yaml << 'EOF'
 files:
-  - CLAUDE.md
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
 EOF
 
-    echo "# LEGACY TEST" > CLAUDE.local.md
+    echo "# MISSING PATTERN TEST" > CLAUDE.local.md
 
     # Run hook and capture stderr
     local output
-    output=$(.git/hooks/post-checkout "" "" "1" 2>&1)
+    local exit_code=0
+    output=$(.git/hooks/post-checkout "" "" "1" 2>&1) || exit_code=$?
 
-    if [[ "$output" == *"pattern"* ]]; then
-        pass "Error/warning shown for missing pattern"
+    if [[ "$output" == *"pattern"* ]] && [[ $exit_code -ne 0 ]]; then
+        pass "Error shown for missing pattern"
     else
-        fail "No error for missing pattern"
-    fi
-
-    # Should still work with default .local pattern (backwards compat)
-    info "Testing backwards compatibility with missing pattern..."
-    if grep -q "LEGACY TEST" CLAUDE.md; then
-        pass "Backwards compatibility maintained with default .local"
-    else
-        fail "Backwards compatibility broken"
+        fail "No error for missing pattern (exit code: $exit_code)"
     fi
 
     rm -f CLAUDE.local.md
@@ -545,27 +571,37 @@ EOF
     create_config
 }
 
-test_pattern_without_dot() {
-    info "Testing pattern without leading dot..."
+test_duplicate_target_error() {
+    info "Testing error for duplicate target file..."
     cd "$TEST_REPO"
 
+    # Create config with same file in multiple replaces lists
     cat > .local-overrides.yaml << 'EOF'
-pattern: "custom"
+pattern: ".local"
 files:
-  - CLAUDE.md
+  - override: FIRST.local.md
+    replaces:
+      - CLAUDE.md
+  - override: SECOND.local.md
+    replaces:
+      - CLAUDE.md
 EOF
 
-    echo "# NO DOT PATTERN" > CLAUDE.custom.md
+    echo "# FIRST" > FIRST.local.md
+    echo "# SECOND" > SECOND.local.md
 
-    .git/hooks/post-checkout "" "" "1"
+    # Run hook - should error
+    local output
+    local exit_code=0
+    output=$(.git/hooks/post-checkout "" "" "1" 2>&1) || exit_code=$?
 
-    if grep -q "NO DOT PATTERN" CLAUDE.md; then
-        pass "Pattern without leading dot works"
+    if [[ "$output" == *"Duplicate"* ]] && [[ $exit_code -ne 0 ]]; then
+        pass "Error shown for duplicate target file"
     else
-        fail "Pattern without leading dot failed"
+        fail "No error for duplicate target (exit code: $exit_code, output: $output)"
     fi
 
-    rm -f CLAUDE.custom.md
+    rm -f FIRST.local.md SECOND.local.md
     git checkout HEAD -- CLAUDE.md 2>/dev/null || true
     create_config
 }
@@ -596,11 +632,41 @@ test_list_shows_pattern() {
     local output
     output=$(git-local-override list)
 
-    if [[ "$output" == *"Pattern:"* && "$output" == *".local"* ]]; then
+    if [[ "$output" == *"pattern:"* && "$output" == *".local"* ]]; then
         pass "List command shows pattern"
     else
         fail "List command does not show pattern"
     fi
+}
+
+test_list_shows_grouped_targets() {
+    info "Testing list command shows grouped targets..."
+    cd "$TEST_REPO"
+
+    # Create multi-target config
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: COMBINED.local.md
+    replaces:
+      - CLAUDE.md
+      - AGENTS.md
+EOF
+
+    echo "# COMBINED" > COMBINED.local.md
+
+    local output
+    output=$(git-local-override list)
+
+    if [[ "$output" == *"COMBINED.local.md"* && "$output" == *"CLAUDE.md"* && "$output" == *"AGENTS.md"* ]]; then
+        pass "List shows grouped targets"
+    else
+        echo "Output was: $output"
+        fail "List does not show grouped targets"
+    fi
+
+    rm -f COMBINED.local.md
+    create_config
 }
 
 #------------------------------------------------------------------------------
@@ -635,18 +701,21 @@ main() {
     test_pre_commit_hook
     test_post_commit_hook
     test_status_command
-    test_plain_text_config
     test_no_override_when_no_local_file
-    test_file_not_in_config_warning
+    test_file_not_in_config_error
     test_hooks_check_for_config
 
-    # Custom naming tests
+    # Pattern and format tests
     test_custom_pattern
-    test_per_file_override
     test_missing_pattern_error
-    test_pattern_without_dot
     test_init_config_has_pattern
     test_list_shows_pattern
+
+    # Multi-target tests
+    test_multi_target_override
+    test_multi_target_pre_commit_restores_all
+    test_duplicate_target_error
+    test_list_shows_grouped_targets
 
     echo ""
     echo "========================================"

@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+
+- **New config format**: Unified `override:` + `replaces:` format replaces all previous formats
+  - **Old format (no longer supported):**
+    ```yaml
+    files:
+      - CLAUDE.md
+      - path: config.json
+        override: config.local.json
+    ```
+  - **New format:**
+    ```yaml
+    files:
+      - override: CLAUDE.local.md
+        replaces:
+          - CLAUDE.md
+    ```
+
+- **Multi-target overrides**: One override file can now replace multiple tracked files
+  ```yaml
+  files:
+    - override: AGENTS.local.md
+      replaces:
+        - AGENTS.md
+        - CLAUDE.md
+  ```
+
+- **Grouped pre-commit restore**: When any target in a group is staged, ALL targets are restored
+  - Ensures consistency for multi-target overrides
+  - Prevents partial commits of grouped files
+
+### Removed
+
+- Legacy plain-text `.local-overrides` config format
+- Old `- path:` / `override:` per-file format
+- Old simple list format (`- CLAUDE.md`)
+- `get_local_path()` function from hooks (override paths are now explicit)
+- Backwards compatibility fallback for missing `pattern:` field
+
+### Added
+
+- Conflict detection: Error if same file appears in multiple `replaces:` lists
+- `get_targets_for_override()` helper function for grouped operations
+- `get_override_files()` helper function to list unique override files
+
+### Migration
+
+Existing configs must be migrated:
+```yaml
+# OLD
+pattern: ".local"
+files:
+  - CLAUDE.md
+  - AGENTS.md
+
+# NEW
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+```
+
 ## [0.0.7] - 2026-01-06
 
 ### Added

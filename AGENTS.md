@@ -144,10 +144,30 @@ When using `((counter++))` with `set -e`, the exit code is 1 if the value before
 
 ## Testing
 
-### Running Tests
+**IMPORTANT: Tests must be run inside Docker to ensure isolation and consistency.**
+
+### Running Tests (Docker - Required)
 
 ```bash
-# Run all tests
+# Run all tests in Docker (recommended)
+make test-docker
+
+# Run tests with bash 3.2 for macOS compatibility
+make test-docker-bash3
+
+# Run specific test suites
+make test-docker-unit     # Unit tests only
+make test-docker-install  # Install/uninstall tests
+make test-docker-gitops   # Git operations tests
+make test-docker-precommit # Pre-commit integration tests
+```
+
+### Running Tests Locally (Quick Check Only)
+
+Local tests can be used for quick development iteration, but Docker tests are authoritative:
+
+```bash
+# Quick local test (for development only)
 make test
 
 # Clean test artifacts
@@ -197,8 +217,10 @@ main() {
 Shared library sourced by all hooks. Key functions:
 
 - `get_repo_root()` - Get repository root directory
-- `get_local_path()` - Convert path to `.local` version
-- `read_config()` - Parse `.local-overrides.yaml` or `.local-overrides`
+- `read_config()` - Parse `.local-overrides.yaml`, returns `target|override` pairs
+- `get_override_files()` - List unique override files from config
+- `get_targets_for_override()` - Get all target files for a specific override
+- `validate_config()` - Validate config format and check for duplicate targets
 
 ### `hooks/local-override-post-checkout`
 
@@ -213,6 +235,7 @@ Called by git after branch checkouts (not file checkouts). Key behavior:
 Called before commit. Key behavior:
 
 - Checks if staged files have local overrides
+- **Grouped restore**: If ANY target in a group is staged, ALL targets in that group are restored
 - Restores original content from git
 - Re-stages the restored content
 
