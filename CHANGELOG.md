@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-01-08
+
 ### Changed (BREAKING)
 
 - **New config format**: Unified `override:` + `replaces:` format replaces all previous formats
@@ -290,6 +292,7 @@ files:
 - **0.0.4** - Community health files for public release
 - **0.0.5** - CI badge and .gitattributes for resilience
 
+[0.1.0]: https://github.com/jonathanabila/git-override/compare/v0.0.7...v0.1.0
 [0.0.7]: https://github.com/jonathanabila/git-override/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/jonathanabila/git-override/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/jonathanabila/git-override/compare/v0.0.4...v0.0.5
