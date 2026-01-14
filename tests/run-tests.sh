@@ -182,18 +182,18 @@ test_override_is_applied() {
 }
 
 test_git_status_after_override() {
-    info "Testing git status shows modified file..."
+    info "Testing git status hides file with skip-worktree..."
 
     cd "$TEST_REPO"
 
-    # Git should see the file as modified (since we applied local content)
+    # Git should NOT see the file as modified (skip-worktree hides it)
     local status
     status=$(git status --porcelain)
 
-    if [[ "$status" == *"CLAUDE.md"* ]]; then
-        pass "Git sees file as modified (expected before pre-commit hook)"
+    if [[ "$status" != *"CLAUDE.md"* ]]; then
+        pass "Git status hides file (skip-worktree active)"
     else
-        fail "Git status unexpected"
+        fail "Git status still shows file (skip-worktree not active)"
     fi
 }
 
@@ -312,6 +312,9 @@ test_pre_commit_hook() {
     echo "# LOCAL CONTENT FOR COMMIT TEST" > CLAUDE.local.md
     git-local-override apply
 
+    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
+    git update-index --no-skip-worktree CLAUDE.md
+
     # Stage the file
     git add CLAUDE.md
 
@@ -416,7 +419,8 @@ test_hooks_check_for_config() {
     # Create a local file that would be applied if config existed
     echo "# SHOULD NOT BE APPLIED" > CLAUDE.local.md
 
-    # Restore original
+    # Clear skip-worktree from any previous tests, then restore original
+    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
     git checkout HEAD -- CLAUDE.md
 
     # Run post-checkout - should exit early without config
@@ -522,6 +526,9 @@ EOF
         return
     fi
 
+    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
+    git update-index --no-skip-worktree CLAUDE.md
+
     # Stage ONLY CLAUDE.md
     git add CLAUDE.md
 
@@ -537,6 +544,8 @@ EOF
 
     # Restore
     rm -f COMBINED.local.md
+    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
     git checkout HEAD -- CLAUDE.md AGENTS.md 2>/dev/null || true
     create_config
 }
