@@ -82,6 +82,9 @@ $override"
 
             # Check if file exists in HEAD (not a new file)
             if git -C "$repo_root" cat-file -e "HEAD:$target_file" 2>/dev/null; then
+                # Clear skip-worktree so git can see the change
+                git -C "$repo_root" update-index --no-skip-worktree "$target_file" 2>/dev/null || true
+
                 # Restore original from git
                 git -C "$repo_root" show "HEAD:$target_file" > "$repo_root/$target_file"
 

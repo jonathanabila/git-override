@@ -61,6 +61,8 @@ main() {
         if [[ -f "$full_override" && -f "$full_target" ]]; then
             # Apply override: copy override content to target file
             cp "$full_override" "$full_target"
+            # Mark as skip-worktree so git status doesn't show the change
+            git -C "$repo_root" update-index --skip-worktree "$target" 2>/dev/null || true
         fi
     done < <(read_config "$repo_root")
 

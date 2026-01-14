@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **skip-worktree integration**: Overridden files no longer appear as modified in `git status`
+  - Uses `git update-index --skip-worktree` when applying overrides
+  - Uses `git update-index --no-skip-worktree` when restoring originals
+  - Applied automatically in hooks (post-checkout, pre-commit, post-commit)
+  - Applied in CLI commands (`apply`, `restore`)
+
 ## [0.1.0] - 2026-01-08
 
 ### Changed (BREAKING)
