@@ -5,18 +5,17 @@
 # Removes the git local-override system.
 # This removes:
 #   - CLI tool from ~/.local/bin
-#   - Global hook scripts from ~/.config/git/hooks
-#   - Optionally: allowlist and registry files
+#   - Global template hooks from ~/.config/git/template/hooks (if --global was used)
+#   - Gitignore patterns for *.local.* files
 #
 # Note: This does NOT automatically remove hooks from individual repositories.
-# Run 'git-local-override uninit' in each repo first, or manually remove hooks.
+# You must manually remove hooks from each repo's .git/hooks/ directory.
 #
 set -euo pipefail
 
 # Configuration directories
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/git"
-LOCAL_OVERRIDES_DIR="$CONFIG_DIR/local-overrides"
-HOOKS_DIR="$CONFIG_DIR/hooks"
+TEMPLATE_HOOKS_DIR="$CONFIG_DIR/template/hooks"
 BIN_DIR="${HOME}/.local/bin"
 
 # Colors
@@ -59,11 +58,17 @@ remove_cli_tool() {
     fi
 }
 
-remove_hook_scripts() {
-    info "Removing global hook scripts..."
+remove_template_hooks() {
+    info "Removing global template hook scripts..."
 
-    for hook in local-override-post-checkout local-override-pre-commit local-override-post-commit; do
-        local hook_file="$HOOKS_DIR/$hook"
+    if [[ ! -d "$TEMPLATE_HOOKS_DIR" ]]; then
+        info "No global template hooks directory found"
+        return 0
+    fi
+
+    # Remove our hooks and shared library
+    for hook in local-override-post-checkout local-override-pre-commit local-override-post-commit local-override-lib.sh; do
+        local hook_file="$TEMPLATE_HOOKS_DIR/$hook"
 
         if [[ -f "$hook_file" ]]; then
             rm "$hook_file"
@@ -71,33 +76,38 @@ remove_hook_scripts() {
         fi
     done
 
+    # Also check for the wrapper hooks we create
+    for hook_type in post-checkout pre-commit post-commit; do
+        local hook_file="$TEMPLATE_HOOKS_DIR/$hook_type"
+        if [[ -f "$hook_file" ]] && grep -q "local-override" "$hook_file" 2>/dev/null; then
+            rm "$hook_file"
+            success "Removed: $hook_file"
+        fi
+    done
+
     # Remove hooks directory if empty
-    if [[ -d "$HOOKS_DIR" ]] && [[ -z "$(ls -A "$HOOKS_DIR" 2>/dev/null)" ]]; then
-        rmdir "$HOOKS_DIR"
-        info "Removed empty directory: $HOOKS_DIR"
+    if [[ -d "$TEMPLATE_HOOKS_DIR" ]] && [[ -z "$(ls -A "$TEMPLATE_HOOKS_DIR" 2>/dev/null)" ]]; then
+        rmdir "$TEMPLATE_HOOKS_DIR"
+        info "Removed empty directory: $TEMPLATE_HOOKS_DIR"
     fi
 }
 
-remove_overrides_data() {
-    if [[ ! -d "$LOCAL_OVERRIDES_DIR" ]]; then
-        info "No overrides data directory found"
-        return 0
-    fi
+remove_git_template_config() {
+    # Check if we set the git template directory
+    local template_dir
+    template_dir=$(git config --global init.templateDir 2>/dev/null || echo "")
 
-    echo ""
-    echo "Found overrides data directory: $LOCAL_OVERRIDES_DIR"
-    echo "This contains:"
-    ls -la "$LOCAL_OVERRIDES_DIR" 2>/dev/null || true
-    echo ""
+    if [[ "$template_dir" == *"/.config/git/template"* ]]; then
+        echo ""
+        read -p "Remove git template directory config? [y/N] " -n 1 -r
+        echo
 
-    read -p "Delete overrides data (allowlist and registry files)? [y/N] " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf "$LOCAL_OVERRIDES_DIR"
-        success "Removed: $LOCAL_OVERRIDES_DIR"
-    else
-        info "Preserved: $LOCAL_OVERRIDES_DIR"
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            git config --global --unset init.templateDir
+            success "Removed git template directory configuration"
+        else
+            info "Preserved git template directory configuration"
+        fi
     fi
 }
 
@@ -120,8 +130,8 @@ remove_gitignore_patterns() {
         return 0
     fi
 
-    # Check if our patterns exist
-    if ! grep -q 'git local-override' "$gitignore_file" 2>/dev/null; then
+    # Check if our patterns exist (look for our comment or the patterns)
+    if ! grep -q 'git-local-override\|git local-override' "$gitignore_file" 2>/dev/null; then
         info "No local-override patterns found in gitignore"
         return 0
     fi
@@ -138,7 +148,8 @@ remove_gitignore_patterns() {
 
         local skip_block=false
         while IFS= read -r line || [[ -n "$line" ]]; do
-            if [[ "$line" == *"git local-override"* ]]; then
+            # Match our comment (both old and new style)
+            if [[ "$line" == *"git local-override"* || "$line" == *"git-local-override"* ]]; then
                 skip_block=true
                 continue
             fi
@@ -192,8 +203,8 @@ main() {
     echo ""
 
     remove_cli_tool
-    remove_hook_scripts
-    remove_overrides_data
+    remove_template_hooks
+    remove_git_template_config
     remove_gitignore_patterns
     print_warning_about_repos
     print_summary

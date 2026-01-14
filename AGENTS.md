@@ -217,7 +217,9 @@ main() {
 Shared library sourced by all hooks. Key functions:
 
 - `get_repo_root()` - Get repository root directory
+- `read_pattern()` - Read the `pattern:` field from config file
 - `read_config()` - Parse `.local-overrides.yaml`, returns `target|override` pairs
+- `get_active_overrides()` - Get files with existing override files
 - `get_override_files()` - List unique override files from config
 - `get_targets_for_override()` - Get all target files for a specific override
 - `validate_config()` - Validate config format and check for duplicate targets
@@ -250,9 +252,11 @@ Optional CLI tool. Key functions:
 - `cmd_add()` - Create local override file
 - `cmd_remove()` - Remove override, restore original
 - `cmd_list()` - Show configured files and status
-- `cmd_apply()` - Manually apply all overrides
-- `cmd_restore()` - Manually restore all originals
-- `read_config()` - Parse config file (duplicated from lib)
+- `cmd_status()` - Show detailed system status (config, hooks, pattern)
+- `cmd_apply()` - Manually apply all overrides (sets skip-worktree)
+- `cmd_restore()` - Manually restore all originals (clears skip-worktree)
+- `cmd_init_config()` - Create a `.local-overrides.yaml` template
+- `read_config()` - Parse config file (duplicated from lib for standalone operation)
 
 ## Common Tasks
 

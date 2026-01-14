@@ -22,11 +22,17 @@ Be respectful, inclusive, and constructive. We're all here to build something us
 git clone https://github.com/jonathanabila/git-override.git
 cd git-override
 
-# Run the test suite
+# Run the test suite (local)
 make test
 
-# Install hooks to a test repository
+# Run tests in Docker (recommended)
+make test-docker
+
+# Install hooks to the current repository (for testing)
 ./scripts/install.sh --repo
+
+# Or install CLI tool globally (optional)
+./scripts/install.sh --cli
 ```
 
 ## Project Structure
@@ -44,17 +50,26 @@ git-local-override/
 │   ├── install.sh
 │   └── uninstall.sh
 ├── tests/                        # Test suite
-│   ├── run-tests.sh              # Main test runner
+│   ├── run-tests.sh              # Main test runner (unit tests)
+│   ├── run-docker.sh             # Docker test launcher
+│   ├── docker/                   # Docker test infrastructure
+│   │   ├── Dockerfile            # Ubuntu test image
+│   │   ├── Dockerfile.bash3      # Bash 3.2 compatibility image
+│   │   └── entrypoint.sh
 │   └── integration/              # Integration tests
+│       ├── test-install.sh       # Install/uninstall tests
+│       ├── test-git-ops.sh       # Git operations tests
+│       └── test-precommit.sh     # Pre-commit framework tests
 ├── docs/                         # Additional documentation
 │   └── DESIGN.md                 # Historical design (v0.0.1)
 ├── .pre-commit-hooks.yaml        # Pre-commit integration definitions
 ├── .pre-commit-config.yaml       # Pre-commit hooks for this repo
 ├── Makefile                      # Build automation
 ├── README.md                     # User documentation
-├── CONTRIBUTING.md               # Contributor guidelines
+├── CONTRIBUTING.md               # Contributor guidelines (this file)
 ├── CHANGELOG.md                  # Version history
-├── AGENTS.md                     # AI agent instructions
+├── AGENTS.md                     # AI agent instructions (same as CLAUDE.md)
+├── CLAUDE.md                     # AI agent instructions
 └── LICENSE                       # MIT license
 ```
 

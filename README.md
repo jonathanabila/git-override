@@ -168,7 +168,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jonathanabila/git-override
-    rev: v0.0.2
+    rev: v0.1.0  # Use latest version
     hooks:
       - id: local-override-pre-commit
       - id: local-override-post-commit
@@ -196,7 +196,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 <summary>📌 Pin to Specific Version</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.0.2/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.1.0/scripts/install.sh | bash
 ```
 
 </details>
@@ -280,6 +280,14 @@ The magic happens through git hooks that run automatically:
 | `git pull` | post-checkout | Applies local overrides after merge |
 | `git commit` | pre-commit | Restores originals, stages them |
 | After commit | post-commit | Re-applies local overrides |
+
+### Skip-Worktree Integration
+
+When overrides are applied, files are marked with git's `skip-worktree` flag. This means:
+
+- **Clean `git status`**: Modified files won't appear as changed
+- **Invisible to git**: Local changes are completely hidden from git's view
+- **Automatic management**: The hooks handle setting/clearing this flag automatically
 
 ---
 

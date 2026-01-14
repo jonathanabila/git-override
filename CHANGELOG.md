@@ -14,12 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Uses `git update-index --no-skip-worktree` when restoring originals
   - Applied automatically in hooks (post-checkout, pre-commit, post-commit)
   - Applied in CLI commands (`apply`, `restore`)
+- **Skip-worktree documentation**: Added section to README explaining this feature
 
 ### Fixed
 
 - **Test compatibility with skip-worktree**: Fixed integration tests failing due to skip-worktree
   - Tests now clear skip-worktree before `git add` or `git checkout` operations
   - Affected tests: git operations and pre-commit framework integration tests
+- **Documentation accuracy**: Comprehensive review and update of all documentation
+  - Fixed outdated config format in `install.sh` summary (now shows `override:`/`replaces:` format)
+  - Fixed `uninstall.sh` references to legacy registry/allowlist system and non-existent `uninit` command
+  - Updated pre-commit version references from v0.0.2 to v0.1.0 across all docs
+  - Fixed placeholder URLs (`https://.../`) with actual GitHub URLs
+  - Fixed CLI help text showing non-existent v1.0.0 version
+  - Fixed Makefile `install-manual` creating legacy allowlist files
+  - Updated CONTRIBUTING.md project structure to reflect actual directory layout
+  - Updated AGENTS.md/CLAUDE.md key functions list to include `read_pattern()`, `get_active_overrides()`, `cmd_status()`, `cmd_init_config()`
+  - Fixed incomplete version history summary in CHANGELOG.md
 
 ## [0.1.0] - 2026-01-08
 
@@ -300,11 +311,14 @@ files:
 
 ## Version History
 
-- **0.0.1** - Initial release with full feature set
-- **0.0.2** - Config-driven architecture
-- **0.0.3** - Docker-based testing infrastructure and CI
-- **0.0.4** - Community health files for public release
+- **0.1.0** - Multi-target overrides with new config format (BREAKING)
+- **0.0.7** - Custom override file naming via pattern field
+- **0.0.6** - GitHub Actions release workflow
 - **0.0.5** - CI badge and .gitattributes for resilience
+- **0.0.4** - Community health files for public release
+- **0.0.3** - Docker-based testing infrastructure and CI
+- **0.0.2** - Config-driven architecture
+- **0.0.1** - Initial release with full feature set
 
 [0.1.0]: https://github.com/jonathanabila/git-override/compare/v0.0.7...v0.1.0
 [0.0.7]: https://github.com/jonathanabila/git-override/compare/v0.0.6...v0.0.7

@@ -543,7 +543,7 @@ cmd_status() {
         echo ""
         echo "Install hooks with one of:"
         echo "  - pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout"
-        echo "  - curl -fsSL https://.../install.sh | bash"
+        echo "  - curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash"
     fi
 
     echo ""
@@ -739,7 +739,7 @@ INSTALLATION:
       Add to .pre-commit-config.yaml:
         repos:
           - repo: https://github.com/jonathanabila/git-override
-            rev: v1.0.0
+            rev: v0.1.0  # Use latest version
             hooks:
               - id: local-override-pre-commit
               - id: local-override-post-commit
@@ -749,7 +749,7 @@ INSTALLATION:
         pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout
 
     Standalone:
-      curl -fsSL https://.../install.sh | bash
+      curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
 EOF
 }
 

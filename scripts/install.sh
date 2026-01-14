@@ -227,10 +227,10 @@ Options:
 
 Examples:
   # Install to current repo
-  curl -fsSL https://.../install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
 
   # Install globally (template) + CLI
-  curl -fsSL https://.../install.sh | bash -s -- --global --cli
+  curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --global --cli
 
   # From cloned repo
   ./scripts/install.sh --repo
@@ -246,9 +246,12 @@ print_summary() {
     echo "Next steps:"
     echo ""
     echo "  1. Create a .local-overrides.yaml in your repository:"
+    echo ""
+    echo "     pattern: \".local\""
     echo "     files:"
-    echo "       - CLAUDE.md"
-    echo "       - AGENTS.md"
+    echo "       - override: CLAUDE.local.md"
+    echo "         replaces:"
+    echo "           - CLAUDE.md"
     echo ""
     echo "  2. Create your local override file:"
     echo "     cp CLAUDE.md CLAUDE.local.md"

@@ -18,8 +18,7 @@
 PREFIX ?= $(HOME)/.local
 CONFIG_DIR ?= $(HOME)/.config/git
 BIN_DIR := $(PREFIX)/bin
-HOOKS_DIR := $(CONFIG_DIR)/hooks
-OVERRIDES_DIR := $(CONFIG_DIR)/local-overrides
+TEMPLATE_HOOKS_DIR := $(CONFIG_DIR)/template/hooks
 
 # Source directories
 SRC_BIN := bin
@@ -138,41 +137,40 @@ fmt-check: ## Check shell script formatting (requires shfmt)
 install-manual: check-bash ## Install manually without running install script
 	@echo "Creating directories..."
 	@mkdir -p $(BIN_DIR)
-	@mkdir -p $(HOOKS_DIR)
-	@mkdir -p $(OVERRIDES_DIR)
+	@mkdir -p $(TEMPLATE_HOOKS_DIR)
 
 	@echo "Installing CLI tool..."
 	@cp $(CLI_TOOL) $(BIN_DIR)/
 	@chmod +x $(BIN_DIR)/git-local-override
 
-	@echo "Installing hook scripts..."
-	@cp $(HOOK_SCRIPTS) $(HOOKS_DIR)/
-	@chmod +x $(HOOKS_DIR)/local-override-*
+	@echo "Installing hook scripts to git template directory..."
+	@cp $(HOOK_SCRIPTS) $(TEMPLATE_HOOKS_DIR)/
+	@cp $(SRC_HOOKS)/local-override-lib.sh $(TEMPLATE_HOOKS_DIR)/
+	@chmod +x $(TEMPLATE_HOOKS_DIR)/local-override-*
 
-	@echo "Creating default allowlist..."
-	@if [ ! -f $(OVERRIDES_DIR)/allowlist ]; then \
-		echo "# Global allowlist for git local-override" > $(OVERRIDES_DIR)/allowlist; \
-		echo "**/AGENTS.md" >> $(OVERRIDES_DIR)/allowlist; \
-		echo "**/CLAUDE.md" >> $(OVERRIDES_DIR)/allowlist; \
-		echo "CLAUDE.md" >> $(OVERRIDES_DIR)/allowlist; \
-	fi
+	@echo "Configuring git template directory..."
+	@git config --global init.templateDir $(CONFIG_DIR)/template
 
 	@echo ""
 	@echo "Installation complete!"
 	@echo ""
 	@echo "Make sure $(BIN_DIR) is in your PATH:"
 	@echo '  export PATH="$$HOME/.local/bin:$$PATH"'
+	@echo ""
+	@echo "New repos will have hooks automatically. For existing repos, run:"
+	@echo "  ./scripts/install.sh --repo"
 
 uninstall-manual: ## Uninstall manually
 	@echo "Removing CLI tool..."
 	@rm -f $(BIN_DIR)/git-local-override
 
-	@echo "Removing hook scripts..."
-	@rm -f $(HOOKS_DIR)/local-override-*
+	@echo "Removing hook scripts from git template..."
+	@rm -f $(TEMPLATE_HOOKS_DIR)/local-override-*
 
 	@echo ""
 	@echo "Uninstallation complete."
-	@echo "Note: Allowlist and registry files preserved in $(OVERRIDES_DIR)"
+	@echo "Note: You may want to unset init.templateDir:"
+	@echo "  git config --global --unset init.templateDir"
 
 #------------------------------------------------------------------------------
 # Help
