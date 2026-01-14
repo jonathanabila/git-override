@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Applied automatically in hooks (post-checkout, pre-commit, post-commit)
   - Applied in CLI commands (`apply`, `restore`)
 
+### Fixed
+
+- **Test compatibility with skip-worktree**: Fixed integration tests failing due to skip-worktree
+  - Tests now clear skip-worktree before `git add` or `git checkout` operations
+  - Affected tests: git operations and pre-commit framework integration tests
+
 ## [0.1.0] - 2026-01-08
 
 ### Changed (BREAKING)

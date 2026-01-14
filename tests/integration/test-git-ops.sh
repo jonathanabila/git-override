@@ -151,6 +151,9 @@ test_commit_staged_override_file() {
 
     cd "$TEST_DIR"
 
+    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
+    git update-index --no-skip-worktree CLAUDE.md
+
     # Stage the override file itself
     git add CLAUDE.md
 
@@ -288,6 +291,9 @@ test_no_override_without_local_file() {
     # Remove the local file for config.yaml
     rm -f config.local.yaml
 
+    # Clear skip-worktree before restore (git checkout doesn't work with skip-worktree)
+    git update-index --no-skip-worktree config.yaml
+
     # Restore original
     git checkout HEAD -- config.yaml
 
@@ -349,6 +355,9 @@ test_dirty_working_tree_commit() {
     # Make unstaged changes to README
     echo "Unstaged change" >> README.md
 
+    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
+    git update-index --no-skip-worktree config.yaml
+
     # Stage config.yaml (which has local content applied)
     git add config.yaml
 
@@ -393,6 +402,10 @@ test_hooks_skip_without_config() {
 
     # Remove config
     rm -f .local-overrides.yaml .local-overrides
+
+    # Clear skip-worktree before checkout (git checkout doesn't work with skip-worktree)
+    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    git update-index --no-skip-worktree config.yaml 2>/dev/null || true
 
     # Restore original content
     git checkout HEAD -- CLAUDE.md config.yaml
