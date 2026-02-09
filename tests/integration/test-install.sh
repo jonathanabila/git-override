@@ -359,6 +359,240 @@ test_new_repo_gets_hooks_after_global_install() {
     fi
 }
 
+test_install_configures_filter_driver() {
+    info "Testing install configures filter driver..."
+
+    local repo_dir="$TEST_DIR/repo-filter-config"
+    create_test_repo "$repo_dir"
+
+    # Create a config file so install knows what to filter
+    cat > "$repo_dir/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    # Run install
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    # Check filter.local-override.smudge is configured
+    cd "$repo_dir"
+    local smudge_cmd
+    smudge_cmd=$(git config --local filter.local-override.smudge 2>/dev/null || echo "")
+    if [[ -n "$smudge_cmd" ]] && [[ "$smudge_cmd" == *"local-override-filter-smudge"* ]]; then
+        pass "Filter smudge command configured"
+    else
+        fail "Filter smudge command not configured (got: '$smudge_cmd')"
+        return 1
+    fi
+
+    # Check filter.local-override.clean is configured
+    local clean_cmd
+    clean_cmd=$(git config --local filter.local-override.clean 2>/dev/null || echo "")
+    if [[ -n "$clean_cmd" ]] && [[ "$clean_cmd" == *"local-override-filter-clean"* ]]; then
+        pass "Filter clean command configured"
+    else
+        fail "Filter clean command not configured (got: '$clean_cmd')"
+        return 1
+    fi
+
+    # Check filter.local-override.required is false
+    local required
+    required=$(git config --local filter.local-override.required 2>/dev/null || echo "")
+    if [[ "$required" == "false" ]]; then
+        pass "Filter required set to false"
+    else
+        fail "Filter required not set to false (got: '$required')"
+        return 1
+    fi
+}
+
+test_install_populates_attributes() {
+    info "Testing install populates .git/info/attributes..."
+
+    local repo_dir="$TEST_DIR/repo-filter-attributes"
+    create_test_repo "$repo_dir"
+
+    # Create a config file with multiple targets
+    cat > "$repo_dir/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    # Run install
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    cd "$repo_dir"
+    local attributes_file=".git/info/attributes"
+
+    # Check attributes file exists
+    if [[ ! -f "$attributes_file" ]]; then
+        fail "Attributes file not created"
+        return 1
+    fi
+
+    # Check it contains filter entries for each target
+    if grep -q "AGENTS.md filter=local-override" "$attributes_file" &&
+       grep -q "CLAUDE.md filter=local-override" "$attributes_file"; then
+        pass "Attributes file contains filter entries for all targets"
+    else
+        fail "Attributes file missing filter entries"
+        cat "$attributes_file" || true
+        return 1
+    fi
+
+    # Check for header comment
+    if grep -q "git-local-override" "$attributes_file"; then
+        pass "Attributes file has header comment"
+    else
+        fail "Attributes file missing header comment"
+        return 1
+    fi
+}
+
+test_install_idempotent_attributes() {
+    info "Testing install is idempotent for attributes..."
+
+    local repo_dir="$TEST_DIR/repo-filter-idempotent"
+    create_test_repo "$repo_dir"
+
+    # Create a config file
+    cat > "$repo_dir/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    # Run install twice
+    "$PROJECT_DIR/scripts/install.sh" --repo
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    cd "$repo_dir"
+    local attributes_file=".git/info/attributes"
+
+    # Count occurrences of the filter entry
+    local count
+    count=$(grep -c "AGENTS.md filter=local-override" "$attributes_file" 2>/dev/null || echo "0")
+
+    if [[ "$count" -eq 1 ]]; then
+        pass "No duplicate filter entries after reinstall"
+    else
+        fail "Found $count occurrences of filter entry (expected 1)"
+        cat "$attributes_file" || true
+        return 1
+    fi
+}
+
+test_uninstall_removes_filter_config() {
+    info "Testing uninstall removes filter config..."
+
+    local repo_dir="$TEST_DIR/repo-filter-uninstall"
+    create_test_repo "$repo_dir"
+
+    # Create a config file
+    cat > "$repo_dir/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    # Install first
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    cd "$repo_dir"
+
+    # Verify filter is configured
+    if ! git config --local filter.local-override.smudge >/dev/null 2>&1; then
+        fail "Pre-condition: filter not installed"
+        return 1
+    fi
+
+    # Run uninstall (non-interactive)
+    echo "n" | "$PROJECT_DIR/scripts/uninstall.sh" || true
+
+    # Check filter config is removed
+    if git config --local filter.local-override.smudge >/dev/null 2>&1; then
+        fail "Filter smudge config still exists after uninstall"
+        return 1
+    fi
+
+    if git config --local filter.local-override.clean >/dev/null 2>&1; then
+        fail "Filter clean config still exists after uninstall"
+        return 1
+    fi
+
+    pass "Filter config removed by uninstall"
+
+    # Check attributes file has no local-override entries
+    local attributes_file=".git/info/attributes"
+    if [[ -f "$attributes_file" ]] && grep -q "filter=local-override" "$attributes_file"; then
+        fail "Attributes file still contains filter entries"
+        cat "$attributes_file" || true
+        return 1
+    fi
+
+    pass "Attributes file cleaned by uninstall"
+}
+
+test_install_filter_scripts_executable() {
+    info "Testing install creates executable filter scripts..."
+
+    local repo_dir="$TEST_DIR/repo-filter-scripts"
+    create_test_repo "$repo_dir"
+
+    # Create a config file
+    cat > "$repo_dir/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    # Run install
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    cd "$repo_dir"
+
+    # Check filter scripts exist
+    if [[ ! -f ".git/hooks/local-override-filter-smudge" ]]; then
+        fail "Filter smudge script not installed"
+        return 1
+    fi
+
+    if [[ ! -f ".git/hooks/local-override-filter-clean" ]]; then
+        fail "Filter clean script not installed"
+        return 1
+    fi
+
+    pass "Filter scripts installed"
+
+    # Check they are executable
+    if [[ ! -x ".git/hooks/local-override-filter-smudge" ]]; then
+        fail "Filter smudge script not executable"
+        return 1
+    fi
+
+    if [[ ! -x ".git/hooks/local-override-filter-clean" ]]; then
+        fail "Filter clean script not executable"
+        return 1
+    fi
+
+    pass "Filter scripts are executable"
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -382,6 +616,11 @@ main() {
     test_install_gitignore
     test_uninstall_from_repo
     test_new_repo_gets_hooks_after_global_install
+    test_install_configures_filter_driver
+    test_install_populates_attributes
+    test_install_idempotent_attributes
+    test_uninstall_removes_filter_config
+    test_install_filter_scripts_executable
 
     # Cleanup
     reset_git_config
