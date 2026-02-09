@@ -679,6 +679,263 @@ EOF
 }
 
 #------------------------------------------------------------------------------
+# Filter Tests (smudge/clean)
+#------------------------------------------------------------------------------
+
+test_filter_smudge_applies_override() {
+    info "Testing smudge filter applies override when override exists..."
+    cd "$TEST_REPO"
+    create_config
+
+    # Create filter scripts (they don't exist yet, so this should fail)
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$smudge_script" ]]; then
+        fail "Smudge filter script not found (expected - not implemented yet)"
+        return
+    fi
+
+    # Create local override
+    echo "# LOCAL SMUDGE CONTENT" > CLAUDE.local.md
+
+    # Test smudge: should output local content when override exists
+    local output
+    output=$(echo "# Original CLAUDE.md content" | "$smudge_script" CLAUDE.md)
+
+    if [[ "$output" == *"LOCAL SMUDGE CONTENT"* ]]; then
+        pass "Smudge filter applies override"
+    else
+        fail "Smudge filter did not apply override"
+    fi
+}
+
+test_filter_smudge_passthrough() {
+    info "Testing smudge filter passes through when no override exists..."
+    cd "$TEST_REPO"
+    create_config
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+
+    if [[ ! -f "$smudge_script" ]]; then
+        fail "Smudge filter script not found (expected - not implemented yet)"
+        return
+    fi
+
+    # Remove local override
+    rm -f CLAUDE.local.md
+
+    # Test smudge: should pass through stdin when no override
+    local input="# Original content from git"
+    local output
+    output=$(echo "$input" | "$smudge_script" CLAUDE.md)
+
+    if [[ "$output" == "$input" ]]; then
+        pass "Smudge filter passes through without override"
+    else
+        fail "Smudge filter did not pass through (got: $output)"
+    fi
+}
+
+test_filter_clean_returns_original() {
+    info "Testing clean filter returns original content from git..."
+    cd "$TEST_REPO"
+    create_config
+
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$clean_script" ]]; then
+        fail "Clean filter script not found (expected - not implemented yet)"
+        return
+    fi
+
+    # Create local override
+    echo "# LOCAL CLEAN CONTENT" > CLAUDE.local.md
+
+    # Test clean: should output original from git, not local content
+    local output
+    output=$(echo "# LOCAL CLEAN CONTENT" | "$clean_script" CLAUDE.md)
+
+    if [[ "$output" == *"Original CLAUDE.md content"* ]]; then
+        pass "Clean filter returns original content"
+    else
+        fail "Clean filter did not return original (got: $output)"
+    fi
+}
+
+test_filter_clean_passthrough() {
+    info "Testing clean filter passes through when no override exists..."
+    cd "$TEST_REPO"
+    create_config
+
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$clean_script" ]]; then
+        fail "Clean filter script not found (expected - not implemented yet)"
+        return
+    fi
+
+    # Remove local override
+    rm -f CLAUDE.local.md
+
+    # Test clean: should pass through stdin when no override
+    local input="# Content from working tree"
+    local output
+    output=$(echo "$input" | "$clean_script" CLAUDE.md)
+
+    if [[ "$output" == "$input" ]]; then
+        pass "Clean filter passes through without override"
+    else
+        fail "Clean filter did not pass through (got: $output)"
+    fi
+}
+
+test_filter_roundtrip() {
+    info "Testing filter roundtrip: clean(smudge(blob)) == blob..."
+    cd "$TEST_REPO"
+    create_config
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$smudge_script" || ! -f "$clean_script" ]]; then
+        fail "Filter scripts not found (expected - not implemented yet)"
+        return
+    fi
+
+    # Create local override
+    echo "# LOCAL ROUNDTRIP CONTENT" > CLAUDE.local.md
+
+    # Original content from git
+    local original="# Original CLAUDE.md content"
+
+    # Roundtrip: original -> smudge -> clean -> should equal original
+    local smudged
+    smudged=$(echo "$original" | "$smudge_script" CLAUDE.md)
+
+    local cleaned
+    cleaned=$(echo "$smudged" | "$clean_script" CLAUDE.md)
+
+    if [[ "$cleaned" == "$original" ]]; then
+        pass "Filter roundtrip preserves original content"
+    else
+        fail "Filter roundtrip failed (original: '$original', cleaned: '$cleaned')"
+    fi
+}
+
+test_filter_disable_env_var() {
+    info "Testing filters passthrough when GIT_LOCAL_OVERRIDE_DISABLE=1..."
+    cd "$TEST_REPO"
+    create_config
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$smudge_script" || ! -f "$clean_script" ]]; then
+        fail "Filter scripts not found (expected - not implemented yet)"
+        return
+    fi
+
+    # Create local override
+    echo "# LOCAL DISABLED CONTENT" > CLAUDE.local.md
+
+    # Test with disable flag
+    local input="# Input content"
+    local smudge_output
+    local clean_output
+
+    smudge_output=$(GIT_LOCAL_OVERRIDE_DISABLE=1 echo "$input" | "$smudge_script" CLAUDE.md)
+    clean_output=$(GIT_LOCAL_OVERRIDE_DISABLE=1 echo "$input" | "$clean_script" CLAUDE.md)
+
+    if [[ "$smudge_output" == "$input" && "$clean_output" == "$input" ]]; then
+        pass "Filters passthrough when disabled"
+    else
+        fail "Filters did not passthrough when disabled"
+    fi
+}
+
+test_filter_no_head_passthrough() {
+    info "Testing clean filter passes through when HEAD doesn't exist..."
+    cd "$TEST_REPO"
+
+    # Create a fresh repo with no commits
+    local temp_repo="$TESTS_DIR/test-no-head"
+    rm -rf "$temp_repo"
+    mkdir -p "$temp_repo"
+    cd "$temp_repo"
+
+    git init -q
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+
+    # Install hooks
+    mkdir -p .git/hooks
+    cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
+    cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/ 2>/dev/null || true
+    chmod +x .git/hooks/* 2>/dev/null || true
+
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$clean_script" ]]; then
+        fail "Clean filter script not found (expected - not implemented yet)"
+        cd "$TEST_REPO"
+        rm -rf "$temp_repo"
+        return
+    fi
+
+    # Create config
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    # Test clean without HEAD
+    local input="# Content before first commit"
+    local output
+    output=$(echo "$input" | "$clean_script" CLAUDE.md)
+
+    if [[ "$output" == "$input" ]]; then
+        pass "Clean filter passes through when HEAD doesn't exist"
+    else
+        fail "Clean filter did not passthrough without HEAD (got: $output)"
+    fi
+
+    cd "$TEST_REPO"
+    rm -rf "$temp_repo"
+}
+
+test_filter_non_configured_file_passthrough() {
+    info "Testing filters passthrough for non-configured files..."
+    cd "$TEST_REPO"
+    create_config
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$smudge_script" || ! -f "$clean_script" ]]; then
+        fail "Filter scripts not found (expected - not implemented yet)"
+        return
+    fi
+
+    # Test with a file not in config
+    local input="# Content for non-configured file"
+    local smudge_output
+    local clean_output
+
+    smudge_output=$(echo "$input" | "$smudge_script" config.json)
+    clean_output=$(echo "$input" | "$clean_script" config.json)
+
+    if [[ "$smudge_output" == "$input" && "$clean_output" == "$input" ]]; then
+        pass "Filters passthrough for non-configured files"
+    else
+        fail "Filters did not passthrough for non-configured file"
+    fi
+}
+
+#------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
 
@@ -725,6 +982,16 @@ main() {
     test_multi_target_pre_commit_restores_all
     test_duplicate_target_error
     test_list_shows_grouped_targets
+
+    # Filter tests (smudge/clean)
+    test_filter_smudge_applies_override
+    test_filter_smudge_passthrough
+    test_filter_clean_returns_original
+    test_filter_clean_passthrough
+    test_filter_roundtrip
+    test_filter_disable_env_var
+    test_filter_no_head_passthrough
+    test_filter_non_configured_file_passthrough
 
     echo ""
     echo "========================================"
