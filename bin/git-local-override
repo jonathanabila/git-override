@@ -626,6 +626,70 @@ cmd_restore() {
     success "Restored $count file(s)"
 }
 
+cmd_filter_smudge() {
+    local file_path="${1:-}"
+
+    if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
+        cat
+        return 0
+    fi
+
+    local repo_root
+    if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        cat
+        return 0
+    fi
+
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
+        cat
+        return 0
+    fi
+
+    local override_path
+    if override_path=$(get_override_for_target "$file_path" "$repo_root"); then
+        if [[ -n "$override_path" && -f "$repo_root/$override_path" ]]; then
+            cat > /dev/null
+            cat "$repo_root/$override_path"
+            return 0
+        fi
+    fi
+
+    cat
+}
+
+cmd_filter_clean() {
+    local file_path="${1:-}"
+
+    if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
+        cat
+        return 0
+    fi
+
+    local repo_root
+    if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        cat
+        return 0
+    fi
+
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
+        cat
+        return 0
+    fi
+
+    local override_path
+    if override_path=$(get_override_for_target "$file_path" "$repo_root"); then
+        if [[ -n "$override_path" && -f "$repo_root/$override_path" ]]; then
+            if git -C "$repo_root" show "HEAD:$file_path" >/dev/null 2>&1; then
+                cat > /dev/null
+                git -C "$repo_root" show "HEAD:$file_path" 2>/dev/null || cat
+                return 0
+            fi
+        fi
+    fi
+
+    cat
+}
+
 cmd_init_config() {
     local repo_root
     repo_root="$(get_repo_root)"
@@ -683,6 +747,8 @@ COMMANDS:
     status                  Show detailed status
     apply                   Manually apply all overrides
     restore                 Manually restore all originals from git
+    filter-smudge <path>    Filter helper: output local override or passthrough
+    filter-clean <path>     Filter helper: output HEAD content or passthrough
     init-config             Create a .local-overrides.yaml template
     help                    Show this help message
 
@@ -768,6 +834,8 @@ main() {
         status)         cmd_status "$@" ;;
         apply)          cmd_apply "$@" ;;
         restore)        cmd_restore "$@" ;;
+        filter-smudge)  cmd_filter_smudge "$@" ;;
+        filter-clean)   cmd_filter_clean "$@" ;;
         init-config)    cmd_init_config "$@" ;;
         help|--help|-h) cmd_help ;;
         *)              die "Unknown command: $cmd. Run 'git-local-override help' for usage." ;;

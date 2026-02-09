@@ -193,6 +193,29 @@ read_config() {
     done < "$config_file"
 }
 
+# Get override file path for a configured target file
+# Arguments: $1 = repo_root, $2 = target file path
+# Outputs override file path if configured, empty otherwise
+get_override_for_file() {
+    local repo_root="$1"
+    local file_path="$2"
+
+    local entry target override
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+
+        target="${entry%%|*}"
+        override="${entry#*|}"
+
+        if [[ "$target" == "$file_path" ]]; then
+            echo "$override"
+            return 0
+        fi
+    done < <(read_config "$repo_root")
+
+    return 0
+}
+
 # Get list of files that have local overrides available
 # (files in config that have an override file present)
 get_active_overrides() {

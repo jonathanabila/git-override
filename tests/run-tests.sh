@@ -70,6 +70,8 @@ setup() {
     cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
     cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
     cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit
+    cp "$PROJECT_DIR/hooks/local-override-filter-smudge" .git/hooks/
+    cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/
     chmod +x .git/hooks/*
 
     echo -e "${GREEN}[OK]${NC} Test environment setup complete"
@@ -844,8 +846,8 @@ test_filter_disable_env_var() {
     local smudge_output
     local clean_output
 
-    smudge_output=$(GIT_LOCAL_OVERRIDE_DISABLE=1 echo "$input" | "$smudge_script" CLAUDE.md)
-    clean_output=$(GIT_LOCAL_OVERRIDE_DISABLE=1 echo "$input" | "$clean_script" CLAUDE.md)
+    smudge_output=$(echo "$input" | GIT_LOCAL_OVERRIDE_DISABLE=1 "$smudge_script" CLAUDE.md)
+    clean_output=$(echo "$input" | GIT_LOCAL_OVERRIDE_DISABLE=1 "$clean_script" CLAUDE.md)
 
     if [[ "$smudge_output" == "$input" && "$clean_output" == "$input" ]]; then
         pass "Filters passthrough when disabled"

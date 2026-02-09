@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Applied automatically in hooks (post-checkout, pre-commit, post-commit)
   - Applied in CLI commands (`apply`, `restore`)
 - **Skip-worktree documentation**: Added section to README explaining this feature
+- **Filter driver scripts**: Added `local-override-filter-smudge` and `local-override-filter-clean`
+  - Smudge outputs local override content when configured override files exist
+  - Clean outputs original `HEAD:<path>` content when overrides are active
+  - Both filters support passthrough mode and `GIT_LOCAL_OVERRIDE_DISABLE=1`
+- **Filter helper commands**: Added CLI subcommands `filter-smudge` and `filter-clean`
+  - Mirrors hook filter behavior for direct invocation and testing
+
+### Changed
+
+- **Hook test setup**: Unit test bootstrap now installs filter scripts into `.git/hooks`
+- **Disable-env test invocation**: Filter disable test now exports `GIT_LOCAL_OVERRIDE_DISABLE=1` to the filter process
 
 ### Fixed
 
