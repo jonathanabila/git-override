@@ -97,12 +97,15 @@ Ensure `.local.*` files are gitignored. The installer adds this globally, but yo
 
 ### Verification
 
-Run `git-local-override status` (if CLI installed) or check that `.git/hooks/pre-commit` exists and contains "local-override".
+Run `git-local-override status` (if CLI installed) or check that:
+- `.git/hooks/pre-commit` exists and contains "local-override"
+- `git config --local filter.local-override.smudge` returns a path (filter driver configured)
 
 ### Key Behavior
 
 - **On commit**: Original file content is committed (local changes are protected)
 - **On checkout/pull**: Local overrides are automatically reapplied
+- **On branch switch**: Filter drivers ensure seamless switching even when overridden files differ between branches
 - **git status**: Always clean—local modifications are invisible to git
 
 </details>
@@ -274,11 +277,13 @@ The magic happens through git hooks that run automatically:
 
 ### Hook Summary
 
-| Git Operation | Hook | What Happens |
-|---------------|------|--------------|
+| Git Operation | Hook / Filter | What Happens |
+|---------------|---------------|--------------|
 | `git checkout` | post-checkout | Applies local overrides to working tree |
+| `git checkout` | filter driver (smudge) | Transparently applies local override content |
 | `git pull` | post-checkout | Applies local overrides after merge |
 | `git commit` | pre-commit | Restores originals, stages them |
+| `git add` / staging | filter driver (clean) | Presents original content to git index |
 | After commit | post-commit | Re-applies local overrides |
 
 ### Skip-Worktree Integration
@@ -288,6 +293,20 @@ When overrides are applied, files are marked with git's `skip-worktree` flag. Th
 - **Clean `git status`**: Modified files won't appear as changed
 - **Invisible to git**: Local changes are completely hidden from git's view
 - **Automatic management**: The hooks handle setting/clearing this flag automatically
+
+### Seamless Branch Switching (Filter Drivers)
+
+git-local-override uses **smudge/clean filter drivers** (the same mechanism used by git-lfs and git-crypt) to enable seamless branch switching even when overridden files differ between branches.
+
+**The Problem**: `skip-worktree` hides files from `git status`, but doesn't prevent checkout conflicts when branches have different versions of an overridden file.
+
+**The Solution**: Filter drivers make git consider overridden files "clean" through a roundtrip property: `clean(smudge(original)) == original`. This means:
+
+- **Smudge** (on checkout): Outputs local override content transparently
+- **Clean** (on staging): Presents original content from `HEAD` to git
+- **Result**: Git operations work seamlessly—checkout, switch, pull, merge, rebase, stash all succeed
+
+Filter drivers are configured automatically during installation in `.git/info/attributes` (local-only, not tracked in `.gitattributes`). Hooks and filters work together: filters handle content transformation, hooks manage skip-worktree.
 
 ---
 
@@ -366,6 +385,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 | `git-local-override status` | Show detailed system status |
 | `git-local-override apply` | Manually apply all overrides |
 | `git-local-override restore` | Manually restore all originals |
+| `git-local-override sync-filters` | Sync filter configuration with config file |
 | `git-local-override init-config` | Create a `.local-overrides.yaml` template |
 | `git-local-override help` | Show help |
 
@@ -405,6 +425,17 @@ git-local-override chains with your existing hooks:
 ```bash
 .git/hooks/pre-commit           # Our wrapper
 .git/hooks/pre-commit.chained   # Your original hook (called after ours)
+```
+
+</details>
+
+<details>
+<summary><strong>Disable Filters Temporarily</strong></summary>
+
+Set `GIT_LOCAL_OVERRIDE_DISABLE=1` to bypass filter drivers. Useful for debugging or getting the true original content:
+
+```bash
+GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
 ```
 
 </details>
@@ -480,6 +511,31 @@ files:
 </details>
 
 <details>
+<summary><strong>Branch switching fails with "local changes would be overwritten"</strong></summary>
+
+**Cause**: Filter drivers not configured properly.
+
+**Solution**:
+
+```bash
+# Re-sync filter configuration
+git-local-override sync-filters
+
+# Or reinstall
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+```
+
+If still failing, check filter configuration:
+
+```bash
+git config --local filter.local-override.smudge
+git config --local filter.local-override.clean
+cat .git/info/attributes
+```
+
+</details>
+
+<details>
 <summary><strong>New hooks not working after project update (curl install)</strong></summary>
 
 If you installed using the curl method (not pre-commit) and the project adds new hooks in an update, you need to re-run the install script:
@@ -503,8 +559,12 @@ This is because the curl method installs hooks directly to `.git/hooks/` at inst
 | `.git/hooks/pre-commit` | Hook script | Restores originals before commit |
 | `.git/hooks/post-commit` | Hook script | Re-applies overrides after commit |
 | `.git/hooks/post-checkout` | Hook script | Applies overrides after checkout |
+| `.git/hooks/local-override-filter-smudge` | Filter script | Applies local content on checkout |
+| `.git/hooks/local-override-filter-clean` | Filter script | Presents original content to git |
 | `.git/hooks/local-override-lib.sh` | Shared library | Common functions for hooks |
 | `.git/hooks/*.chained` | Backup | Your existing hooks (preserved) |
+| `.git/info/attributes` | Filter config | Maps files to filter driver (local only) |
+| `git config filter.local-override.*` | Git config | Filter driver configuration |
 | `~/.config/git/ignore` | Gitignore patterns | Ignores `*.local.*` files globally |
 
 With `--global`: Also installs to `~/.config/git/template/hooks/` for new repos.

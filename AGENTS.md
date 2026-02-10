@@ -14,6 +14,8 @@ git-local-override/
 │   └── git-local-override        # Main command-line interface
 ├── hooks/                        # Git hook scripts
 │   ├── local-override-lib.sh     # Shared library functions
+│   ├── local-override-filter-smudge   # Smudge filter (checkout)
+│   ├── local-override-filter-clean    # Clean filter (staging)
 │   ├── local-override-post-checkout
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
@@ -21,7 +23,11 @@ git-local-override/
 │   ├── install.sh
 │   └── uninstall.sh
 ├── tests/                        # Test suite
-│   └── run-tests.sh              # Main test runner
+│   ├── run-tests.sh              # Main test runner
+│   └── integration/              # Integration tests
+│       ├── test-install.sh       # Install/uninstall tests
+│       ├── test-git-ops.sh       # Git operations tests
+│       └── test-precommit.sh     # Pre-commit framework tests
 ├── docs/                         # Additional documentation
 │   └── DESIGN.md                 # Original design specification
 ├── .pre-commit-hooks.yaml        # Pre-commit integration definitions
@@ -54,6 +60,17 @@ The system is config-driven, not registry-based:
 
 1. **Pre-commit**: Users add to `.pre-commit-config.yaml` and run `pre-commit install`
 2. **Curl**: `curl ... | bash` downloads hooks directly to `.git/hooks/`
+
+### Filter Drivers (Smudge/Clean)
+
+git-local-override uses **smudge/clean filter drivers** (same mechanism as git-lfs and git-crypt) to make git consider overridden files "clean" during checkout/switch/merge operations:
+
+- **Smudge**: Runs on checkout, outputs local override content to working tree
+- **Clean**: Runs on staging, outputs original content from `HEAD` to git index
+- **Roundtrip**: `clean(smudge(original)) == original` makes git consider files unchanged
+- **Configuration**: Via `.git/info/attributes` (local, not tracked) and `git config filter.local-override.*`
+- **Bypass**: Set `GIT_LOCAL_OVERRIDE_DISABLE=1` to temporarily disable filters
+- **Coexistence**: Filters and hooks work together — filters handle content transformation, hooks handle skip-worktree management
 
 ## Code Guidelines
 
@@ -222,6 +239,7 @@ Shared library sourced by all hooks. Key functions:
 - `get_active_overrides()` - Get files with existing override files
 - `get_override_files()` - List unique override files from config
 - `get_targets_for_override()` - Get all target files for a specific override
+- `get_override_for_file()` - Find the override file for a given target file path
 - `validate_config()` - Validate config format and check for duplicate targets
 
 ### `hooks/local-override-post-checkout`
@@ -245,6 +263,23 @@ Called before commit. Key behavior:
 
 Called after commit. Re-applies local overrides.
 
+### `hooks/local-override-filter-smudge`
+
+Standalone smudge filter script called by git during checkout. Key behavior:
+
+- Receives original blob content on stdin, filename as $1 (%f)
+- Outputs .local override content if exists, else passthrough
+- Respects GIT_LOCAL_OVERRIDE_DISABLE=1
+
+### `hooks/local-override-filter-clean`
+
+Standalone clean filter script called by git during staging. Key behavior:
+
+- Receives working tree content on stdin, filename as $1 (%f)
+- Outputs original content from git HEAD if override exists, else passthrough
+- Falls back to passthrough when HEAD doesn't exist
+- Respects GIT_LOCAL_OVERRIDE_DISABLE=1
+
 ### `bin/git-local-override`
 
 Optional CLI tool. Key functions:
@@ -252,9 +287,12 @@ Optional CLI tool. Key functions:
 - `cmd_add()` - Create local override file
 - `cmd_remove()` - Remove override, restore original
 - `cmd_list()` - Show configured files and status
-- `cmd_status()` - Show detailed system status (config, hooks, pattern)
-- `cmd_apply()` - Manually apply all overrides (sets skip-worktree)
+- `cmd_status()` - Show detailed system status (config, hooks, pattern, filter status)
+- `cmd_apply()` - Manually apply all overrides (sets skip-worktree, syncs filters)
 - `cmd_restore()` - Manually restore all originals (clears skip-worktree)
+- `cmd_sync_filters()` - Sync filter configuration with config file
+- `cmd_filter_smudge()` - Internal: smudge filter for git filter driver
+- `cmd_filter_clean()` - Internal: clean filter for git filter driver
 - `cmd_init_config()` - Create a `.local-overrides.yaml` template
 - `read_config()` - Parse config file (duplicated from lib for standalone operation)
 
@@ -306,6 +344,18 @@ bash -x bin/git-local-override add file.md
 ```bash
 # Add debug output to read_config():
 echo "DEBUG: file=$file" >&2
+```
+
+### Disable Filter Drivers
+
+```bash
+# Temporarily bypass filter drivers
+GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
+
+# Check filter configuration
+git config --local filter.local-override.smudge
+git config --local filter.local-override.clean
+cat .git/info/attributes
 ```
 
 ## Performance Considerations
