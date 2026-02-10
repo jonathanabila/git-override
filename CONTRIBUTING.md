@@ -45,7 +45,9 @@ git-local-override/
 │   ├── local-override-lib.sh     # Shared library functions
 │   ├── local-override-post-checkout
 │   ├── local-override-pre-commit
-│   └── local-override-post-commit
+│   ├── local-override-post-commit
+│   ├── local-override-filter-smudge   # Smudge filter (checkout)
+│   └── local-override-filter-clean    # Clean filter (staging)
 ├── scripts/                      # Installation scripts
 │   ├── install.sh
 │   └── uninstall.sh
@@ -120,8 +122,16 @@ git checkout HEAD -- "$path" 2>/dev/null || true
 
 All changes should include tests. The test suite is in `tests/run-tests.sh`.
 
+**IMPORTANT: Tests must be run inside Docker to ensure isolation and consistency.**
+
 ```bash
-# Run all tests
+# Run all tests in Docker (recommended and authoritative)
+make test-docker
+
+# Run tests with bash 3.2 for macOS compatibility
+make test-docker-bash3
+
+# Quick local test (for development iteration only)
 make test
 
 # Run tests with verbose output
@@ -201,7 +211,8 @@ Types:
 
 #### PR Checklist
 
-- [ ] Tests pass (`make test`)
+- [ ] Tests pass (`make test-docker` - authoritative)
+- [ ] Tests pass (`make test` - local verification)
 - [ ] Code follows style guidelines
 - [ ] Bash 3.2 compatible
 - [ ] Documentation updated

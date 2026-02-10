@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Flaky test elimination**: Fixed `test_hooks_skip_without_config` in `tests/integration/test-git-ops.sh` by using `git show "HEAD:file" > file` instead of `git checkout HEAD --` to bypass smudge filter and ensure deterministic test behavior
+
+### Changed
+
+- **Documentation updates**: Updated README.md and CONTRIBUTING.md to accurately reflect filter driver implementation, including filter scripts in architecture diagrams and emphasizing Docker tests as authoritative
+
 ### Added
 
 - **skip-worktree integration**: Overridden files no longer appear as modified in `git status`

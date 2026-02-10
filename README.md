@@ -453,6 +453,8 @@ GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
     ├── post-checkout           # Applies overrides after checkout
     ├── pre-commit              # Restores originals before commit
     ├── post-commit             # Re-applies overrides after commit
+    ├── local-override-filter-smudge   # Filter: applies local content on checkout
+    ├── local-override-filter-clean    # Filter: presents original content to git
     └── local-override-lib.sh   # Shared functions
 ```
 
