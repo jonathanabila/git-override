@@ -447,8 +447,9 @@ test_hooks_skip_without_config() {
     git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
     git update-index --no-skip-worktree config.yaml 2>/dev/null || true
 
-    # Restore original content
-    git checkout HEAD -- CLAUDE.md config.yaml
+    # Restore original content deterministically (bypass smudge filter)
+    git show "HEAD:CLAUDE.md" > CLAUDE.md
+    git show "HEAD:config.yaml" > config.yaml
 
     # Make a change and commit
     echo "No config test" >> README.md
