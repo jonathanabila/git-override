@@ -171,7 +171,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jonathanabila/git-override
-    rev: v0.1.0  # Use latest version
+    rev: v0.2.0  # Use latest version
     hooks:
       - id: local-override-pre-commit
       - id: local-override-post-commit
@@ -199,7 +199,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 <summary>📌 Pin to Specific Version</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.1.0/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.2.0/scripts/install.sh | bash
 ```
 
 </details>
@@ -595,14 +595,20 @@ git-local-override/
 │   └── git-local-override
 ├── hooks/                        # Git hook scripts
 │   ├── local-override-lib.sh     # Shared library
+│   ├── local-override-filter-smudge   # Smudge filter (checkout)
+│   ├── local-override-filter-clean    # Clean filter (staging)
 │   ├── local-override-post-checkout
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
-├── scripts/                      # Installation scripts
+├── scripts/                      # Installation and release scripts
 │   ├── install.sh
-│   └── uninstall.sh
+│   ├── uninstall.sh
+│   └── release.sh
 ├── tests/                        # Test suite
-│   └── run-tests.sh
+│   ├── run-tests.sh              # Unit tests
+│   ├── run-docker.sh             # Docker test launcher
+│   ├── docker/                   # Docker test infrastructure
+│   └── integration/              # Integration tests
 ├── .pre-commit-hooks.yaml        # Pre-commit hook definitions
 └── docs/
     └── DESIGN.md

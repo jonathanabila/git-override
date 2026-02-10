@@ -19,23 +19,41 @@ git-local-override/
 │   ├── local-override-post-checkout
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
-├── scripts/                      # Installation scripts
+├── scripts/                      # Installation and release scripts
 │   ├── install.sh
-│   └── uninstall.sh
+│   ├── uninstall.sh
+│   └── release.sh                # Changelog version assignment
 ├── tests/                        # Test suite
 │   ├── run-tests.sh              # Main test runner
+│   ├── run-docker.sh             # Docker test launcher
+│   ├── docker/                   # Docker test infrastructure
+│   │   ├── Dockerfile            # Ubuntu test image
+│   │   ├── Dockerfile.bash3      # Bash 3.2 compatibility image
+│   │   └── entrypoint.sh
 │   └── integration/              # Integration tests
 │       ├── test-install.sh       # Install/uninstall tests
 │       ├── test-git-ops.sh       # Git operations tests
 │       └── test-precommit.sh     # Pre-commit framework tests
+├── .github/                      # GitHub configuration
+│   ├── workflows/
+│   │   ├── test.yml              # CI test workflow
+│   │   └── release.yml           # Automated release workflow
+│   ├── ISSUE_TEMPLATE/           # Issue templates
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   ├── CODEOWNERS
+│   └── dependabot.yml
 ├── docs/                         # Additional documentation
-│   └── DESIGN.md                 # Original design specification
+│   └── DESIGN.md                 # Original design specification (v0.0.1, obsolete)
 ├── .pre-commit-hooks.yaml        # Pre-commit integration definitions
 ├── .pre-commit-config.yaml       # Pre-commit hooks for this repo
+├── .editorconfig                 # Editor configuration
+├── .gitattributes                # Line ending configuration
 ├── Makefile                      # Build automation
 ├── README.md                     # User documentation
 ├── CONTRIBUTING.md               # Contributor guidelines
 ├── CHANGELOG.md                  # Version history
+├── SECURITY.md                   # Security policy
+├── CODE_OF_CONDUCT.md            # Contributor code of conduct
 └── LICENSE                       # MIT license
 ```
 

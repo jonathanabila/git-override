@@ -4,7 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.0.x   | :white_check_mark: |
+| 0.2.x   | :white_check_mark: |
+| 0.1.x   | :white_check_mark: |
+| 0.0.x   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -61,5 +63,5 @@ We will not pursue legal action against researchers who follow these guidelines.
 4. **Use version pinning** when installing via curl to ensure reproducible installs:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.0.3/scripts/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.2.0/scripts/install.sh | bash
    ```

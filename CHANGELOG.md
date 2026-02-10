@@ -343,6 +343,7 @@ files:
 
 ## Version History
 
+- **0.2.0** - Skip-worktree, filter drivers, seamless branch switching
 - **0.1.0** - Multi-target overrides with new config format (BREAKING)
 - **0.0.7** - Custom override file naming via pattern field
 - **0.0.6** - GitHub Actions release workflow

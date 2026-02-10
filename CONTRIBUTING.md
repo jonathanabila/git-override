@@ -48,9 +48,10 @@ git-local-override/
 │   ├── local-override-post-commit
 │   ├── local-override-filter-smudge   # Smudge filter (checkout)
 │   └── local-override-filter-clean    # Clean filter (staging)
-├── scripts/                      # Installation scripts
+├── scripts/                      # Installation and release scripts
 │   ├── install.sh
-│   └── uninstall.sh
+│   ├── uninstall.sh
+│   └── release.sh                # Changelog version assignment
 ├── tests/                        # Test suite
 │   ├── run-tests.sh              # Main test runner (unit tests)
 │   ├── run-docker.sh             # Docker test launcher
@@ -62,6 +63,10 @@ git-local-override/
 │       ├── test-install.sh       # Install/uninstall tests
 │       ├── test-git-ops.sh       # Git operations tests
 │       └── test-precommit.sh     # Pre-commit framework tests
+├── .github/                      # GitHub configuration
+│   ├── workflows/                # CI and release workflows
+│   ├── ISSUE_TEMPLATE/           # Issue templates
+│   └── PULL_REQUEST_TEMPLATE.md
 ├── docs/                         # Additional documentation
 │   └── DESIGN.md                 # Historical design (v0.0.1)
 ├── .pre-commit-hooks.yaml        # Pre-commit integration definitions
@@ -293,12 +298,17 @@ Include:
 
 ## Release Process
 
-Maintainers only:
+Releases are automated via GitHub Actions:
 
-1. Update version in relevant files
-2. Update CHANGELOG.md with release notes
-3. Create git tag: `git tag -a v0.0.X -m "Release v0.0.X"`
-4. Push tag: `git push origin v0.0.X`
+1. Ensure all changes are in the `[Unreleased]` section of CHANGELOG.md
+2. Go to **Actions** → **Release** workflow → **Run workflow**
+3. Enter the version number (e.g., `0.2.1`)
+4. The workflow will:
+   - Run `scripts/release.sh` to update CHANGELOG.md
+   - Commit, tag, and push
+   - Create a GitHub Release with release notes
+
+For manual releases (if needed): `./scripts/release.sh <version>`
 
 ## Questions?
 
