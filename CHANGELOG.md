@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-09
+
 ### Fixed
 
 - **Flaky test elimination**: Fixed `test_hooks_skip_without_config` in `tests/integration/test-git-ops.sh` by using `git show "HEAD:file" > file` instead of `git checkout HEAD --` to bypass smudge filter and ensure deterministic test behavior
@@ -350,6 +352,7 @@ files:
 - **0.0.2** - Config-driven architecture
 - **0.0.1** - Initial release with full feature set
 
+[0.2.0]: https://github.com/jonathanabila/git-override/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jonathanabila/git-override/compare/v0.0.7...v0.1.0
 [0.0.7]: https://github.com/jonathanabila/git-override/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/jonathanabila/git-override/compare/v0.0.5...v0.0.6
