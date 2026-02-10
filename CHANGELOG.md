@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Both filters support passthrough mode and `GIT_LOCAL_OVERRIDE_DISABLE=1`
 - **Filter helper commands**: Added CLI subcommands `filter-smudge` and `filter-clean`
   - Mirrors hook filter behavior for direct invocation and testing
+- **sync-filters CLI command**: Added `git-local-override sync-filters` to manually sync filter configuration
+  - Regenerates `.git/info/attributes` from `.local-overrides.yaml`
+  - Configures git filter driver if not already set up
+  - Useful for fixing out-of-sync filter state
+- **GIT_LOCAL_OVERRIDE_DISABLE environment variable**: Bypass filter drivers when set to 1
+  - Allows getting true original content with `GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- <file>`
+  - Documented in CLI help and README
 
 ### Changed
 
@@ -29,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Branch switching with divergent overridden files**: Fixed checkout/switch failures when overridden files differ between branches
+  - Filter drivers now make git consider overridden files "clean" via clean(smudge(X)) == X roundtrip
+  - Works across all git operations: checkout, switch, pull, merge, rebase, stash
+  - Resolves "Your local changes would be overwritten by checkout" errors
 - **Test compatibility with skip-worktree**: Fixed integration tests failing due to skip-worktree
   - Tests now clear skip-worktree before `git add` or `git checkout` operations
   - Affected tests: git operations and pre-commit framework integration tests
