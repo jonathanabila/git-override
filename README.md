@@ -306,7 +306,9 @@ git-local-override uses **smudge/clean filter drivers** (the same mechanism used
 - **Clean** (on staging): Presents original content from `HEAD` to git
 - **Result**: Git operations work seamlessly—checkout, switch, pull, merge, rebase, stash all succeed
 
-Filter drivers are configured automatically during installation in `.git/info/attributes` (local-only, not tracked in `.gitattributes`). Hooks and filters work together: filters handle content transformation, hooks manage skip-worktree.
+Filter drivers are configured automatically during installation in `.git/info/attributes` (local-only, not tracked in `.gitattributes`).
+The filter commands use worktree-safe absolute paths so linked worktrees (`git worktree add`) work correctly.
+Hooks and filters work together: filters handle content transformation, hooks manage skip-worktree.
 
 ---
 
@@ -535,6 +537,9 @@ git config --local filter.local-override.clean
 cat .git/info/attributes
 ```
 
+In linked worktrees, relative filter commands like `.git/hooks/...` fail because `.git` is a file in worktree directories.
+Run `git-local-override sync-filters` to migrate to the worktree-safe absolute-path configuration.
+
 </details>
 
 <details>
@@ -566,7 +571,7 @@ This is because the curl method installs hooks directly to `.git/hooks/` at inst
 | `.git/hooks/local-override-lib.sh` | Shared library | Common functions for hooks |
 | `.git/hooks/*.chained` | Backup | Your existing hooks (preserved) |
 | `.git/info/attributes` | Filter config | Maps files to filter driver (local only) |
-| `git config filter.local-override.*` | Git config | Filter driver configuration |
+| `git config filter.local-override.*` | Git config | Filter commands pointing to absolute hook script paths |
 | `~/.config/git/ignore` | Gitignore patterns | Ignores `*.local.*` files globally |
 
 With `--global`: Also installs to `~/.config/git/template/hooks/` for new repos.

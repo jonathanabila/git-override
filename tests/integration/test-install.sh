@@ -388,6 +388,18 @@ EOF
         return 1
     fi
 
+    if [[ "$smudge_cmd" == .git/hooks/* ]]; then
+        fail "Filter smudge command uses legacy relative .git/hooks path"
+        return 1
+    fi
+
+    if [[ "$smudge_cmd" == /* ]]; then
+        pass "Filter smudge command uses absolute path"
+    else
+        fail "Filter smudge command is not absolute (got: '$smudge_cmd')"
+        return 1
+    fi
+
     # Check filter.local-override.clean is configured
     local clean_cmd
     clean_cmd=$(git config --local filter.local-override.clean 2>/dev/null || echo "")
@@ -395,6 +407,18 @@ EOF
         pass "Filter clean command configured"
     else
         fail "Filter clean command not configured (got: '$clean_cmd')"
+        return 1
+    fi
+
+    if [[ "$clean_cmd" == .git/hooks/* ]]; then
+        fail "Filter clean command uses legacy relative .git/hooks path"
+        return 1
+    fi
+
+    if [[ "$clean_cmd" == /* ]]; then
+        pass "Filter clean command uses absolute path"
+    else
+        fail "Filter clean command is not absolute (got: '$clean_cmd')"
         return 1
     fi
 

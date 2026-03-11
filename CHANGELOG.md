@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Linked worktree filter failures**: Filter driver commands now use worktree-safe absolute hook script paths instead of relative `.git/hooks/...` paths
+  - Fixes `git worktree add` failures like `local-override-filter-smudge: Not a directory` when `.git` is a file in linked worktrees
+  - `git-local-override sync-filters` now repairs legacy filter config by rewriting old relative commands
+
+### Changed
+
+- **Installer filter configuration**:
+  - `scripts/install.sh --repo` now installs hooks into the common git hooks directory and configures local filter commands with absolute paths
+  - `scripts/install.sh --global` now configures global filter commands with absolute template hook paths
+
+### Added
+
+- **Regression coverage for worktree-safe filter paths**:
+  - Added integration test for `git worktree add` with filters enabled
+  - Added test coverage that install writes absolute filter command paths
+  - Added test coverage that `sync-filters` migrates legacy `.git/hooks/...` filter config
+
 ## [0.2.0] - 2026-02-09
 
 ### Fixed

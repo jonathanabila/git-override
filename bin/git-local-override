@@ -61,6 +61,35 @@ get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null || die "Not in a git repository"
 }
 
+# Get git common directory as an absolute path
+get_common_git_dir() {
+    local repo_root="$1"
+    local common_git_dir
+
+    common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    [[ -n "$common_git_dir" ]] || die "Unable to resolve git common directory"
+
+    if [[ "$common_git_dir" != /* ]]; then
+        common_git_dir="$repo_root/$common_git_dir"
+    fi
+
+    echo "$common_git_dir"
+}
+
+get_attributes_file_path() {
+    local repo_root="$1"
+    local attributes_path
+
+    attributes_path="$(git -C "$repo_root" rev-parse --git-path info/attributes 2>/dev/null || echo "")"
+    [[ -n "$attributes_path" ]] || die "Unable to resolve git attributes path"
+
+    if [[ "$attributes_path" != /* ]]; then
+        attributes_path="$repo_root/$attributes_path"
+    fi
+
+    echo "$attributes_path"
+}
+
 # Read the pattern field from config file
 # Returns the pattern string, or empty if not found
 read_pattern() {
@@ -503,11 +532,13 @@ cmd_list() {
 sync_attributes() {
     local repo_root="$1"
     local config_file="$repo_root/.local-overrides.yaml"
-    local attributes_file="$repo_root/.git/info/attributes"
+    local attributes_file
     local temp_file
+
+    attributes_file="$(get_attributes_file_path "$repo_root")"
     temp_file="$(mktemp)"
 
-    mkdir -p "$repo_root/.git/info"
+    mkdir -p "$(dirname "$attributes_file")"
 
     # Preserve existing non-local-override entries
     if [[ -f "$attributes_file" ]]; then
@@ -747,6 +778,12 @@ cmd_restore() {
 
 cmd_sync_filters() {
     local repo_root
+    local common_git_dir
+    local expected_smudge
+    local expected_clean
+    local filter_smudge
+    local filter_clean
+
     repo_root="$(get_repo_root)"
 
     if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
@@ -760,14 +797,18 @@ cmd_sync_filters() {
 
     info "Syncing filter driver configuration..."
 
-    # Configure git filter if not already configured
-    local filter_smudge
-    filter_smudge="$(git -C "$repo_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
+    # Configure git filter if missing or legacy relative path
+    common_git_dir="$(get_common_git_dir "$repo_root")"
+    expected_smudge="$common_git_dir/hooks/local-override-filter-smudge %f"
+    expected_clean="$common_git_dir/hooks/local-override-filter-clean %f"
 
-    if [[ -z "$filter_smudge" ]]; then
+    filter_smudge="$(git -C "$repo_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
+    filter_clean="$(git -C "$repo_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
+
+    if [[ "$filter_smudge" != "$expected_smudge" || "$filter_clean" != "$expected_clean" ]]; then
         info "Configuring filter driver..."
-        git -C "$repo_root" config --local filter.local-override.smudge ".git/hooks/local-override-filter-smudge %f"
-        git -C "$repo_root" config --local filter.local-override.clean ".git/hooks/local-override-filter-clean %f"
+        git -C "$repo_root" config --local filter.local-override.smudge "$expected_smudge"
+        git -C "$repo_root" config --local filter.local-override.clean "$expected_clean"
         git -C "$repo_root" config --local filter.local-override.required false
         success "Filter driver configured"
     else
@@ -778,8 +819,10 @@ cmd_sync_filters() {
     sync_attributes "$repo_root"
 
     # Count filtered files
-    local attributes_file="$repo_root/.git/info/attributes"
+    local attributes_file
     local filter_count=0
+
+    attributes_file="$(get_attributes_file_path "$repo_root")"
     if [[ -f "$attributes_file" ]]; then
         filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null || echo "0")
     fi

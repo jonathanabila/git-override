@@ -937,6 +937,33 @@ test_filter_non_configured_file_passthrough() {
     fi
 }
 
+test_sync_filters_migrates_legacy_hook_paths() {
+    info "Testing sync-filters migrates legacy .git/hooks filter paths..."
+    cd "$TEST_REPO"
+    create_config
+
+    git config --local filter.local-override.smudge ".git/hooks/local-override-filter-smudge %f"
+    git config --local filter.local-override.clean ".git/hooks/local-override-filter-clean %f"
+
+    git-local-override sync-filters >/dev/null
+
+    local smudge_cmd
+    local clean_cmd
+    smudge_cmd=$(git config --local filter.local-override.smudge 2>/dev/null || echo "")
+    clean_cmd=$(git config --local filter.local-override.clean 2>/dev/null || echo "")
+
+    if [[ "$smudge_cmd" == .git/hooks/* || "$clean_cmd" == .git/hooks/* ]]; then
+        fail "sync-filters did not migrate legacy relative paths"
+        return
+    fi
+
+    if [[ "$smudge_cmd" == /* && "$clean_cmd" == /* ]]; then
+        pass "sync-filters migrated to absolute worktree-safe filter paths"
+    else
+        fail "sync-filters did not set absolute filter paths"
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -994,6 +1021,7 @@ main() {
     test_filter_disable_env_var
     test_filter_no_head_passthrough
     test_filter_non_configured_file_passthrough
+    test_sync_filters_migrates_legacy_hook_paths
 
     echo ""
     echo "========================================"

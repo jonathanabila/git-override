@@ -84,9 +84,15 @@ EOF
     git add .local-overrides.yaml
     git commit -q -m "Add local-overrides config"
 
-    # Configure git filter driver
-    git config --local filter.local-override.smudge ".git/hooks/local-override-filter-smudge %f"
-    git config --local filter.local-override.clean ".git/hooks/local-override-filter-clean %f"
+    # Configure git filter driver using worktree-safe common git dir paths
+    local common_git_dir
+    common_git_dir=$(git rev-parse --git-common-dir)
+    if [[ "$common_git_dir" != /* ]]; then
+        common_git_dir="$TEST_DIR/$common_git_dir"
+    fi
+
+    git config --local filter.local-override.smudge "$common_git_dir/hooks/local-override-filter-smudge %f"
+    git config --local filter.local-override.clean "$common_git_dir/hooks/local-override-filter-clean %f"
     git config --local filter.local-override.required false
 
     # Create .git/info/attributes for filter
@@ -894,6 +900,43 @@ test_disable_env_var_allows_restore() {
     git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
 }
 
+test_worktree_add_with_filters() {
+    info "Testing git worktree add works with filters..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    local worktree_branch="worktree-filter-test-branch"
+    local worktree_dir="$TEST_DIR/worktrees/worktree-filter-test"
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    rm -rf "$worktree_dir"
+    mkdir -p "$TEST_DIR/worktrees"
+    git branch -D "$worktree_branch" 2>/dev/null || true
+
+    local output
+    output=$(git worktree add -b "$worktree_branch" "$worktree_dir" "$default_branch" 2>&1)
+    local status=$?
+
+    if [[ $status -ne 0 ]]; then
+        fail "git worktree add failed: $output"
+        git worktree remove -f "$worktree_dir" 2>/dev/null || true
+        git branch -D "$worktree_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    if [[ -d "$worktree_dir" ]]; then
+        pass "git worktree add succeeded with filters configured"
+    else
+        fail "Worktree directory was not created"
+        git branch -D "$worktree_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    git worktree remove -f "$worktree_dir" 2>/dev/null || true
+    git branch -D "$worktree_branch" 2>/dev/null || true
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -930,6 +973,7 @@ main() {
     test_filter_and_hooks_coexist
     test_no_override_file_normal_checkout
     test_disable_env_var_allows_restore
+    test_worktree_add_with_filters
 
     cleanup
 

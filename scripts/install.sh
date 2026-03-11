@@ -81,6 +81,24 @@ get_cli_content() {
     fi
 }
 
+# Resolve git common directory as an absolute path
+get_common_git_dir() {
+    local repo_root="$1"
+    local common_git_dir
+
+    common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    if [[ -z "$common_git_dir" ]]; then
+        error "Unable to resolve git common directory"
+        exit 1
+    fi
+
+    if [[ "$common_git_dir" != /* ]]; then
+        common_git_dir="$repo_root/$common_git_dir"
+    fi
+
+    echo "$common_git_dir"
+}
+
 # Read config file and output list of target|override pairs
 # Output format: target|override (one line per target file)
 read_config_pairs() {
@@ -167,11 +185,22 @@ install_filter_scripts_to_dir() {
 sync_attributes() {
     local repo_root="$1"
     local config_file="$repo_root/.local-overrides.yaml"
-    local attributes_file="$repo_root/.git/info/attributes"
+    local attributes_file
     local temp_file
+
+    attributes_file="$(git -C "$repo_root" rev-parse --git-path info/attributes 2>/dev/null || echo "")"
+    if [[ -z "$attributes_file" ]]; then
+        error "Unable to resolve git attributes path"
+        exit 1
+    fi
+
+    if [[ "$attributes_file" != /* ]]; then
+        attributes_file="$repo_root/$attributes_file"
+    fi
+
     temp_file="$(mktemp)"
 
-    mkdir -p "$repo_root/.git/info"
+    mkdir -p "$(dirname "$attributes_file")"
 
     if [[ -f "$attributes_file" ]]; then
         local line
@@ -227,12 +256,19 @@ $target"
 install_filters() {
     local repo_root="$1"
     local hooks_dir="$2"
+    local common_git_dir
+    local smudge_script
+    local clean_script
 
     info "Installing filter driver scripts..."
     install_filter_scripts_to_dir "$hooks_dir"
 
-    git -C "$repo_root" config --local filter.local-override.smudge ".git/hooks/local-override-filter-smudge %f"
-    git -C "$repo_root" config --local filter.local-override.clean ".git/hooks/local-override-filter-clean %f"
+    common_git_dir="$(get_common_git_dir "$repo_root")"
+    smudge_script="$common_git_dir/hooks/local-override-filter-smudge"
+    clean_script="$common_git_dir/hooks/local-override-filter-clean"
+
+    git -C "$repo_root" config --local filter.local-override.smudge "$smudge_script %f"
+    git -C "$repo_root" config --local filter.local-override.clean "$clean_script %f"
     git -C "$repo_root" config --local filter.local-override.required false
     success "Configured local filter.local-override"
 
@@ -298,13 +334,18 @@ EOF
 # Install to current repository
 install_to_repo() {
     local repo_root
+    local common_git_dir
+    local hooks_dir
+    local lib_dir
+
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
         error "Not in a git repository"
         exit 1
     }
 
-    local hooks_dir="$repo_root/.git/hooks"
-    local lib_dir="$repo_root/.git/hooks"
+    common_git_dir="$(get_common_git_dir "$repo_root")"
+    hooks_dir="$common_git_dir/hooks"
+    lib_dir="$common_git_dir/hooks"
 
     info "Installing hooks to repository: $repo_root"
     install_hooks_to_dir "$hooks_dir" "$lib_dir"
@@ -325,8 +366,8 @@ install_to_template() {
     git config --global init.templateDir "${XDG_CONFIG_HOME:-$HOME/.config}/git/template"
     success "Configured git template directory"
 
-    git config --global filter.local-override.smudge ".git/hooks/local-override-filter-smudge %f"
-    git config --global filter.local-override.clean ".git/hooks/local-override-filter-clean %f"
+    git config --global filter.local-override.smudge "$template_dir/local-override-filter-smudge %f"
+    git config --global filter.local-override.clean "$template_dir/local-override-filter-clean %f"
     git config --global filter.local-override.required false
     success "Configured global filter.local-override"
 
