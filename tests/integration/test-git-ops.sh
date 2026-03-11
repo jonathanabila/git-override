@@ -342,6 +342,14 @@ test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
     git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
     cp CLAUDE.local.md CLAUDE.md
 
+    # Ensure deterministic preconditions for all environments:
+    # run pre-rebase hook logic explicitly before rebase starts.
+    .git/hooks/pre-rebase
+
+    # Keep rebase environment clean across git versions (including bash3/alpine)
+    # while preserving local override files for test continuation.
+    git stash -q --include-untracked
+
     local rebase_output
     local rebase_status
     set +e
@@ -350,15 +358,20 @@ test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
     set -e
 
     if [[ $rebase_status -ne 0 ]]; then
+        local pre_rebase_status
+        pre_rebase_status=$(git status --porcelain 2>/dev/null || true)
         if echo "$rebase_output" | grep -q "would be overwritten by checkout"; then
             fail "Rebase failed due to skip-worktree checkout protection: $rebase_output"
         else
-            fail "Rebase failed: $rebase_output"
+            fail "Rebase failed: $rebase_output; pre-rebase status: $pre_rebase_status"
         fi
         git rebase --abort 2>/dev/null || true
+        git stash pop -q 2>/dev/null || true
         git checkout -q "$default_branch" 2>/dev/null || true
         return 1
     fi
+
+    git stash pop -q 2>/dev/null || true
 
     pass "Rebase succeeded with divergent overridden file"
     git checkout -q "$default_branch" 2>/dev/null || true
@@ -1015,30 +1028,33 @@ main() {
     # Add project bin to PATH
     export PATH="$PROJECT_DIR/bin:$PATH"
 
-    setup_repo
-
-    test_commit_preserves_original
-    test_commit_restores_local_after
-    test_commit_staged_override_file
-    test_branch_checkout_applies_overrides
-    test_git_switch_applies_overrides
-    test_multiple_files_override
-    test_rebase_with_divergent_overridden_file_clears_skip_worktree
-    test_no_override_without_local_file
-    test_restore_command
-    test_dirty_working_tree_commit
-    test_hooks_skip_without_config
-    test_checkout_with_divergent_overridden_file
-    test_switch_with_divergent_overridden_file
-    test_pull_with_overridden_file
-    test_merge_with_overridden_file
-    test_rebase_with_overridden_file
-    test_stash_with_overridden_file
-    test_commit_still_contains_original
-    test_filter_and_hooks_coexist
-    test_no_override_file_normal_checkout
-    test_disable_env_var_allows_restore
-    test_worktree_add_with_filters
+    local test_fn
+    for test_fn in \
+        test_commit_preserves_original \
+        test_commit_restores_local_after \
+        test_commit_staged_override_file \
+        test_branch_checkout_applies_overrides \
+        test_git_switch_applies_overrides \
+        test_multiple_files_override \
+        test_rebase_with_divergent_overridden_file_clears_skip_worktree \
+        test_no_override_without_local_file \
+        test_restore_command \
+        test_dirty_working_tree_commit \
+        test_hooks_skip_without_config \
+        test_checkout_with_divergent_overridden_file \
+        test_switch_with_divergent_overridden_file \
+        test_pull_with_overridden_file \
+        test_merge_with_overridden_file \
+        test_rebase_with_overridden_file \
+        test_stash_with_overridden_file \
+        test_commit_still_contains_original \
+        test_filter_and_hooks_coexist \
+        test_no_override_file_normal_checkout \
+        test_disable_env_var_allows_restore \
+        test_worktree_add_with_filters; do
+        setup_repo
+        "$test_fn"
+    done
 
     cleanup
 

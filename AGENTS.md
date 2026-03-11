@@ -196,6 +196,14 @@ make test-docker-unit     # Unit tests only
 make test-docker-install  # Install/uninstall tests
 make test-docker-gitops   # Git operations tests
 make test-docker-precommit # Pre-commit integration tests
+
+# Match CI matrix before committing (required)
+make test-docker          # All Docker suites (Linux CI equivalent)
+make test-docker-bash3    # Bash compatibility suite (Bash 3.2 CI equivalent)
+
+# If developing on macOS, also run native suites to mirror macOS CI job
+make test
+tests/integration/test-install.sh && tests/integration/test-git-ops.sh && tests/integration/test-precommit.sh
 ```
 
 ### Running Tests Locally (Quick Check Only)
@@ -209,6 +217,14 @@ make test
 # Clean test artifacts
 make clean
 ```
+
+### Pre-commit CI parity requirement
+
+Before creating any commit, run the full local CI-equivalent suite and ensure all pass:
+
+- `make test-docker`
+- `make test-docker-bash3`
+- On macOS: `make test` plus all integration scripts in `tests/integration/`
 
 ### Writing Tests
 
