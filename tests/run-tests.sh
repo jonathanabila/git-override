@@ -70,6 +70,7 @@ setup() {
     cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
     cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
     cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit
+    cp "$PROJECT_DIR/hooks/local-override-pre-rebase" .git/hooks/pre-rebase
     cp "$PROJECT_DIR/hooks/local-override-filter-smudge" .git/hooks/
     cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/
     chmod +x .git/hooks/*

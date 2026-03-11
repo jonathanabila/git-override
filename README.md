@@ -176,12 +176,13 @@ repos:
       - id: local-override-pre-commit
       - id: local-override-post-commit
       - id: local-override-post-checkout
+      - id: local-override-pre-rebase
 ```
 
 Then install:
 
 ```bash
-pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout
+pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout --hook-type pre-rebase
 ```
 
 </details>
@@ -282,9 +283,11 @@ The magic happens through git hooks that run automatically:
 | `git checkout` | post-checkout | Applies local overrides to working tree |
 | `git checkout` | filter driver (smudge) | Transparently applies local override content |
 | `git pull` | post-checkout | Applies local overrides after merge |
+| `git rebase` | pre-rebase | Clears skip-worktree and restores originals before rebase checkout/detach |
 | `git commit` | pre-commit | Restores originals, stages them |
 | `git add` / staging | filter driver (clean) | Presents original content to git index |
 | After commit | post-commit | Re-applies local overrides |
+
 
 ### Skip-Worktree Integration
 
@@ -453,6 +456,7 @@ GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
 ├── CLAUDE.local.md             # Your local version (gitignored)
 └── .git/hooks/
     ├── post-checkout           # Applies overrides after checkout
+    ├── pre-rebase              # Clears skip-worktree before rebase
     ├── pre-commit              # Restores originals before commit
     ├── post-commit             # Re-applies overrides after commit
     ├── local-override-filter-smudge   # Filter: applies local content on checkout
@@ -540,6 +544,9 @@ cat .git/info/attributes
 In linked worktrees, relative filter commands like `.git/hooks/...` fail because `.git` is a file in worktree directories.
 Run `git-local-override sync-filters` to migrate to the worktree-safe absolute-path configuration.
 
+If failures happen specifically during rebase and mention files like `AGENTS.md`/`CLAUDE.md` being overwritten by checkout,
+ensure your install includes the `pre-rebase` hook. Re-run install or pre-commit install with `--hook-type pre-rebase`.
+
 </details>
 
 <details>
@@ -564,6 +571,7 @@ This is because the curl method installs hooks directly to `.git/hooks/` at inst
 | Location | What | Purpose |
 |----------|------|---------|
 | `.git/hooks/pre-commit` | Hook script | Restores originals before commit |
+| `.git/hooks/pre-rebase` | Hook script | Clears skip-worktree before rebase |
 | `.git/hooks/post-commit` | Hook script | Re-applies overrides after commit |
 | `.git/hooks/post-checkout` | Hook script | Applies overrides after checkout |
 | `.git/hooks/local-override-filter-smudge` | Filter script | Applies local content on checkout |

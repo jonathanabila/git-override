@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pre-rebase protection hook**: Added `local-override-pre-rebase` to clear skip-worktree for configured targets before rebase
+  - Prevents rebase failures like `Your local changes ... would be overwritten by checkout` on overridden files
+  - Installed by `scripts/install.sh` and exposed via `.pre-commit-hooks.yaml` as `local-override-pre-rebase`
+
+### Fixed
+
+- **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set
+  - Test now simulates true upstream divergence using `GIT_LOCAL_OVERRIDE_DISABLE=1 git add` so filter-clean does not mask changes
+
 ### Fixed
 
 - **Linked worktree filter failures**: Filter driver commands now use worktree-safe absolute hook script paths instead of relative `.git/hooks/...` paths

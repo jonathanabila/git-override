@@ -65,6 +65,7 @@ setup_repo() {
     cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
     cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
     cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit
+    cp "$PROJECT_DIR/hooks/local-override-pre-rebase" .git/hooks/pre-rebase
     cp "$PROJECT_DIR/hooks/local-override-filter-smudge" .git/hooks/
     cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/
     chmod +x .git/hooks/*
@@ -175,7 +176,7 @@ test_commit_staged_override_file() {
     git update-index --no-skip-worktree CLAUDE.md
 
     echo "# TEMPORARY CHANGE - should be filtered" > CLAUDE.md
-    git add CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
 
     if ! git commit -q -m "Commit CLAUDE.md" 2>/dev/null; then
         info "No changes to commit (clean filter returned original)"
@@ -308,6 +309,59 @@ test_multiple_files_override() {
         fail "Some files lost local content after commit"
         return 1
     fi
+}
+
+test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
+    info "Testing rebase succeeds with divergent override when skip-worktree is set..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    git branch -D rebase-diverge-feature 2>/dev/null || true
+
+    # Feature branch with non-overridden change
+    git checkout -q -b rebase-diverge-feature
+    echo "feature-line" >> README.md
+    git add README.md
+    git commit -q -m "Feature commit for divergent rebase"
+
+    # Main branch changes overridden file content in git history
+    git checkout -q "$default_branch"
+    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
+    echo "# Upstream CLAUDE update" > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Upstream updates CLAUDE"
+
+    # Back to feature branch with local override active + skip-worktree set
+    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout -q rebase-diverge-feature
+    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+    cp CLAUDE.local.md CLAUDE.md
+
+    local rebase_output
+    local rebase_status
+    set +e
+    rebase_output=$(git rebase "$default_branch" 2>&1)
+    rebase_status=$?
+    set -e
+
+    if [[ $rebase_status -ne 0 ]]; then
+        if echo "$rebase_output" | grep -q "would be overwritten by checkout"; then
+            fail "Rebase failed due to skip-worktree checkout protection: $rebase_output"
+        else
+            fail "Rebase failed: $rebase_output"
+        fi
+        git rebase --abort 2>/dev/null || true
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    pass "Rebase succeeded with divergent overridden file"
+    git checkout -q "$default_branch" 2>/dev/null || true
 }
 
 test_no_override_without_local_file() {
@@ -462,8 +516,12 @@ test_hooks_skip_without_config() {
     git add README.md
     git commit -q -m "No config commit"
 
-    # Files should still have original content (not local)
-    if grep -q "Original CLAUDE.md content" CLAUDE.md; then
+    # Files should still match tracked content from HEAD (not local override content)
+    local expected_content
+    local actual_content
+    expected_content=$(GIT_LOCAL_OVERRIDE_DISABLE=1 git show "HEAD:CLAUDE.md" 2>/dev/null || echo "")
+    actual_content=$(cat CLAUDE.md 2>/dev/null || echo "")
+    if [[ "$actual_content" == "$expected_content" ]] && [[ "$actual_content" != *"MY LOCAL"* ]]; then
         pass "Hooks gracefully handle missing config"
     else
         fail "Hooks modified files without config"
@@ -788,6 +846,9 @@ test_commit_still_contains_original() {
     git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
     cp CLAUDE.local.md CLAUDE.md
 
+    local claude_before
+    claude_before=$(git show HEAD:CLAUDE.md 2>/dev/null || echo "")
+
     echo "Test change for commit test" >> README.md
     git add README.md
     git commit -q -m "Test commit with filters"
@@ -795,8 +856,8 @@ test_commit_still_contains_original() {
     local committed_claude
     committed_claude=$(git show HEAD:CLAUDE.md 2>/dev/null || echo "")
 
-    if echo "$committed_claude" | grep -q "Original CLAUDE.md content"; then
-        pass "Committed content is original (not local override)"
+    if [[ "$committed_claude" == "$claude_before" ]]; then
+        pass "Committed content unchanged for CLAUDE.md (not local override)"
     else
         fail "Committed content contains local override"
         echo "Committed: $committed_claude"
@@ -886,9 +947,12 @@ test_disable_env_var_allows_restore() {
 
     git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
 
+    local expected_content
+    expected_content=$(git show HEAD:CLAUDE.md 2>/dev/null || echo "")
+
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
 
-    if grep -q "Original CLAUDE.md content" CLAUDE.md; then
+    if [[ "$(cat CLAUDE.md 2>/dev/null || echo "")" == "$expected_content" ]]; then
         pass "GIT_LOCAL_OVERRIDE_DISABLE=1 restored true original"
     else
         fail "GIT_LOCAL_OVERRIDE_DISABLE=1 did not restore original"
@@ -959,6 +1023,7 @@ main() {
     test_branch_checkout_applies_overrides
     test_git_switch_applies_overrides
     test_multiple_files_override
+    test_rebase_with_divergent_overridden_file_clears_skip_worktree
     test_no_override_without_local_file
     test_restore_command
     test_dirty_working_tree_commit

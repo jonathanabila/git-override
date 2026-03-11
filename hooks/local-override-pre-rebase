@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#
+# local-override-pre-rebase
+#
+# Clears skip-worktree flags and restores original content before rebase
+# so checkout/detach operations inside rebase are not blocked.
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=local-override-lib.sh
+source "$SCRIPT_DIR/local-override-lib.sh"
+
+main() {
+    local repo_root
+    repo_root="$(get_repo_root)" || exit 0
+
+    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
+        exit 0
+    fi
+
+    if ! validate_config "$repo_root"; then
+        exit 1
+    fi
+
+    local entry target
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+        target="${entry%%|*}"
+
+        # Always clear skip-worktree for rebase safety
+        git -C "$repo_root" update-index --no-skip-worktree "$target" 2>/dev/null || true
+
+        # Restore tracked original content to avoid checkout overwrite failures
+        # when local override content differs from branch history.
+        if git -C "$repo_root" cat-file -e "HEAD:$target" 2>/dev/null; then
+            mkdir -p "$(dirname "$repo_root/$target")"
+            GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" show "HEAD:$target" > "$repo_root/$target" 2>/dev/null || true
+        fi
+    done < <(read_config "$repo_root")
+
+    exit 0
+}
+
+main "$@"

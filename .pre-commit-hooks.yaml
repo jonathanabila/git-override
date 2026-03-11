@@ -10,8 +10,9 @@
 #         - id: local-override-pre-commit
 #         - id: local-override-post-commit
 #         - id: local-override-post-checkout
+#         - id: local-override-pre-rebase
 #
-# Then run: pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout
+# Then run: pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout --hook-type pre-rebase
 
 - id: local-override-pre-commit
   name: Restore originals before commit
@@ -37,5 +38,14 @@
   entry: hooks/local-override-post-checkout
   language: script
   stages: [post-checkout]
+  always_run: true
+  pass_filenames: false
+
+- id: local-override-pre-rebase
+  name: Clear skip-worktree before rebase
+  description: Clears skip-worktree and restores originals for override targets so rebase checkout operations can proceed
+  entry: hooks/local-override-pre-rebase
+  language: script
+  stages: [pre-rebase]
   always_run: true
   pass_filenames: false

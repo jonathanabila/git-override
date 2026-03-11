@@ -290,7 +290,7 @@ install_hooks_to_dir() {
     success "Installed: $lib_dir/local-override-lib.sh"
 
     # Install each hook
-    for hook_type in post-checkout pre-commit post-commit; do
+    for hook_type in post-checkout pre-commit post-commit pre-rebase; do
         local hook_file="$hooks_dir/$hook_type"
         local our_hook="local-override-$hook_type"
 

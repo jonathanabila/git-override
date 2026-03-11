@@ -96,6 +96,14 @@ repos:
         stages: [post-checkout]
         always_run: true
         pass_filenames: false
+
+      - id: local-override-pre-rebase
+        name: Clear skip-worktree before rebase
+        entry: $PROJECT_DIR/hooks/local-override-pre-rebase
+        language: script
+        stages: [pre-rebase]
+        always_run: true
+        pass_filenames: false
 EOF
 
     # Copy the lib file to where hooks expect it
@@ -131,7 +139,8 @@ test_precommit_install() {
     if pre-commit install \
         --hook-type pre-commit \
         --hook-type post-commit \
-        --hook-type post-checkout; then
+        --hook-type post-checkout \
+        --hook-type pre-rebase; then
         pass "pre-commit install succeeded"
     else
         fail "pre-commit install failed"
@@ -141,7 +150,8 @@ test_precommit_install() {
     # Verify hooks were created
     if [[ -f ".git/hooks/pre-commit" ]] &&
        [[ -f ".git/hooks/post-commit" ]] &&
-       [[ -f ".git/hooks/post-checkout" ]]; then
+       [[ -f ".git/hooks/post-checkout" ]] &&
+       [[ -f ".git/hooks/pre-rebase" ]]; then
         pass "All hook files created"
     else
         fail "Some hook files missing"
@@ -188,7 +198,8 @@ test_precommit_commit_flow() {
     pre-commit install \
         --hook-type pre-commit \
         --hook-type post-commit \
-        --hook-type post-checkout 2>/dev/null || true
+        --hook-type post-checkout \
+        --hook-type pre-rebase 2>/dev/null || true
 
     # Apply local content
     echo "# MY LOCAL CLAUDE.md - commit flow test" > CLAUDE.local.md

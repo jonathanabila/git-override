@@ -17,6 +17,7 @@ git-local-override/
 │   ├── local-override-filter-smudge   # Smudge filter (checkout)
 │   ├── local-override-filter-clean    # Clean filter (staging)
 │   ├── local-override-post-checkout
+│   ├── local-override-pre-rebase
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
 ├── scripts/                      # Installation and release scripts
@@ -277,6 +278,15 @@ Called before commit. Key behavior:
 - Restores original content from git
 - Re-stages the restored content
 
+### `hooks/local-override-pre-rebase`
+
+Called before `git rebase`. Key behavior:
+
+- Clears skip-worktree on configured target files
+- Restores original tracked content for configured targets before rebase starts
+- Prevents rebase checkout/detach failures like "local changes would be overwritten by checkout"
+- Fast exit if no config file
+
 ### `hooks/local-override-post-commit`
 
 Called after commit. Re-applies local overrides.
@@ -352,6 +362,9 @@ bash -x bin/git-local-override add file.md
 
 # Manually run pre-commit hook
 .git/hooks/pre-commit
+
+# Manually run pre-rebase hook
+.git/hooks/pre-rebase
 
 # Manually run post-commit hook
 .git/hooks/post-commit
