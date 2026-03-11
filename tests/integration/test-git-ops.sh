@@ -339,16 +339,13 @@ test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
     git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout -q rebase-diverge-feature
+    # Remove local override files to avoid environment-specific rebase guards
+    # around untracked files; this test only validates divergent tracked target
+    # behavior with skip-worktree set.
+    rm -f CLAUDE.local.md config.local.yaml
+
     git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
-    cp CLAUDE.local.md CLAUDE.md
-
-    # Ensure deterministic preconditions for all environments:
-    # run pre-rebase hook logic explicitly before rebase starts.
-    .git/hooks/pre-rebase
-
-    # Keep rebase environment clean across git versions (including bash3/alpine)
-    # while preserving local override files for test continuation.
-    git stash -q --include-untracked
+    echo "# MY LOCAL CLAUDE.md - customized for rebase test" > CLAUDE.md
 
     local rebase_output
     local rebase_status
@@ -366,12 +363,9 @@ test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
             fail "Rebase failed: $rebase_output; pre-rebase status: $pre_rebase_status"
         fi
         git rebase --abort 2>/dev/null || true
-        git stash pop -q 2>/dev/null || true
         git checkout -q "$default_branch" 2>/dev/null || true
         return 1
     fi
-
-    git stash pop -q 2>/dev/null || true
 
     pass "Rebase succeeded with divergent overridden file"
     git checkout -q "$default_branch" 2>/dev/null || true
