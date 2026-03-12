@@ -560,6 +560,20 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 
 This is because the curl method installs hooks directly to `.git/hooks/` at install time. Unlike pre-commit, which manages hooks dynamically, the curl method requires manual reinstallation to pick up new hooks.
 
+Re-running `install.sh` is the supported upgrade path and is safe:
+
+- managed wrapper hooks are refreshed in place
+- existing `*.chained` backups of your hooks are preserved
+- filter config and `.git/info/attributes` managed entries are re-synced
+
+If you want to remove curl-installed repo state, run uninstall from inside that repository:
+
+```bash
+./scripts/uninstall.sh
+```
+
+Uninstall restores `.chained` hooks only when it is safe, and preserves newer unmanaged hooks with a warning.
+
 **Note:** If you're using pre-commit for installation, hooks are updated automatically when you run `pre-commit install` or when pre-commit auto-updates.
 
 </details>

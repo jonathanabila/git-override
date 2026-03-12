@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Safe reinstall TDD plan document**: Added `docs/safe-reinstall-tdd-plan.md` with the ownership model, red/green/refactor workflow, TODO checklist, and regression tests for making reinstall a supported upgrade path
+
+- **Safe reinstall/uninstall regression coverage**: Expanded `tests/integration/test-install.sh` with focused upgrade/removal scenarios
+  - Adds reinstall refresh checks for managed `pre-commit` and `pre-rebase` wrappers
+  - Adds chained-hook preservation checks across reinstall
+  - Adds stale managed artifact pruning coverage for reinstall ownership boundaries
+  - Adds uninstall safety checks for restoring chained hooks only when canonical wrappers are still managed
+  - Adds global uninstall coverage for removing `filter.local-override.*` and template `pre-rebase` artifacts
+  - Adds linked-worktree uninstall coverage using git-resolved paths
+
 - **Agent work order for test isolation migration**: Added `docs/test-isolation-agent-work-order.md` with execution rules, phase order, validation workflow, and failure-classification requirements for implementation agents
 
 - **Test isolation helper library scaffold**: Added `tests/test-lib.sh` for phase 1 of the test isolation migration
@@ -25,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Installed by `scripts/install.sh` and exposed via `.pre-commit-hooks.yaml` as `local-override-pre-rebase`
 
 ### Changed
+
+- **Installer hook ownership model**: `scripts/install.sh` now uses an exact managed-wrapper marker (`# git-local-override-managed-hook: <hook>`) for ownership detection
+  - Reinstall now refreshes managed wrappers in place instead of skipping existing hook files
+  - Existing `.chained` backups are preserved across reinstall
+  - Reinstall prunes stale managed helper artifacts left by older installer layouts (for example `local-override-pre-rebase`)
+  - Ambiguous unmanaged states with an existing `.chained` file are preserved with warnings instead of being overwritten
+
+- **README upgrade guidance**: Documented that rerunning `install.sh` is the safe supported upgrade path and that repo uninstall should be run from inside each affected repository
+  - Clarifies reinstall behavior for managed wrappers, chained backups, and filter/attributes resync
+  - Clarifies uninstall safety behavior when unmanaged hooks are present
 
 - **Git-ops integration isolation**: Migrated `tests/integration/test-git-ops.sh` to phase 2 per-test isolation using `tests/test-lib.sh`
   - Builds one suite seed repo, clones a fresh test repo per case, and gives each case its own temp `HOME` and `XDG_CONFIG_HOME`
@@ -49,6 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `make test-docker-bash3` now runs each supported suite in its own container invocation to keep Docker validation aligned with per-suite isolation goals
 
 ### Fixed
+
+- **Uninstall symmetry and safety**: `scripts/uninstall.sh` now reconciles managed state using exact marker ownership checks
+  - Restores `<hook>.chained` only when canonical hooks are still managed wrappers
+  - Preserves newer unmanaged canonical hooks and warns on ambiguous states
+  - Removes repository hooks/filters using git-resolved paths (`git rev-parse --git-common-dir`, `git rev-parse --git-path info/attributes`) for linked-worktree compatibility
+  - Removes global `filter.local-override.*` config during uninstall
+  - Cleans global template `pre-rebase` wrapper/artifacts alongside other managed template files
 
 - **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set
   - Test now simulates true upstream divergence using `GIT_LOCAL_OVERRIDE_DISABLE=1 git add` so filter-clean does not mask changes

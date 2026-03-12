@@ -37,6 +37,10 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Exact marker used to identify installer-managed wrapper hooks.
+# Ownership checks MUST use this marker (not fuzzy matching).
+MANAGED_HOOK_MARKER_PREFIX="# git-local-override-managed-hook:"
+
 info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 success() { echo -e "${GREEN}[OK]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -79,6 +83,70 @@ get_cli_content() {
     else
         curl -fsSL "$REMOTE_BASE/bin/git-local-override"
     fi
+}
+
+managed_hook_marker_line() {
+    local hook_type="$1"
+    printf '%s %s' "$MANAGED_HOOK_MARKER_PREFIX" "$hook_type"
+}
+
+is_managed_wrapper_hook() {
+    local hook_file="$1"
+    local hook_type="$2"
+    local marker
+
+    [[ -f "$hook_file" ]] || return 1
+    marker="$(managed_hook_marker_line "$hook_type")"
+    grep -qxF "$marker" "$hook_file" 2>/dev/null
+}
+
+append_chain_logic() {
+    local hook_file="$1"
+
+    cat >> "$hook_file" << 'EOF'
+
+# Chain to existing hook
+if [[ -x "${BASH_SOURCE[0]}.chained" ]]; then
+    exec "${BASH_SOURCE[0]}.chained" "$@"
+fi
+EOF
+}
+
+write_managed_wrapper_hook() {
+    local hook_file="$1"
+    local hook_type="$2"
+    local hook_content="$3"
+    local marker
+
+    marker="$(managed_hook_marker_line "$hook_type")"
+
+    printf '%s\n' "$hook_content" > "$hook_file"
+    printf '%s\n' "$marker" >> "$hook_file"
+
+    if [[ -f "$hook_file.chained" ]]; then
+        append_chain_logic "$hook_file"
+    fi
+
+    chmod +x "$hook_file"
+}
+
+prune_stale_managed_artifacts() {
+    local hooks_dir="$1"
+    local artifact
+
+    # Older installer versions could leave these helper-style artifacts behind.
+    # They are not used by the current wrapper model and should be pruned on reinstall.
+    for artifact in \
+        local-override-post-checkout \
+        local-override-pre-commit \
+        local-override-post-commit \
+        local-override-pre-rebase; do
+        local artifact_file="$hooks_dir/$artifact"
+        if [[ -f "$artifact_file" ]]; then
+            rm "$artifact_file"
+            info "Removed stale managed artifact: $artifact"
+        fi
+    done
 }
 
 # Resolve git common directory as an absolute path
@@ -283,6 +351,8 @@ install_hooks_to_dir() {
     mkdir -p "$hooks_dir"
     mkdir -p "$lib_dir"
 
+    prune_stale_managed_artifacts "$hooks_dir"
+
     # Install the shared library
     info "Installing shared library..."
     get_lib_content > "$lib_dir/local-override-lib.sh"
@@ -299,33 +369,26 @@ install_hooks_to_dir() {
         hook_content="$(get_hook_content "$our_hook")"
 
         if [[ -f "$hook_file" ]]; then
-            # Check if already installed
-            if grep -q "local-override" "$hook_file" 2>/dev/null; then
-                info "Hook already installed: $hook_type"
+            if is_managed_wrapper_hook "$hook_file" "$hook_type"; then
+                info "Refreshing managed hook: $hook_type"
+                write_managed_wrapper_hook "$hook_file" "$hook_type" "$hook_content"
+                success "Installed $hook_type hook"
                 continue
             fi
 
-            # HOOK CHAINING: Preserve existing hooks by renaming to .chained
+            # HOOK CHAINING: Preserve existing unmanaged hooks by renaming to .chained
             # Our hook runs first, then calls the chained hook with same args.
             # This ensures compatibility with other tools (husky, pre-commit, etc.)
+            if [[ -f "$hook_file.chained" ]]; then
+                warn "Ambiguous state for $hook_type: unmanaged hook with existing $hook_type.chained; preserving both"
+                continue
+            fi
+
             mv "$hook_file" "$hook_file.chained"
             info "Preserved existing $hook_type hook as $hook_type.chained"
         fi
 
-        # Write our hook
-        echo "$hook_content" > "$hook_file"
-        chmod +x "$hook_file"
-
-        # Add chaining logic if there's an existing hook
-        if [[ -f "$hook_file.chained" ]]; then
-            cat >> "$hook_file" << 'EOF'
-
-# Chain to existing hook
-if [[ -x "${BASH_SOURCE[0]}.chained" ]]; then
-    exec "${BASH_SOURCE[0]}.chained" "$@"
-fi
-EOF
-        fi
+        write_managed_wrapper_hook "$hook_file" "$hook_type" "$hook_content"
 
         success "Installed $hook_type hook"
     done

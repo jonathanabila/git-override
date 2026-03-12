@@ -89,6 +89,57 @@ create_test_repo() {
     git commit -q -m "Initial commit"
 }
 
+managed_hook_marker_for_test() {
+    local hook_type="$1"
+    printf '# git-local-override-managed-hook: %s\n' "$hook_type"
+}
+
+get_common_hooks_dir_for_repo() {
+    local repo_dir="$1"
+    local common_git_dir
+
+    common_git_dir="$(git -C "$repo_dir" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    if [[ -z "$common_git_dir" ]]; then
+        return 1
+    fi
+
+    if [[ "$common_git_dir" != /* ]]; then
+        common_git_dir="$repo_dir/$common_git_dir"
+    fi
+
+    printf '%s/hooks\n' "$common_git_dir"
+}
+
+get_hook_file_for_repo() {
+    local repo_dir="$1"
+    local hook_name="$2"
+    local hooks_dir
+
+    hooks_dir="$(get_common_hooks_dir_for_repo "$repo_dir")" || return 1
+    printf '%s/%s\n' "$hooks_dir" "$hook_name"
+}
+
+get_attributes_file_for_repo() {
+    local repo_dir="$1"
+    local attributes_file
+
+    attributes_file="$(git -C "$repo_dir" rev-parse --git-path info/attributes 2>/dev/null || echo "")"
+    if [[ -z "$attributes_file" ]]; then
+        return 1
+    fi
+
+    if [[ "$attributes_file" != /* ]]; then
+        attributes_file="$repo_dir/$attributes_file"
+    fi
+
+    printf '%s\n' "$attributes_file"
+}
+
+run_uninstall_non_interactive_capture() {
+    local output_file="$1"
+    printf 'n\nn\nn\nn\n' | "$PROJECT_DIR/scripts/uninstall.sh" > "$output_file" 2>&1
+}
+
 #------------------------------------------------------------------------------
 # Tests
 #------------------------------------------------------------------------------
@@ -201,6 +252,191 @@ test_install_idempotent() {
         pass "Hooks still functional after reinstall"
     else
         fail "Hooks broken after reinstall"
+        return 1
+    fi
+}
+
+test_reinstall_upgrades_managed_pre_commit_hook() {
+    info "Testing reinstall upgrades managed pre-commit hook..."
+
+    local repo_dir="$TEST_DIR/repo-reinstall-managed-pre-commit"
+    create_test_repo "$repo_dir"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-commit")" || {
+        fail "Unable to resolve pre-commit hook path"
+        return 1
+    }
+
+    echo "# STALE_MANAGED_PRE_COMMIT_SENTINEL" >> "$hook_file"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    if grep -q "STALE_MANAGED_PRE_COMMIT_SENTINEL" "$hook_file"; then
+        fail "Managed pre-commit hook was not refreshed on reinstall"
+        return 1
+    fi
+    pass "Managed pre-commit hook refreshed on reinstall"
+
+    local marker
+    marker="$(managed_hook_marker_for_test "pre-commit")"
+    if grep -qxF "$marker" "$hook_file"; then
+        pass "Managed pre-commit marker preserved"
+    else
+        fail "Managed pre-commit marker missing after reinstall"
+        return 1
+    fi
+
+    if [[ ! -f "$hook_file.chained" ]]; then
+        pass "Reinstall did not create extra pre-commit.chained"
+    else
+        fail "Unexpected pre-commit.chained created during managed reinstall"
+        return 1
+    fi
+}
+
+test_reinstall_upgrades_managed_pre_rebase_hook() {
+    info "Testing reinstall upgrades managed pre-rebase hook..."
+
+    local repo_dir="$TEST_DIR/repo-reinstall-managed-pre-rebase"
+    create_test_repo "$repo_dir"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-rebase")" || {
+        fail "Unable to resolve pre-rebase hook path"
+        return 1
+    }
+
+    echo "# STALE_MANAGED_PRE_REBASE_SENTINEL" >> "$hook_file"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    if grep -q "STALE_MANAGED_PRE_REBASE_SENTINEL" "$hook_file"; then
+        fail "Managed pre-rebase hook was not refreshed on reinstall"
+        return 1
+    fi
+    pass "Managed pre-rebase hook refreshed on reinstall"
+
+    local marker
+    marker="$(managed_hook_marker_for_test "pre-rebase")"
+    if grep -qxF "$marker" "$hook_file"; then
+        pass "Managed pre-rebase marker preserved"
+    else
+        fail "Managed pre-rebase marker missing after reinstall"
+        return 1
+    fi
+
+    if [[ ! -f "$hook_file.chained" ]]; then
+        pass "Reinstall did not create extra pre-rebase.chained"
+    else
+        fail "Unexpected pre-rebase.chained created during managed reinstall"
+        return 1
+    fi
+}
+
+test_reinstall_preserves_existing_chained_hook() {
+    info "Testing reinstall preserves existing chained hook..."
+
+    local repo_dir="$TEST_DIR/repo-reinstall-preserve-chained"
+    create_test_repo "$repo_dir"
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-commit")" || {
+        fail "Unable to resolve pre-commit hook path"
+        return 1
+    }
+
+    cat > "$hook_file" << 'EOF'
+#!/usr/bin/env bash
+echo "Original pre-commit hook content"
+EOF
+    chmod +x "$hook_file"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local chained_file="$hook_file.chained"
+    if [[ ! -f "$chained_file" ]]; then
+        fail "Pre-condition: pre-commit.chained was not created"
+        return 1
+    fi
+
+    local chained_before="$TEST_DIR/pre-commit.chained.before"
+    cp "$chained_file" "$chained_before"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    if [[ -f "$chained_file" ]]; then
+        pass "pre-commit.chained still exists after reinstall"
+    else
+        fail "pre-commit.chained missing after reinstall"
+        return 1
+    fi
+
+    if cmp -s "$chained_before" "$chained_file"; then
+        pass "pre-commit.chained content preserved"
+    else
+        fail "pre-commit.chained content changed during reinstall"
+        return 1
+    fi
+
+    local marker
+    marker="$(managed_hook_marker_for_test "pre-commit")"
+    if grep -qxF "$marker" "$hook_file"; then
+        pass "Canonical pre-commit remains managed after reinstall"
+    else
+        fail "Canonical pre-commit not managed after reinstall"
+        return 1
+    fi
+}
+
+test_reinstall_prunes_stale_managed_artifacts() {
+    info "Testing reinstall prunes stale managed artifacts without touching unmanaged hooks..."
+
+    local repo_dir="$TEST_DIR/repo-reinstall-prune-stale-managed"
+    create_test_repo "$repo_dir"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local hooks_dir
+    hooks_dir="$(get_common_hooks_dir_for_repo "$repo_dir")" || {
+        fail "Unable to resolve hooks directory"
+        return 1
+    }
+
+    local stale_managed_artifact="$hooks_dir/local-override-pre-rebase"
+    cat > "$stale_managed_artifact" << 'EOF'
+#!/usr/bin/env bash
+# stale managed artifact from previous installer version
+exit 0
+EOF
+    chmod +x "$stale_managed_artifact"
+
+    local unmanaged_hook="$hooks_dir/pre-push"
+    cat > "$unmanaged_hook" << 'EOF'
+#!/usr/bin/env bash
+echo "UNMANAGED_PRE_PUSH_CONTROL"
+EOF
+    chmod +x "$unmanaged_hook"
+
+    local unmanaged_before="$TEST_DIR/pre-push.before"
+    cp "$unmanaged_hook" "$unmanaged_before"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    if [[ -f "$stale_managed_artifact" ]]; then
+        fail "Stale managed artifact was not pruned on reinstall"
+        return 1
+    fi
+    pass "Stale managed artifact pruned on reinstall"
+
+    if [[ -f "$unmanaged_hook" ]] && cmp -s "$unmanaged_before" "$unmanaged_hook"; then
+        pass "Unmanaged control hook preserved unchanged"
+    else
+        fail "Unmanaged control hook was modified during reinstall"
         return 1
     fi
 }
@@ -342,6 +578,130 @@ test_uninstall_from_repo() {
         pass "CLI tool removed"
     else
         fail "CLI tool still exists"
+        return 1
+    fi
+}
+
+test_uninstall_restores_chained_hook_when_wrapper_is_managed() {
+    info "Testing uninstall restores chained hook for managed wrapper..."
+
+    local repo_dir="$TEST_DIR/repo-uninstall-restore-chained"
+    create_test_repo "$repo_dir"
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-commit")" || {
+        fail "Unable to resolve pre-commit hook path"
+        return 1
+    }
+
+    cat > "$hook_file" << 'EOF'
+#!/usr/bin/env bash
+echo "ORIGINAL_USER_PRE_COMMIT"
+EOF
+    chmod +x "$hook_file"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local chained_file="$hook_file.chained"
+    if [[ ! -f "$chained_file" ]]; then
+        fail "Pre-condition: pre-commit.chained missing after install"
+        return 1
+    fi
+
+    local marker
+    marker="$(managed_hook_marker_for_test "pre-commit")"
+    if ! grep -qxF "$marker" "$hook_file"; then
+        fail "Pre-condition: canonical pre-commit is not managed"
+        return 1
+    fi
+
+    local uninstall_output="$TEST_DIR/uninstall-restore-chained.log"
+    if ! run_uninstall_non_interactive_capture "$uninstall_output"; then
+        fail "Uninstall command failed"
+        cat "$uninstall_output" || true
+        return 1
+    fi
+
+    if [[ -f "$hook_file" ]]; then
+        pass "Canonical pre-commit exists after uninstall"
+    else
+        fail "Canonical pre-commit missing after uninstall"
+        return 1
+    fi
+
+    if grep -q "ORIGINAL_USER_PRE_COMMIT" "$hook_file"; then
+        pass "Uninstall restored original user pre-commit hook"
+    else
+        fail "Uninstall did not restore original user pre-commit hook"
+        return 1
+    fi
+
+    if [[ ! -f "$chained_file" ]]; then
+        pass "pre-commit.chained removed after restoration"
+    else
+        fail "pre-commit.chained still present after restoration"
+        return 1
+    fi
+}
+
+test_uninstall_does_not_overwrite_newer_user_hook() {
+    info "Testing uninstall preserves newer user hook when canonical is unmanaged..."
+
+    local repo_dir="$TEST_DIR/repo-uninstall-preserve-newer-user-hook"
+    create_test_repo "$repo_dir"
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-commit")" || {
+        fail "Unable to resolve pre-commit hook path"
+        return 1
+    }
+
+    cat > "$hook_file" << 'EOF'
+#!/usr/bin/env bash
+echo "ORIGINAL_USER_HOOK_BEFORE_INSTALL"
+EOF
+    chmod +x "$hook_file"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local chained_file="$hook_file.chained"
+    if [[ ! -f "$chained_file" ]]; then
+        fail "Pre-condition: pre-commit.chained missing after install"
+        return 1
+    fi
+
+    cat > "$hook_file" << 'EOF'
+#!/usr/bin/env bash
+echo "NEWER_USER_HOOK_AFTER_INSTALL"
+EOF
+    chmod +x "$hook_file"
+
+    local uninstall_output="$TEST_DIR/uninstall-preserve-newer-user-hook.log"
+    if ! run_uninstall_non_interactive_capture "$uninstall_output"; then
+        fail "Uninstall command failed"
+        cat "$uninstall_output" || true
+        return 1
+    fi
+
+    if grep -q "NEWER_USER_HOOK_AFTER_INSTALL" "$hook_file"; then
+        pass "Uninstall preserved newer unmanaged user hook"
+    else
+        fail "Uninstall overwrote newer unmanaged user hook"
+        return 1
+    fi
+
+    if [[ -f "$chained_file" ]]; then
+        pass "pre-commit.chained preserved for ambiguous uninstall state"
+    else
+        fail "pre-commit.chained was unexpectedly removed"
+        return 1
+    fi
+
+    if grep -qi "ambiguous" "$uninstall_output"; then
+        pass "Uninstall emitted ambiguous-state warning"
+    else
+        fail "Uninstall did not emit ambiguous-state warning"
+        cat "$uninstall_output" || true
         return 1
     fi
 }
@@ -584,6 +944,185 @@ EOF
     pass "Attributes file cleaned by uninstall"
 }
 
+test_global_uninstall_removes_global_filter_config() {
+    info "Testing global uninstall removes global filter config..."
+
+    local repo_dir="$TEST_DIR/repo-global-uninstall-filters"
+    create_test_repo "$repo_dir"
+
+    "$PROJECT_DIR/scripts/install.sh" --global
+
+    if git config --global filter.local-override.smudge >/dev/null 2>&1 &&
+       git config --global filter.local-override.clean >/dev/null 2>&1 &&
+       git config --global filter.local-override.required >/dev/null 2>&1; then
+        pass "Pre-condition: global filter config set"
+    else
+        fail "Pre-condition: global filter config missing after global install"
+        return 1
+    fi
+
+    local uninstall_output="$TEST_DIR/uninstall-global-filter-config.log"
+    if ! run_uninstall_non_interactive_capture "$uninstall_output"; then
+        fail "Uninstall command failed"
+        cat "$uninstall_output" || true
+        return 1
+    fi
+
+    if git config --global filter.local-override.smudge >/dev/null 2>&1; then
+        fail "Global smudge filter config still exists after uninstall"
+        return 1
+    fi
+
+    if git config --global filter.local-override.clean >/dev/null 2>&1; then
+        fail "Global clean filter config still exists after uninstall"
+        return 1
+    fi
+
+    if git config --global filter.local-override.required >/dev/null 2>&1; then
+        fail "Global required filter config still exists after uninstall"
+        return 1
+    fi
+
+    pass "Global filter.local-override.* config removed"
+}
+
+test_global_uninstall_removes_pre_rebase_artifacts() {
+    info "Testing global uninstall removes pre-rebase template artifacts..."
+
+    local repo_dir="$TEST_DIR/repo-global-uninstall-pre-rebase"
+    create_test_repo "$repo_dir"
+
+    "$PROJECT_DIR/scripts/install.sh" --global
+
+    local template_dir="$XDG_CONFIG_HOME/git/template/hooks"
+
+    if [[ -f "$template_dir/pre-rebase" ]]; then
+        pass "Pre-condition: template pre-rebase wrapper installed"
+    else
+        fail "Pre-condition: template pre-rebase wrapper missing"
+        return 1
+    fi
+
+    cat > "$template_dir/local-override-pre-rebase" << 'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "$template_dir/local-override-pre-rebase"
+
+    local uninstall_output="$TEST_DIR/uninstall-global-pre-rebase.log"
+    if ! run_uninstall_non_interactive_capture "$uninstall_output"; then
+        fail "Uninstall command failed"
+        cat "$uninstall_output" || true
+        return 1
+    fi
+
+    local managed_file
+    for managed_file in \
+        pre-commit \
+        post-commit \
+        post-checkout \
+        pre-rebase \
+        local-override-lib.sh \
+        local-override-filter-smudge \
+        local-override-filter-clean \
+        local-override-pre-rebase; do
+        if [[ -f "$template_dir/$managed_file" ]]; then
+            fail "Managed template artifact still exists after uninstall: $managed_file"
+            return 1
+        fi
+    done
+
+    pass "Managed template pre-rebase and related artifacts removed"
+}
+
+test_repo_uninstall_uses_git_resolved_paths_in_linked_worktree() {
+    info "Testing repo uninstall uses git-resolved paths in linked worktree..."
+
+    local main_repo="$TEST_DIR/repo-worktree-main"
+    create_test_repo "$main_repo"
+
+    cat > "$main_repo/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    echo "Base AGENTS content" > "$main_repo/AGENTS.md"
+    cd "$main_repo"
+    git add .local-overrides.yaml AGENTS.md
+    git commit -q -m "Add override config for linked worktree test"
+
+    local linked_repo="$TEST_DIR/repo-worktree-linked"
+    git -C "$main_repo" worktree add -q -b linked-worktree-branch "$linked_repo" HEAD
+
+    if [[ -f "$linked_repo/.git" ]]; then
+        pass "Linked worktree uses .git file (not directory)"
+    else
+        fail "Pre-condition: linked worktree .git should be a file"
+        return 1
+    fi
+
+    cd "$linked_repo"
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    if ! git config --local filter.local-override.smudge >/dev/null 2>&1; then
+        fail "Pre-condition: linked worktree filter config missing after install"
+        return 1
+    fi
+
+    local common_hooks_dir
+    common_hooks_dir="$(get_common_hooks_dir_for_repo "$linked_repo")" || {
+        fail "Unable to resolve common hooks directory for linked worktree"
+        return 1
+    }
+
+    if [[ ! -f "$common_hooks_dir/local-override-filter-smudge" ]] ||
+       [[ ! -f "$common_hooks_dir/local-override-filter-clean" ]]; then
+        fail "Pre-condition: linked worktree filter scripts missing from common hooks directory"
+        return 1
+    fi
+
+    local attributes_file
+    attributes_file="$(get_attributes_file_for_repo "$linked_repo")" || {
+        fail "Unable to resolve linked worktree attributes path"
+        return 1
+    }
+
+    if [[ ! -f "$attributes_file" ]] || ! grep -q "AGENTS.md filter=local-override" "$attributes_file"; then
+        fail "Pre-condition: linked worktree attributes missing managed filter entry"
+        return 1
+    fi
+
+    local uninstall_output="$TEST_DIR/uninstall-linked-worktree.log"
+    if ! run_uninstall_non_interactive_capture "$uninstall_output"; then
+        fail "Uninstall command failed from linked worktree"
+        cat "$uninstall_output" || true
+        return 1
+    fi
+
+    if git config --local filter.local-override.smudge >/dev/null 2>&1; then
+        fail "Linked worktree filter config still exists after uninstall"
+        return 1
+    fi
+    pass "Linked worktree filter config removed"
+
+    if [[ -f "$common_hooks_dir/local-override-filter-smudge" ]] ||
+       [[ -f "$common_hooks_dir/local-override-filter-clean" ]]; then
+        fail "Managed filter scripts were not removed from common hooks directory"
+        return 1
+    fi
+    pass "Managed filter scripts removed from common hooks directory"
+
+    if [[ -f "$attributes_file" ]] && grep -q "filter=local-override" "$attributes_file"; then
+        fail "Linked worktree attributes still contains managed filter entries"
+        cat "$attributes_file" || true
+        return 1
+    fi
+    pass "Linked worktree resolved attributes cleaned"
+}
+
 test_install_filter_scripts_executable() {
     info "Testing install creates executable filter scripts..."
 
@@ -649,15 +1188,24 @@ main() {
         test_install_to_repo \
         test_install_with_existing_hooks \
         test_install_idempotent \
+        test_reinstall_upgrades_managed_pre_commit_hook \
+        test_reinstall_upgrades_managed_pre_rebase_hook \
+        test_reinstall_preserves_existing_chained_hook \
+        test_reinstall_prunes_stale_managed_artifacts \
         test_install_global \
         test_install_cli \
         test_install_gitignore \
         test_uninstall_from_repo \
+        test_uninstall_restores_chained_hook_when_wrapper_is_managed \
+        test_uninstall_does_not_overwrite_newer_user_hook \
         test_new_repo_gets_hooks_after_global_install \
         test_install_configures_filter_driver \
         test_install_populates_attributes \
         test_install_idempotent_attributes \
         test_uninstall_removes_filter_config \
+        test_global_uninstall_removes_global_filter_config \
+        test_global_uninstall_removes_pre_rebase_artifacts \
+        test_repo_uninstall_uses_git_resolved_paths_in_linked_worktree \
         test_install_filter_scripts_executable; do
         CURRENT_TEST_NAME="$test_fn"
         setup
