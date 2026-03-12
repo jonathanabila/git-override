@@ -86,11 +86,16 @@ docker-build-bash3: ## Build the bash 3.2 compatibility test image
 
 test-docker: docker-build ## Run all tests in Docker
 	@echo "Running all tests in Docker..."
-	@docker run --rm $(DOCKER_IMAGE) all
+	@docker run --rm $(DOCKER_IMAGE) unit
+	@docker run --rm $(DOCKER_IMAGE) install
+	@docker run --rm $(DOCKER_IMAGE) gitops
+	@docker run --rm $(DOCKER_IMAGE) precommit
 
 test-docker-bash3: docker-build-bash3 ## Run tests with bash 3.2 (macOS compatibility)
 	@echo "Running tests with bash 3.2..."
-	@docker run --rm $(DOCKER_IMAGE_BASH3) unit install gitops
+	@docker run --rm $(DOCKER_IMAGE_BASH3) unit
+	@docker run --rm $(DOCKER_IMAGE_BASH3) install
+	@docker run --rm $(DOCKER_IMAGE_BASH3) gitops
 
 test-docker-unit: docker-build ## Run unit tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) unit

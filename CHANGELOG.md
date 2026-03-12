@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Builds one suite seed repo, clones a fresh repo per test case, and reinstalls hooks for each clone so tests no longer depend on prior repo mutations
   - Moves ad hoc temp-repo cleanup into per-test roots, including the no-HEAD filter case, while keeping each assertion's original behavior intact
 
+- **Docker suite orchestration**: Tightened phase 6 Docker test orchestration in `Makefile`
+  - `make test-docker` now runs unit, install, gitops, and pre-commit suites in separate container invocations instead of one shared `all` run
+  - `make test-docker-bash3` now runs each supported suite in its own container invocation to keep Docker validation aligned with per-suite isolation goals
+
 ### Fixed
 
 - **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set
