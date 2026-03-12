@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Archived design doc cleanup**: Replaced `docs/DESIGN.md` legacy deep-dive content with a concise archived-history note
+  - Removes obsolete implementation details and command examples that no longer apply
+  - Keeps stable references while directing readers to current authoritative docs
+
 - **Installer hook ownership model**: `scripts/install.sh` now uses an exact managed-wrapper marker (`# git-local-override-managed-hook: <hook>`) for ownership detection
   - Reinstall now refreshes managed wrappers in place instead of skipping existing hook files
   - Existing `.chained` backups are preserved across reinstall
