@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents rebase failures like `Your local changes ... would be overwritten by checkout` on overridden files
   - Installed by `scripts/install.sh` and exposed via `.pre-commit-hooks.yaml` as `local-override-pre-rebase`
 
+### Changed
+
+- **Git-ops integration isolation**: Migrated `tests/integration/test-git-ops.sh` to phase 2 per-test isolation using `tests/test-lib.sh`
+  - Builds one suite seed repo, clones a fresh test repo per case, and gives each case its own temp `HOME` and `XDG_CONFIG_HOME`
+  - Reconfigures hooks and filters per clone with `install_test_hooks` and `git-local-override sync-filters` so coverage stays aligned with real repo setup
+
+- **Local docs ignore rule**: Added `docs/` to `.gitignore` so local planning docs stay out of status by default
+
 ### Fixed
 
 - **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set

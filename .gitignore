@@ -23,5 +23,8 @@ tests/test-config/
 *.temp
 *.bak
 
+# Local planning docs
+docs/
+
 # Local tooling state
 .sisyphus/
