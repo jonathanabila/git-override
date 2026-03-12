@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent work order for test isolation migration**: Added `docs/test-isolation-agent-work-order.md` with execution rules, phase order, validation workflow, and failure-classification requirements for implementation agents
+
+- **Test isolation helper library scaffold**: Added `tests/test-lib.sh` for phase 1 of the test isolation migration
+  - Adds Bash 3.2-safe helpers for per-test temp roots, isolated `HOME`/`XDG_CONFIG_HOME`, seed repo cloning, hook installation, and optional failure artifact preservation
+
+- **Test isolation migration plan**: Added `docs/test-isolation-migration-plan.md` to define the phased move toward per-test repo isolation inside Docker-backed suite runs
+  - Documents the target seed-repo architecture, phased rollout order, and success criteria per suite
+  - Adds explicit failure triage rules so each migrated test failure is classified as pre-existing, expected, or a true regression
+
 - **Rebase TDD plan document**: Added `docs/rebase-regression-tdd-plan.md` to capture the regression scenario, test strategy, and implementation checklist for the override-file rebase bug
 
 - **Pre-rebase protection hook**: Added `local-override-pre-rebase` to clear skip-worktree for configured targets before rebase
