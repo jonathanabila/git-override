@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Builds one suite seed repo, clones a fresh repo per case, and gives each case isolated temp home/config state for pre-commit caches and hooks
   - Keeps pre-commit hook installation and local hook-library setup realistic while removing cross-test repository state
 
+- **Install integration isolation**: Migrated `tests/integration/test-install.sh` to phase 4 per-test isolation using `tests/test-lib.sh`
+  - Gives each install/uninstall case its own isolated temp workspace plus dedicated `HOME` and `XDG_CONFIG_HOME` for global git config and CLI install checks
+  - Resets global git config between isolated cases so template-dir and excludesfile assertions no longer depend on prior test state
+
 ### Fixed
 
 - **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set

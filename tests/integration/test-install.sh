@@ -14,7 +14,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEST_DIR="$SCRIPT_DIR/test-workspace"
+. "$SCRIPT_DIR/../test-lib.sh"
+
+TEST_DIR=""
+CURRENT_TEST_ROOT=""
+CURRENT_TEST_NAME=""
+CURRENT_TEST_STATUS=0
 
 # Colors
 RED='\033[0;31m'
@@ -40,7 +45,19 @@ info() {
 }
 
 cleanup() {
-    rm -rf "$TEST_DIR"
+    cd "$PROJECT_DIR"
+    finalize_current_test_root 0
+}
+
+finalize_current_test_root() {
+    local status="${1:-0}"
+
+    if [[ -n "$CURRENT_TEST_ROOT" ]]; then
+        cd "$PROJECT_DIR"
+        preserve_test_root_on_failure "$CURRENT_TEST_ROOT" "$CURRENT_TEST_NAME" "$status"
+        CURRENT_TEST_ROOT=""
+        TEST_DIR=""
+    fi
 }
 
 reset_git_config() {
@@ -50,14 +67,11 @@ reset_git_config() {
 }
 
 setup() {
-    cleanup
+    CURRENT_TEST_ROOT="$(create_test_root "install" "$CURRENT_TEST_NAME")"
+    CURRENT_TEST_STATUS=0
+    setup_test_env "$CURRENT_TEST_ROOT" "$PROJECT_DIR"
+    TEST_DIR="$CURRENT_TEST_ROOT/workspace"
     mkdir -p "$TEST_DIR"
-
-    # Override XDG and HOME to isolate global config
-    export XDG_CONFIG_HOME="$TEST_DIR/config"
-    export HOME="$TEST_DIR/home"
-    mkdir -p "$HOME/.local/bin"
-    mkdir -p "$XDG_CONFIG_HOME/git"
 
     # Ensure clean git config
     reset_git_config
@@ -628,23 +642,40 @@ main() {
     echo "========================================"
     echo ""
 
-    # Run setup before all tests
-    setup
+    trap 'reset_git_config; finalize_current_test_root "${CURRENT_TEST_STATUS:-0}"' EXIT
 
-    # Run tests (each may change directory, so we track that)
-    test_install_to_repo
-    test_install_with_existing_hooks
-    test_install_idempotent
-    test_install_global
-    test_install_cli
-    test_install_gitignore
-    test_uninstall_from_repo
-    test_new_repo_gets_hooks_after_global_install
-    test_install_configures_filter_driver
-    test_install_populates_attributes
-    test_install_idempotent_attributes
-    test_uninstall_removes_filter_config
-    test_install_filter_scripts_executable
+    local test_fn
+    for test_fn in \
+        test_install_to_repo \
+        test_install_with_existing_hooks \
+        test_install_idempotent \
+        test_install_global \
+        test_install_cli \
+        test_install_gitignore \
+        test_uninstall_from_repo \
+        test_new_repo_gets_hooks_after_global_install \
+        test_install_configures_filter_driver \
+        test_install_populates_attributes \
+        test_install_idempotent_attributes \
+        test_uninstall_removes_filter_config \
+        test_install_filter_scripts_executable; do
+        CURRENT_TEST_NAME="$test_fn"
+        setup
+
+        set +e
+        "$test_fn"
+        CURRENT_TEST_STATUS=$?
+        set -e
+
+        if [[ $CURRENT_TEST_STATUS -ne 0 ]]; then
+            reset_git_config
+            finalize_current_test_root "$CURRENT_TEST_STATUS"
+            exit "$CURRENT_TEST_STATUS"
+        fi
+
+        reset_git_config
+        finalize_current_test_root 0
+    done
 
     # Cleanup
     reset_git_config
