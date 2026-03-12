@@ -6,8 +6,14 @@ set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$TESTS_DIR")"
-TEST_REPO="$TESTS_DIR/test-repo"
-export XDG_CONFIG_HOME="$TESTS_DIR/test-config"
+. "$TESTS_DIR/test-lib.sh"
+
+TEST_REPO=""
+SUITE_ROOT=""
+SUITE_SEED_REPO=""
+CURRENT_TEST_ROOT=""
+CURRENT_TEST_NAME=""
+CURRENT_TEST_STATUS=0
 export PATH="$PROJECT_DIR/bin:$PATH"
 
 # Colors
@@ -26,7 +32,7 @@ pass() {
 
 fail() {
     echo -e "${RED}[FAIL]${NC} $*"
-    # Don't exit immediately, continue running tests
+    CURRENT_TEST_STATUS=1
 }
 
 info() {
@@ -38,12 +44,35 @@ info() {
 # Setup
 #------------------------------------------------------------------------------
 
-setup() {
+finalize_current_test_root() {
+    local status="${1:-0}"
+
+    if [[ -n "$CURRENT_TEST_ROOT" ]]; then
+        cd "$PROJECT_DIR"
+        preserve_test_root_on_failure "$CURRENT_TEST_ROOT" "$CURRENT_TEST_NAME" "$status"
+        CURRENT_TEST_ROOT=""
+        TEST_REPO=""
+    fi
+}
+
+cleanup() {
+    cd "$PROJECT_DIR"
+    finalize_current_test_root "${CURRENT_TEST_STATUS:-0}"
+
+    if [[ -n "$SUITE_ROOT" ]]; then
+        cleanup_test_root "$SUITE_ROOT"
+        SUITE_ROOT=""
+        SUITE_SEED_REPO=""
+    fi
+}
+
+setup_suite_seed() {
     echo "Setting up test environment..."
 
-    # Clean and recreate test repo
-    rm -rf "$TEST_REPO"
-    mkdir -p "$TEST_REPO"
+    SUITE_ROOT="$(create_test_root "run-tests" "suite-seed")"
+    TEST_REPO="$SUITE_ROOT/repo"
+    SUITE_SEED_REPO="$SUITE_ROOT/artifacts/seed.git"
+
     cd "$TEST_REPO"
 
     git init -q
@@ -60,22 +89,21 @@ setup() {
     git add .
     git commit -q -m "Initial commit"
 
-    # Reset XDG config (for global gitignore)
-    rm -rf "$XDG_CONFIG_HOME"
-    mkdir -p "$XDG_CONFIG_HOME/git"
+    create_seed_repo "$TEST_REPO" "$SUITE_SEED_REPO"
 
-    # Install hooks using the install script approach (copy hooks directly)
-    mkdir -p .git/hooks
-    cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
-    cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
-    cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit
-    cp "$PROJECT_DIR/hooks/local-override-pre-rebase" .git/hooks/pre-rebase
-    cp "$PROJECT_DIR/hooks/local-override-filter-smudge" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/
-    chmod +x .git/hooks/*
+    cd "$PROJECT_DIR"
 
     echo -e "${GREEN}[OK]${NC} Test environment setup complete"
+}
+
+setup_test_case() {
+    CURRENT_TEST_ROOT="$(create_test_root "run-tests" "$CURRENT_TEST_NAME")"
+    CURRENT_TEST_STATUS=0
+    setup_test_env "$CURRENT_TEST_ROOT" "$PROJECT_DIR"
+
+    clone_seed_repo "$SUITE_SEED_REPO" "$TEST_REPO"
+    install_test_hooks "$TEST_REPO" "$PROJECT_DIR"
+    cd "$TEST_REPO"
 }
 
 create_config() {
@@ -169,6 +197,7 @@ test_override_is_applied() {
     info "Testing override is applied..."
 
     cd "$TEST_REPO"
+    create_config
 
     # Modify the local file
     echo "# My LOCAL CLAUDE.md content" > CLAUDE.local.md
@@ -188,6 +217,10 @@ test_git_status_after_override() {
     info "Testing git status hides file with skip-worktree..."
 
     cd "$TEST_REPO"
+    create_config
+
+    echo "# STATUS LOCAL CONTENT" > CLAUDE.local.md
+    git-local-override apply >/dev/null
 
     # Git should NOT see the file as modified (skip-worktree hides it)
     local status
@@ -204,6 +237,10 @@ test_restore_originals() {
     info "Testing restore command..."
 
     cd "$TEST_REPO"
+
+    create_config
+    echo "# LOCAL CONTENT TO RESTORE" > CLAUDE.local.md
+    git-local-override apply >/dev/null
 
     git-local-override restore
 
@@ -223,6 +260,7 @@ test_list_overrides() {
 
     # Re-apply override so we have an active one
     echo "# LOCAL" > CLAUDE.local.md
+    git-local-override apply >/dev/null
 
     local output
     output=$(git-local-override list)
@@ -240,6 +278,9 @@ test_remove_override() {
 
     cd "$TEST_REPO"
 
+    create_config
+    echo "# LOCAL REMOVE CONTENT" > CLAUDE.local.md
+
     # Remove the CLAUDE.md override (but keep the local file)
     git-local-override remove CLAUDE.md
 
@@ -256,7 +297,7 @@ test_remove_with_delete() {
 
     cd "$TEST_REPO"
 
-    # Ensure local file exists
+    create_config
     echo "# LOCAL" > CLAUDE.local.md
 
     # Remove with delete flag
@@ -862,8 +903,7 @@ test_filter_no_head_passthrough() {
     cd "$TEST_REPO"
 
     # Create a fresh repo with no commits
-    local temp_repo="$TESTS_DIR/test-no-head"
-    rm -rf "$temp_repo"
+    local temp_repo="$CURRENT_TEST_ROOT/no-head-repo"
     mkdir -p "$temp_repo"
     cd "$temp_repo"
 
@@ -871,18 +911,13 @@ test_filter_no_head_passthrough() {
     git config user.email "test@test.com"
     git config user.name "Test User"
 
-    # Install hooks
-    mkdir -p .git/hooks
-    cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/ 2>/dev/null || true
-    chmod +x .git/hooks/* 2>/dev/null || true
+    install_test_hooks "$temp_repo" "$PROJECT_DIR"
 
     local clean_script=".git/hooks/local-override-filter-clean"
 
     if [[ ! -f "$clean_script" ]]; then
         fail "Clean filter script not found (expected - not implemented yet)"
         cd "$TEST_REPO"
-        rm -rf "$temp_repo"
         return
     fi
 
@@ -907,7 +942,6 @@ EOF
     fi
 
     cd "$TEST_REPO"
-    rm -rf "$temp_repo"
 }
 
 test_filter_non_configured_file_passthrough() {
@@ -970,59 +1004,73 @@ test_sync_filters_migrates_legacy_hook_paths() {
 #------------------------------------------------------------------------------
 
 main() {
+    local test_fn
+    local test_exit
+
     echo ""
     echo "========================================"
     echo "  git-local-override Test Suite"
     echo "========================================"
     echo ""
 
-    setup
+    trap cleanup EXIT
+
+    setup_suite_seed
 
     echo ""
     echo "Running tests..."
     echo ""
 
-    test_cli_help
-    test_init_config
-    test_list_no_config
-    test_add_override
-    test_override_is_applied
-    test_git_status_after_override
-    test_restore_originals
-    test_list_overrides
-    test_remove_override
-    test_remove_with_delete
-    test_nested_override
-    test_post_checkout_hook
-    test_pre_commit_hook
-    test_post_commit_hook
-    test_status_command
-    test_no_override_when_no_local_file
-    test_file_not_in_config_error
-    test_hooks_check_for_config
+    for test_fn in \
+        test_cli_help \
+        test_init_config \
+        test_list_no_config \
+        test_add_override \
+        test_override_is_applied \
+        test_git_status_after_override \
+        test_restore_originals \
+        test_list_overrides \
+        test_remove_override \
+        test_remove_with_delete \
+        test_nested_override \
+        test_post_checkout_hook \
+        test_pre_commit_hook \
+        test_post_commit_hook \
+        test_status_command \
+        test_no_override_when_no_local_file \
+        test_file_not_in_config_error \
+        test_hooks_check_for_config \
+        test_custom_pattern \
+        test_missing_pattern_error \
+        test_init_config_has_pattern \
+        test_list_shows_pattern \
+        test_multi_target_override \
+        test_multi_target_pre_commit_restores_all \
+        test_duplicate_target_error \
+        test_list_shows_grouped_targets \
+        test_filter_smudge_applies_override \
+        test_filter_smudge_passthrough \
+        test_filter_clean_returns_original \
+        test_filter_clean_passthrough \
+        test_filter_roundtrip \
+        test_filter_disable_env_var \
+        test_filter_no_head_passthrough \
+        test_filter_non_configured_file_passthrough \
+        test_sync_filters_migrates_legacy_hook_paths; do
+        CURRENT_TEST_NAME="$test_fn"
+        setup_test_case
 
-    # Pattern and format tests
-    test_custom_pattern
-    test_missing_pattern_error
-    test_init_config_has_pattern
-    test_list_shows_pattern
+        set +e
+        "$test_fn"
+        test_exit=$?
+        set -e
 
-    # Multi-target tests
-    test_multi_target_override
-    test_multi_target_pre_commit_restores_all
-    test_duplicate_target_error
-    test_list_shows_grouped_targets
+        if [[ $test_exit -ne 0 && $CURRENT_TEST_STATUS -eq 0 ]]; then
+            fail "${test_fn} exited with status $test_exit"
+        fi
 
-    # Filter tests (smudge/clean)
-    test_filter_smudge_applies_override
-    test_filter_smudge_passthrough
-    test_filter_clean_returns_original
-    test_filter_clean_passthrough
-    test_filter_roundtrip
-    test_filter_disable_env_var
-    test_filter_no_head_passthrough
-    test_filter_non_configured_file_passthrough
-    test_sync_filters_migrates_legacy_hook_paths
+        finalize_current_test_root "$CURRENT_TEST_STATUS"
+    done
 
     echo ""
     echo "========================================"

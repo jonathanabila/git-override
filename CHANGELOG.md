@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Gives each install/uninstall case its own isolated temp workspace plus dedicated `HOME` and `XDG_CONFIG_HOME` for global git config and CLI install checks
   - Resets global git config between isolated cases so template-dir and excludesfile assertions no longer depend on prior test state
 
+- **Unit-style suite isolation**: Migrated `tests/run-tests.sh` to phase 5 per-test isolation using `tests/test-lib.sh`
+  - Builds one suite seed repo, clones a fresh repo per test case, and reinstalls hooks for each clone so tests no longer depend on prior repo mutations
+  - Moves ad hoc temp-repo cleanup into per-test roots, including the no-HEAD filter case, while keeping each assertion's original behavior intact
+
 ### Fixed
 
 - **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set
