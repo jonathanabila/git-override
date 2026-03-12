@@ -14,20 +14,27 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local file_path="${1:-}"
+    local stdin_tmp=""
+
+    stdin_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-clean.XXXXXX")"
+    cat > "$stdin_tmp"
 
     if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
-        cat
+        cat "$stdin_tmp"
+        rm -f "$stdin_tmp"
         return 0
     fi
 
     local repo_root
     repo_root="$(get_repo_root)" || {
-        cat
+        cat "$stdin_tmp"
+        rm -f "$stdin_tmp"
         return 0
     }
 
     if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
-        cat
+        cat "$stdin_tmp"
+        rm -f "$stdin_tmp"
         return 0
     fi
 
@@ -35,14 +42,20 @@ main() {
     override_file="$(get_override_for_file "$repo_root" "$file_path")"
 
     if [[ -n "$override_file" && -f "$repo_root/$override_file" ]]; then
-        if git -C "$repo_root" show "HEAD:$file_path" >/dev/null 2>&1; then
-            cat > /dev/null
-            git -C "$repo_root" show "HEAD:$file_path" 2>/dev/null || cat
-            return 0
+        # Only transform when incoming content is exactly the local override.
+        # If caller already provided original/tracked content (e.g., pre-commit
+        # restored file), passthrough avoids clobbering intended staged content.
+        if cmp -s "$stdin_tmp" "$repo_root/$override_file"; then
+            if git -C "$repo_root" show ":$file_path" >/dev/null 2>&1; then
+                git -C "$repo_root" show ":$file_path" 2>/dev/null || cat "$stdin_tmp"
+                rm -f "$stdin_tmp"
+                return 0
+            fi
         fi
     fi
 
-    cat
+    cat "$stdin_tmp"
+    rm -f "$stdin_tmp"
 }
 
 main "$@"

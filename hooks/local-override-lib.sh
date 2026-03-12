@@ -276,3 +276,30 @@ get_targets_for_override() {
         fi
     done < <(read_config "$repo_root")
 }
+
+# Check if a rebase is currently in progress in this repository/worktree
+# Returns 0 when rebase state is present, 1 otherwise
+is_rebase_in_progress() {
+    local repo_root="$1"
+    local rebase_merge_path=""
+    local rebase_apply_path=""
+
+    rebase_merge_path="$(git -C "$repo_root" rev-parse --git-path rebase-merge 2>/dev/null || true)"
+    rebase_apply_path="$(git -C "$repo_root" rev-parse --git-path rebase-apply 2>/dev/null || true)"
+
+    # Rebase operations can invoke checkout/filter paths before rebase state
+    # directories are created. Honor reflog action signal as an early indicator.
+    if [[ "${GIT_REFLOG_ACTION:-}" == rebase* ]]; then
+        return 0
+    fi
+
+    if [[ -n "$rebase_merge_path" && -d "$rebase_merge_path" ]]; then
+        return 0
+    fi
+
+    if [[ -n "$rebase_apply_path" && -d "$rebase_apply_path" ]]; then
+        return 0
+    fi
+
+    return 1
+}

@@ -371,6 +371,221 @@ test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
     git checkout -q "$default_branch" 2>/dev/null || true
 }
 
+setup_rebase_override_presence_scenario() {
+    cd "$TEST_DIR"
+
+    # Add AGENTS.md as tracked target for this regression scenario
+    echo "# Original AGENTS content" > AGENTS.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add AGENTS.md
+    git commit -q --no-verify -m "Add AGENTS target for rebase regression"
+
+    cat >> .local-overrides.yaml << 'EOF'
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add .local-overrides.yaml
+    git commit -q --no-verify -m "Configure AGENTS override target"
+
+    cat >> .git/info/attributes << 'EOF'
+AGENTS.md filter=local-override
+EOF
+
+    cat > AGENTS.local.md << 'EOF'
+# MY LOCAL AGENTS
+local customized content
+EOF
+    git-local-override apply 2>/dev/null || true
+
+    if ! grep -q "local customized content" AGENTS.md; then
+        fail "Pre-condition: AGENTS local override content not applied"
+        return 1
+    fi
+
+    return 0
+}
+
+test_rebase_succeeds_with_override_file_present() {
+    info "Testing rebase succeeds when override file remains present..."
+
+    cd "$TEST_DIR"
+
+    if ! setup_rebase_override_presence_scenario; then
+        return 1
+    fi
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    git branch -D rebase-override-present 2>/dev/null || true
+
+    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
+    git checkout -q -b rebase-override-present
+    echo "feature-line" >> README.md
+    git add README.md
+    git commit -q -m "Feature commit for rebase reproduction"
+
+    git checkout -q "$default_branch"
+    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
+    echo "# Upstream AGENTS change" > AGENTS.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add AGENTS.md
+    git commit -q --no-verify -m "Upstream updates AGENTS"
+
+    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
+    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
+    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+    git update-index --skip-worktree config.yaml 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout -q rebase-override-present
+    git-local-override apply 2>/dev/null || true
+
+    cp AGENTS.local.md AGENTS.md
+    printf '\nlocal-override-marker-present-test\n' >> AGENTS.md
+    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
+
+    local working_hash
+    local head_hash
+    working_hash=$(git hash-object AGENTS.md)
+    head_hash=$(git show HEAD:AGENTS.md | git hash-object --stdin)
+
+    if [[ "$working_hash" == "$head_hash" ]]; then
+        fail "Setup invalid: AGENTS.md working tree does not differ from HEAD"
+        return 1
+    fi
+
+    local status_output
+    status_output=$(git status --porcelain=v2 -- AGENTS.md 2>/dev/null || true)
+
+    if [[ -n "$status_output" ]]; then
+        fail "Setup invalid: AGENTS.md already visible in status: $status_output"
+        return 1
+    fi
+
+    # Confirm cleanliness here comes from skip-worktree masking, not equal content.
+    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
+    local status_without_skip
+    status_without_skip=$(git status --porcelain=v2 -- AGENTS.md 2>/dev/null || true)
+    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
+
+    if [[ -z "$status_without_skip" ]]; then
+        fail "Setup invalid: AGENTS.md should be visible when skip-worktree is cleared"
+        return 1
+    fi
+
+    if [[ ! -f AGENTS.local.md ]]; then
+        fail "Setup invalid: override file missing before rebase"
+        return 1
+    fi
+
+    local rebase_output
+    local rebase_status
+    set +e
+    rebase_output=$(git rebase "$default_branch" 2>&1)
+    rebase_status=$?
+    set -e
+
+    if [[ $rebase_status -ne 0 ]]; then
+        fail "Expected rebase success with override file present: $rebase_output"
+        git rebase --abort 2>/dev/null || true
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    if [[ ! -f AGENTS.local.md ]]; then
+        fail "Override file unexpectedly disappeared during rebase"
+        return 1
+    fi
+
+    pass "Rebase succeeded with override file still present"
+
+    git checkout -q "$default_branch" 2>/dev/null || true
+}
+
+test_rebase_succeeds_when_override_file_removed_before_rebase() {
+    info "Testing rebase succeeds when override file is removed before rebase..."
+
+    cd "$TEST_DIR"
+
+    if ! setup_rebase_override_presence_scenario; then
+        return 1
+    fi
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    git branch -D rebase-override-workaround 2>/dev/null || true
+
+    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
+    git checkout -q -b rebase-override-workaround
+    echo "feature-line" >> README.md
+    git add README.md
+    git commit -q -m "Feature commit for workaround rebase"
+
+    git checkout -q "$default_branch"
+    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
+    echo "# Upstream AGENTS change" > AGENTS.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add AGENTS.md
+    git commit -q --no-verify -m "Upstream updates AGENTS for workaround"
+
+    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
+    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
+    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+    git update-index --skip-worktree config.yaml 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout -q rebase-override-workaround
+
+    if [[ ! -f AGENTS.local.md ]]; then
+        fail "Setup invalid: override file missing before workaround step"
+        return 1
+    fi
+
+    rm -f AGENTS.local.md
+    git update-index --no-skip-worktree AGENTS.md
+    git update-index --no-assume-unchanged AGENTS.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
+
+    local attrs_tmp
+    attrs_tmp="$(mktemp "${TMPDIR:-/tmp}/attrs.XXXXXX")"
+    grep -v '^AGENTS.md filter=local-override$' .git/info/attributes > "$attrs_tmp" 2>/dev/null || true
+    mv "$attrs_tmp" .git/info/attributes
+
+    local workaround_hash
+    local head_hash
+    workaround_hash=$(git hash-object AGENTS.md)
+    head_hash=$(git show HEAD:AGENTS.md | git hash-object --stdin)
+
+    if [[ "$workaround_hash" != "$head_hash" ]]; then
+        fail "Setup invalid before workaround rebase: AGENTS.md still differs from HEAD"
+        return 1
+    fi
+
+    local pre_rebase_status
+    pre_rebase_status=$(git status --porcelain=v2 -- AGENTS.md 2>/dev/null || true)
+    if [[ -n "$pre_rebase_status" ]]; then
+        fail "Setup invalid before workaround rebase: repository not clean: $pre_rebase_status"
+        return 1
+    fi
+
+    local rebase_output
+    local rebase_status
+    set +e
+    rebase_output=$(git rebase "$default_branch" 2>&1)
+    rebase_status=$?
+    set -e
+
+    if [[ $rebase_status -ne 0 ]]; then
+        fail "Expected rebase success after removing override file: $rebase_output"
+        git rebase --abort 2>/dev/null || true
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    pass "Rebase succeeds when override file is removed before rebase"
+    git checkout -q "$default_branch" 2>/dev/null || true
+}
+
 test_no_override_without_local_file() {
     info "Testing file without .local version is unchanged..."
 
@@ -1030,6 +1245,8 @@ main() {
         test_branch_checkout_applies_overrides \
         test_git_switch_applies_overrides \
         test_multiple_files_override \
+        test_rebase_succeeds_when_override_file_removed_before_rebase \
+        test_rebase_succeeds_with_override_file_present \
         test_rebase_with_divergent_overridden_file_clears_skip_worktree \
         test_no_override_without_local_file \
         test_restore_command \

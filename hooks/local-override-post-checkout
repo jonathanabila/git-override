@@ -35,6 +35,11 @@ main() {
     local repo_root
     repo_root="$(get_repo_root)" || exit 0
 
+    # Do not re-apply overrides during rebase internal checkouts
+    if is_rebase_in_progress "$repo_root"; then
+        exit 0
+    fi
+
     # Quick exit if no config file
     if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
         exit 0

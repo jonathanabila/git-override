@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rebase TDD plan document**: Added `docs/rebase-regression-tdd-plan.md` to capture the regression scenario, test strategy, and implementation checklist for the override-file rebase bug
+
 - **Pre-rebase protection hook**: Added `local-override-pre-rebase` to clear skip-worktree for configured targets before rebase
   - Prevents rebase failures like `Your local changes ... would be overwritten by checkout` on overridden files
   - Installed by `scripts/install.sh` and exposed via `.pre-commit-hooks.yaml` as `local-override-pre-rebase`
@@ -17,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set
   - Test now simulates true upstream divergence using `GIT_LOCAL_OVERRIDE_DISABLE=1 git add` so filter-clean does not mask changes
+
+- **Rebase with active override files**: Fixed rebase detach failures when override files remain present
+  - `local-override-pre-rebase` now restores configured targets with `git checkout HEAD -- <target>` (index + working tree) instead of writing only working-tree bytes
+  - Added `is_rebase_in_progress()` helper and rebase guards in post-checkout/post-commit/smudge paths to avoid reapplying overrides during rebase internals
+  - `local-override-filter-clean` now prefers index (`:<path>`) content and only transforms when stdin matches active override content
+
+- **Rebase regression tests**: Added AGENTS-focused rebase regression + workaround integration coverage
+  - New test validates rebase succeeds with override file present
+  - Companion test validates a disable/remove workaround path before rebase
 
 ### Fixed
 

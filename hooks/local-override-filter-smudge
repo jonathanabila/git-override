@@ -26,6 +26,12 @@ main() {
         return 0
     }
 
+    # During rebase, always passthrough tracked blob content
+    if is_rebase_in_progress "$repo_root"; then
+        cat
+        return 0
+    fi
+
     if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
         cat
         return 0
