@@ -140,6 +140,54 @@ run_uninstall_non_interactive_capture() {
     printf 'n\nn\nn\nn\n' | "$PROJECT_DIR/scripts/uninstall.sh" > "$output_file" 2>&1
 }
 
+count_matching_paths() {
+    local pattern="$1"
+    local count=0
+    local path
+
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        ((count++)) || true
+    done < <(compgen -G "$pattern" || true)
+
+    printf '%s\n' "$count"
+}
+
+first_matching_path() {
+    local pattern="$1"
+    local path
+
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        printf '%s\n' "$path"
+        return 0
+    done < <(compgen -G "$pattern" || true)
+
+    return 1
+}
+
+write_ambiguous_hook_state() {
+    local repo_dir="$1"
+    local hook_name="$2"
+    local canonical_body="$3"
+    local chained_body="$4"
+    local hook_file
+
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "$hook_name")" || return 1
+
+    cat > "$hook_file" <<EOF
+#!/usr/bin/env bash
+echo "$canonical_body"
+EOF
+    chmod +x "$hook_file"
+
+    cat > "$hook_file.chained" <<EOF
+#!/usr/bin/env bash
+echo "$chained_body"
+EOF
+    chmod +x "$hook_file.chained"
+}
+
 #------------------------------------------------------------------------------
 # Tests
 #------------------------------------------------------------------------------
@@ -389,6 +437,314 @@ EOF
         pass "Canonical pre-commit remains managed after reinstall"
     else
         fail "Canonical pre-commit not managed after reinstall"
+        return 1
+    fi
+}
+
+test_install_warns_on_ambiguous_pre_commit_hook() {
+    info "Testing plain install preserves ambiguous pre-commit hook state..."
+
+    local repo_dir="$TEST_DIR/repo-ambiguous-warning-pre-commit"
+    create_test_repo "$repo_dir"
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-commit")" || {
+        fail "Unable to resolve pre-commit hook path"
+        return 1
+    }
+
+    write_ambiguous_hook_state "$repo_dir" "pre-commit" "AMBIGUOUS_CANONICAL_PRE_COMMIT" "AMBIGUOUS_CHAINED_PRE_COMMIT" || {
+        fail "Unable to create ambiguous pre-commit hook state"
+        return 1
+    }
+
+    local output_file="$TEST_DIR/install-ambiguous-warning.log"
+    if ! "$PROJECT_DIR/scripts/install.sh" --repo > "$output_file" 2>&1; then
+        fail "Install failed for ambiguous warning scenario"
+        return 1
+    fi
+
+    if grep -q "Ambiguous state for pre-commit" "$output_file"; then
+        pass "Install emitted ambiguous-state warning"
+    else
+        fail "Install did not emit ambiguous-state warning"
+        return 1
+    fi
+
+    if grep -q "AMBIGUOUS_CANONICAL_PRE_COMMIT" "$hook_file"; then
+        pass "Canonical pre-commit remained unmanaged"
+    else
+        fail "Canonical pre-commit was unexpectedly rewritten"
+        return 1
+    fi
+
+    if grep -q "AMBIGUOUS_CHAINED_PRE_COMMIT" "$hook_file.chained"; then
+        pass "Existing pre-commit.chained remained unchanged"
+    else
+        fail "Existing pre-commit.chained was unexpectedly rewritten"
+        return 1
+    fi
+
+    local marker
+    marker="$(managed_hook_marker_for_test "pre-commit")"
+    if grep -qxF "$marker" "$hook_file"; then
+        fail "Managed marker was unexpectedly installed in warning-only mode"
+        return 1
+    fi
+    pass "Managed wrapper not installed in warning-only mode"
+}
+
+test_install_repairs_ambiguous_pre_commit_hook() {
+    info "Testing repair mode resolves ambiguous pre-commit hook state..."
+
+    local repo_dir="$TEST_DIR/repo-ambiguous-repair-pre-commit"
+    create_test_repo "$repo_dir"
+
+    local hook_file
+    local hooks_dir
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-commit")" || {
+        fail "Unable to resolve pre-commit hook path"
+        return 1
+    }
+    hooks_dir="$(get_common_hooks_dir_for_repo "$repo_dir")" || {
+        fail "Unable to resolve hooks directory"
+        return 1
+    }
+
+    write_ambiguous_hook_state "$repo_dir" "pre-commit" "AMBIGUOUS_CANONICAL_PRE_COMMIT" "AMBIGUOUS_CHAINED_PRE_COMMIT" || {
+        fail "Unable to create ambiguous pre-commit hook state"
+        return 1
+    }
+
+    local output_file="$TEST_DIR/install-ambiguous-repair-pre-commit.log"
+    if ! "$PROJECT_DIR/scripts/install.sh" --repo --resolve-ambiguous-hooks > "$output_file" 2>&1; then
+        fail "Repair install failed for pre-commit"
+        return 1
+    fi
+
+    local marker
+    marker="$(managed_hook_marker_for_test "pre-commit")"
+    if grep -qxF "$marker" "$hook_file"; then
+        pass "Canonical pre-commit became managed"
+    else
+        fail "Canonical pre-commit did not become managed"
+        return 1
+    fi
+
+    if grep -q '"${BASH_SOURCE\[0\]}\.chained"' "$hook_file"; then
+        pass "Managed pre-commit chains to .chained"
+    else
+        fail "Managed pre-commit does not chain to .chained"
+        return 1
+    fi
+
+    if grep -q "AMBIGUOUS_CANONICAL_PRE_COMMIT" "$hook_file.chained"; then
+        pass "New pre-commit.chained contains prior canonical hook"
+    else
+        fail "New pre-commit.chained missing prior canonical hook content"
+        return 1
+    fi
+
+    local stale_count
+    stale_count="$(count_matching_paths "$hook_file.chained.stale-*")"
+    if [[ "$stale_count" == "1" ]]; then
+        pass "One stale pre-commit.chained backup created"
+    else
+        fail "Expected one stale pre-commit.chained backup, found $stale_count"
+        return 1
+    fi
+
+    local stale_file
+    stale_file="$(first_matching_path "$hook_file.chained.stale-*")" || {
+        fail "Unable to locate stale pre-commit.chained backup"
+        return 1
+    }
+    if grep -q "AMBIGUOUS_CHAINED_PRE_COMMIT" "$stale_file"; then
+        pass "Stale pre-commit.chained backup preserved prior chained content"
+    else
+        fail "Stale pre-commit.chained backup missing prior chained content"
+        return 1
+    fi
+
+    local backup_count
+    backup_count="$(count_matching_paths "$hooks_dir/backup-*")"
+    if [[ "$backup_count" == "1" ]]; then
+        pass "One hooks backup directory created"
+    else
+        fail "Expected one hooks backup directory, found $backup_count"
+        return 1
+    fi
+
+    local backup_dir
+    backup_dir="$(first_matching_path "$hooks_dir/backup-*")" || {
+        fail "Unable to locate hooks backup directory"
+        return 1
+    }
+
+    if [[ -f "$backup_dir/pre-commit" ]] && grep -q "AMBIGUOUS_CANONICAL_PRE_COMMIT" "$backup_dir/pre-commit"; then
+        pass "Backup directory preserved original pre-commit"
+    else
+        fail "Backup directory missing original pre-commit content"
+        return 1
+    fi
+
+    if [[ -f "$backup_dir/pre-commit.chained" ]] && grep -q "AMBIGUOUS_CHAINED_PRE_COMMIT" "$backup_dir/pre-commit.chained"; then
+        pass "Backup directory preserved original pre-commit.chained"
+    else
+        fail "Backup directory missing original pre-commit.chained content"
+        return 1
+    fi
+
+    if grep -q "Resolving ambiguous state for pre-commit" "$output_file" &&
+       grep -q "Backed up pre-commit and pre-commit.chained" "$output_file" &&
+       grep -q "Moved existing pre-commit.chained to" "$output_file" &&
+       grep -q "Promoted existing pre-commit to pre-commit.chained" "$output_file"; then
+        pass "Repair install output described repair actions"
+    else
+        fail "Repair install output did not describe expected actions"
+        return 1
+    fi
+}
+
+test_repair_install_is_idempotent_after_pre_commit_repair() {
+    info "Testing repair mode is idempotent after pre-commit repair..."
+
+    local repo_dir="$TEST_DIR/repo-ambiguous-repair-idempotent-pre-commit"
+    create_test_repo "$repo_dir"
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "pre-commit")" || {
+        fail "Unable to resolve pre-commit hook path"
+        return 1
+    }
+
+    write_ambiguous_hook_state "$repo_dir" "pre-commit" "AMBIGUOUS_CANONICAL_PRE_COMMIT" "AMBIGUOUS_CHAINED_PRE_COMMIT" || {
+        fail "Unable to create ambiguous pre-commit hook state"
+        return 1
+    }
+
+    if ! "$PROJECT_DIR/scripts/install.sh" --repo --resolve-ambiguous-hooks > "$TEST_DIR/install-ambiguous-repair-idempotent-first.log" 2>&1; then
+        fail "Initial repair install failed"
+        return 1
+    fi
+
+    local chained_before="$TEST_DIR/pre-commit.repaired.chained.before"
+    cp "$hook_file.chained" "$chained_before"
+
+    local stale_count_before
+    stale_count_before="$(count_matching_paths "$hook_file.chained.stale-*")"
+
+    local second_output="$TEST_DIR/install-ambiguous-repair-idempotent-second.log"
+    if ! "$PROJECT_DIR/scripts/install.sh" --repo --resolve-ambiguous-hooks > "$second_output" 2>&1; then
+        fail "Second repair install failed"
+        return 1
+    fi
+
+    local marker
+    marker="$(managed_hook_marker_for_test "pre-commit")"
+    if grep -qxF "$marker" "$hook_file"; then
+        pass "Canonical pre-commit stayed managed after second repair install"
+    else
+        fail "Canonical pre-commit lost managed marker after second repair install"
+        return 1
+    fi
+
+    if cmp -s "$chained_before" "$hook_file.chained"; then
+        pass "pre-commit.chained remained stable after second repair install"
+    else
+        fail "pre-commit.chained changed on second repair install"
+        return 1
+    fi
+
+    local stale_count_after
+    stale_count_after="$(count_matching_paths "$hook_file.chained.stale-*")"
+    if [[ "$stale_count_before" == "$stale_count_after" ]]; then
+        pass "Second repair install did not create extra stale hooks"
+    else
+        fail "Second repair install created extra stale hooks"
+        return 1
+    fi
+
+    if grep -q "Refreshing managed hook: pre-commit" "$second_output"; then
+        pass "Second repair install behaved like managed hook refresh"
+    else
+        fail "Second repair install did not report managed hook refresh"
+        return 1
+    fi
+}
+
+test_install_repairs_ambiguous_post_checkout_hook() {
+    info "Testing repair mode resolves ambiguous post-checkout hook state..."
+
+    local repo_dir="$TEST_DIR/repo-ambiguous-repair-post-checkout"
+    create_test_repo "$repo_dir"
+
+    local hook_file
+    local hooks_dir
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "post-checkout")" || {
+        fail "Unable to resolve post-checkout hook path"
+        return 1
+    }
+    hooks_dir="$(get_common_hooks_dir_for_repo "$repo_dir")" || {
+        fail "Unable to resolve hooks directory"
+        return 1
+    }
+
+    write_ambiguous_hook_state "$repo_dir" "post-checkout" "AMBIGUOUS_CANONICAL_POST_CHECKOUT" "AMBIGUOUS_CHAINED_POST_CHECKOUT" || {
+        fail "Unable to create ambiguous post-checkout hook state"
+        return 1
+    }
+
+    local output_file="$TEST_DIR/install-ambiguous-repair-post-checkout.log"
+    if ! "$PROJECT_DIR/scripts/install.sh" --repo --resolve-ambiguous-hooks > "$output_file" 2>&1; then
+        fail "Repair install failed for post-checkout"
+        return 1
+    fi
+
+    local marker
+    marker="$(managed_hook_marker_for_test "post-checkout")"
+    if grep -qxF "$marker" "$hook_file"; then
+        pass "Canonical post-checkout became managed"
+    else
+        fail "Canonical post-checkout did not become managed"
+        return 1
+    fi
+
+    if grep -q "AMBIGUOUS_CANONICAL_POST_CHECKOUT" "$hook_file.chained"; then
+        pass "New post-checkout.chained contains prior canonical hook"
+    else
+        fail "New post-checkout.chained missing prior canonical hook content"
+        return 1
+    fi
+
+    local stale_file
+    stale_file="$(first_matching_path "$hook_file.chained.stale-*")" || {
+        fail "Unable to locate stale post-checkout.chained backup"
+        return 1
+    }
+    if grep -q "AMBIGUOUS_CHAINED_POST_CHECKOUT" "$stale_file"; then
+        pass "Stale post-checkout.chained backup preserved prior chained content"
+    else
+        fail "Stale post-checkout.chained backup missing prior chained content"
+        return 1
+    fi
+
+    local backup_dir
+    backup_dir="$(first_matching_path "$hooks_dir/backup-*")" || {
+        fail "Unable to locate post-checkout backup directory"
+        return 1
+    }
+    if [[ -f "$backup_dir/post-checkout" ]] && [[ -f "$backup_dir/post-checkout.chained" ]]; then
+        pass "Backup directory created for post-checkout repair"
+    else
+        fail "Backup directory missing post-checkout repair files"
+        return 1
+    fi
+
+    if grep -q "Resolving ambiguous state for post-checkout" "$output_file"; then
+        pass "Repair output mentioned post-checkout repair"
+    else
+        fail "Repair output missing post-checkout repair message"
         return 1
     fi
 }
@@ -1191,6 +1547,10 @@ main() {
         test_reinstall_upgrades_managed_pre_commit_hook \
         test_reinstall_upgrades_managed_pre_rebase_hook \
         test_reinstall_preserves_existing_chained_hook \
+        test_install_warns_on_ambiguous_pre_commit_hook \
+        test_install_repairs_ambiguous_pre_commit_hook \
+        test_repair_install_is_idempotent_after_pre_commit_repair \
+        test_install_repairs_ambiguous_post_checkout_hook \
         test_reinstall_prunes_stale_managed_artifacts \
         test_install_global \
         test_install_cli \

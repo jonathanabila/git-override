@@ -12,6 +12,7 @@
 # Options:
 #   --global    Install to git template directory (affects new clones)
 #   --repo      Install to current repository only (default)
+#   --resolve-ambiguous-hooks  Repair unmanaged hook + existing .chained states
 #   --cli       Also install the CLI tool to ~/.local/bin
 #
 # INSTALLATION MODES:
@@ -117,17 +118,112 @@ write_managed_wrapper_hook() {
     local hook_type="$2"
     local hook_content="$3"
     local marker
+    local temp_file
 
     marker="$(managed_hook_marker_line "$hook_type")"
 
-    printf '%s\n' "$hook_content" > "$hook_file"
-    printf '%s\n' "$marker" >> "$hook_file"
+    temp_file="$(mktemp "${hook_file}.tmp.XXXXXX")"
+
+    printf '%s\n' "$hook_content" > "$temp_file"
+    printf '%s\n' "$marker" >> "$temp_file"
 
     if [[ -f "$hook_file.chained" ]]; then
-        append_chain_logic "$hook_file"
+        append_chain_logic "$temp_file"
     fi
 
-    chmod +x "$hook_file"
+    chmod +x "$temp_file"
+    mv "$temp_file" "$hook_file"
+}
+
+current_timestamp() {
+    date '+%Y%m%d-%H%M%S'
+}
+
+create_hooks_backup_dir() {
+    local hooks_dir="$1"
+    local timestamp="$2"
+    local backup_dir="$hooks_dir/backup-$timestamp"
+    local counter=0
+
+    while [[ -e "$backup_dir" ]]; do
+        ((counter++)) || true
+        backup_dir="$hooks_dir/backup-$timestamp-$counter"
+    done
+
+    mkdir "$backup_dir" || return 1
+    printf '%s\n' "$backup_dir"
+}
+
+unique_stale_hook_path() {
+    local hook_file="$1"
+    local timestamp="$2"
+    local stale_path="$hook_file.chained.stale-$timestamp"
+    local counter=0
+
+    while [[ -e "$stale_path" ]]; do
+        ((counter++)) || true
+        stale_path="$hook_file.chained.stale-$timestamp-$counter"
+    done
+
+    printf '%s\n' "$stale_path"
+}
+
+resolve_ambiguous_hook_state() {
+    local hook_file="$1"
+    local hook_type="$2"
+    local hook_content="$3"
+    local hooks_dir
+    local chained_file="$hook_file.chained"
+    local timestamp
+    local backup_dir
+    local stale_file
+
+    hooks_dir="$(dirname "$hook_file")"
+    timestamp="$(current_timestamp)"
+
+    info "Resolving ambiguous state for $hook_type"
+
+    backup_dir="$(create_hooks_backup_dir "$hooks_dir" "$timestamp")" || {
+        warn "Unable to create backup directory for $hook_type repair; preserving existing files"
+        return 1
+    }
+
+    if ! cp -p "$hook_file" "$backup_dir/$hook_type"; then
+        warn "Unable to back up existing $hook_type hook; preserving existing files"
+        rm -rf "$backup_dir" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! cp -p "$chained_file" "$backup_dir/$hook_type.chained"; then
+        warn "Unable to back up existing $hook_type.chained; preserving existing files"
+        rm -rf "$backup_dir" 2>/dev/null || true
+        return 1
+    fi
+
+    info "Backed up $hook_type and $hook_type.chained to $backup_dir"
+
+    stale_file="$(unique_stale_hook_path "$hook_file" "$timestamp")"
+    if ! mv "$chained_file" "$stale_file"; then
+        warn "Unable to move existing $hook_type.chained aside; preserving existing files"
+        return 1
+    fi
+    info "Moved existing $hook_type.chained to $(basename "$stale_file")"
+
+    if ! mv "$hook_file" "$chained_file"; then
+        warn "Unable to promote existing $hook_type to $hook_type.chained; restoring original chained hook"
+        mv "$stale_file" "$chained_file" 2>/dev/null || true
+        return 1
+    fi
+    info "Promoted existing $hook_type to $hook_type.chained"
+
+    if ! write_managed_wrapper_hook "$hook_file" "$hook_type" "$hook_content"; then
+        warn "Unable to install managed $hook_type hook; restoring original files"
+        mv "$chained_file" "$hook_file" 2>/dev/null || true
+        mv "$stale_file" "$chained_file" 2>/dev/null || true
+        return 1
+    fi
+
+    success "Installed $hook_type hook"
 }
 
 prune_stale_managed_artifacts() {
@@ -347,6 +443,7 @@ install_filters() {
 install_hooks_to_dir() {
     local hooks_dir="$1"
     local lib_dir="$2"
+    local resolve_ambiguous_hooks="${3:-false}"
 
     mkdir -p "$hooks_dir"
     mkdir -p "$lib_dir"
@@ -380,7 +477,13 @@ install_hooks_to_dir() {
             # Our hook runs first, then calls the chained hook with same args.
             # This ensures compatibility with other tools (husky, pre-commit, etc.)
             if [[ -f "$hook_file.chained" ]]; then
-                warn "Ambiguous state for $hook_type: unmanaged hook with existing $hook_type.chained; preserving both"
+                if [[ "$resolve_ambiguous_hooks" == true ]]; then
+                    if ! resolve_ambiguous_hook_state "$hook_file" "$hook_type" "$hook_content"; then
+                        warn "Repair skipped for $hook_type; preserving existing files"
+                    fi
+                else
+                    warn "Ambiguous state for $hook_type: unmanaged hook with existing $hook_type.chained; preserving both"
+                fi
                 continue
             fi
 
@@ -396,6 +499,7 @@ install_hooks_to_dir() {
 
 # Install to current repository
 install_to_repo() {
+    local resolve_ambiguous_hooks="${1:-false}"
     local repo_root
     local common_git_dir
     local hooks_dir
@@ -411,18 +515,19 @@ install_to_repo() {
     lib_dir="$common_git_dir/hooks"
 
     info "Installing hooks to repository: $repo_root"
-    install_hooks_to_dir "$hooks_dir" "$lib_dir"
+    install_hooks_to_dir "$hooks_dir" "$lib_dir" "$resolve_ambiguous_hooks"
     install_filters "$repo_root" "$hooks_dir"
 }
 
 # Install to git template directory (affects new clones)
 install_to_template() {
+    local resolve_ambiguous_hooks="${1:-false}"
     local template_dir="${XDG_CONFIG_HOME:-$HOME/.config}/git/template/hooks"
     # Put lib in the same directory as hooks so it gets copied with git init
     local lib_dir="$template_dir"
 
     info "Installing hooks to git template: $template_dir"
-    install_hooks_to_dir "$template_dir" "$lib_dir"
+    install_hooks_to_dir "$template_dir" "$lib_dir" "$resolve_ambiguous_hooks"
     install_filter_scripts_to_dir "$template_dir"
 
     # Configure git to use the template
@@ -492,6 +597,7 @@ Usage:
 Options:
   --repo      Install hooks to current repository (default)
   --global    Install hooks to git template (affects new repos)
+  --resolve-ambiguous-hooks   Safely repair ambiguous unmanaged hook + .chained states during install
   --cli       Also install the CLI tool to ~/.local/bin
   --help      Show this help message
 
@@ -541,6 +647,7 @@ print_summary() {
 main() {
     local mode="repo"
     local install_cli_tool=false
+    local resolve_ambiguous_hooks=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -554,6 +661,10 @@ main() {
                 ;;
             --cli)
                 install_cli_tool=true
+                shift
+                ;;
+            --resolve-ambiguous-hooks)
+                resolve_ambiguous_hooks=true
                 shift
                 ;;
             --help|-h)
@@ -574,10 +685,10 @@ main() {
 
     case "$mode" in
         repo)
-            install_to_repo
+            install_to_repo "$resolve_ambiguous_hooks"
             ;;
         global)
-            install_to_template
+            install_to_template "$resolve_ambiguous_hooks"
             ;;
     esac
 

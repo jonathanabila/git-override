@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Installer ambiguous-hook repair mode**: Added opt-in `--resolve-ambiguous-hooks` support to `scripts/install.sh`
+  - Repairs ambiguous managed-hook states where an unmanaged canonical hook and existing `*.chained` file both exist
+  - Backs up both pre-repair files into a timestamped hooks backup directory
+  - Preserves prior chained hooks as `*.chained.stale-<timestamp>` history before promoting the canonical hook
+
+- **Ambiguous hook repair plan document**: Added `docs/ambiguous-hook-repair-plan.md` with the opt-in installer repair design, safety rules, test plan, and a handoff prompt for implementation
+
 - **Safe reinstall TDD plan document**: Added `docs/safe-reinstall-tdd-plan.md` with the ownership model, red/green/refactor workflow, TODO checklist, and regression tests for making reinstall a supported upgrade path
 
 - **Safe reinstall/uninstall regression coverage**: Expanded `tests/integration/test-install.sh` with focused upgrade/removal scenarios
@@ -64,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Gives each install/uninstall case its own isolated temp workspace plus dedicated `HOME` and `XDG_CONFIG_HOME` for global git config and CLI install checks
   - Resets global git config between isolated cases so template-dir and excludesfile assertions no longer depend on prior test state
 
+- **Installer upgrade guidance**: Expanded `README.md` with ambiguous-hook warning and repair instructions
+  - Documents the conservative default reinstall behavior when unmanaged canonical hooks and existing `*.chained` files coexist
+  - Explains when to use `--resolve-ambiguous-hooks` and what files the repair flow preserves
+
 - **Unit-style suite isolation**: Migrated `tests/run-tests.sh` to phase 5 per-test isolation using `tests/test-lib.sh`
   - Builds one suite seed repo, clones a fresh repo per test case, and reinstalls hooks for each clone so tests no longer depend on prior repo mutations
   - Moves ad hoc temp-repo cleanup into per-test roots, including the no-HEAD filter case, while keeping each assertion's original behavior intact
@@ -73,6 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `make test-docker-bash3` now runs each supported suite in its own container invocation to keep Docker validation aligned with per-suite isolation goals
 
 ### Fixed
+
+- **Ambiguous hook reinstall recovery**: `scripts/install.sh` can now safely repair ambiguous hook states when explicitly requested
+  - Leaves default reinstall behavior unchanged: ambiguous unmanaged states still warn and preserve both files without rewriting either one
+  - Adds integration coverage for warning-only mode, repair mode for `pre-commit` and `post-checkout`, and idempotent reinstall after repair
 
 - **Uninstall symmetry and safety**: `scripts/uninstall.sh` now reconciles managed state using exact marker ownership checks
   - Restores `<hook>.chained` only when canonical hooks are still managed wrappers

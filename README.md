@@ -163,6 +163,12 @@ You want to customize a tracked file for your local environment:
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
 ```
 
+If install warns about an ambiguous hook state such as an unmanaged `pre-commit` plus an existing `pre-commit.chained`, the default behavior stays conservative and preserves both files. To repair that state during reinstall, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --resolve-ambiguous-hooks
+```
+
 <details>
 <summary>📦 Alternative: Pre-commit (Recommended for Teams)</summary>
 
@@ -432,6 +438,8 @@ git-local-override chains with your existing hooks:
 .git/hooks/pre-commit.chained   # Your original hook (called after ours)
 ```
 
+If install finds both an unmanaged canonical hook and an existing `*.chained` backup for the same managed hook, it warns and leaves both files untouched by default. Re-run install with `--resolve-ambiguous-hooks` to back up both files, move the old `*.chained` file to `*.chained.stale-<timestamp>`, promote the canonical hook to the new `*.chained`, and install the managed wrapper.
+
 </details>
 
 <details>
@@ -565,6 +573,21 @@ Re-running `install.sh` is the supported upgrade path and is safe:
 - managed wrapper hooks are refreshed in place
 - existing `*.chained` backups of your hooks are preserved
 - filter config and `.git/info/attributes` managed entries are re-synced
+
+If reinstall reports a warning like `Ambiguous state for pre-commit: unmanaged hook with existing pre-commit.chained; preserving both`, it means the installer found a user-managed hook at the canonical path and also found an older chained backup. This warning is intentionally conservative.
+
+Use repair mode only when you want the installer to reconcile that state for you:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --resolve-ambiguous-hooks
+```
+
+Repair mode:
+
+- creates a timestamped backup directory under the hooks directory with copies of both original files
+- preserves the previous `*.chained` file as `*.chained.stale-<timestamp>` history
+- promotes the unmanaged canonical hook to the new `*.chained`
+- installs a fresh managed wrapper at the canonical hook path
 
 If you want to remove curl-installed repo state, run uninstall from inside that repository:
 
