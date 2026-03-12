@@ -11,7 +11,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEST_DIR="$SCRIPT_DIR/test-precommit"
+. "$SCRIPT_DIR/../test-lib.sh"
+
+TEST_DIR=""
+SUITE_ROOT=""
+TEST_SEED_REPO=""
+CURRENT_TEST_ROOT=""
+CURRENT_TEST_NAME=""
+CURRENT_TEST_STATUS=0
 
 # Colors
 RED='\033[0;31m'
@@ -42,8 +49,33 @@ skip() {
 }
 
 cleanup() {
-    rm -rf "$TEST_DIR"
+    cd "$PROJECT_DIR"
+    cleanup_test_root "$SUITE_ROOT"
 }
+
+finalize_current_test_root() {
+    local status="${1:-0}"
+
+    if [[ -n "$CURRENT_TEST_ROOT" ]]; then
+        cd "$PROJECT_DIR"
+        preserve_test_root_on_failure "$CURRENT_TEST_ROOT" "$CURRENT_TEST_NAME" "$status"
+        CURRENT_TEST_ROOT=""
+    fi
+}
+
+cleanup_on_exit() {
+    local exit_code=$?
+    local final_status="${CURRENT_TEST_STATUS:-0}"
+
+    if [[ "$final_status" -eq 0 && "$exit_code" -ne 0 ]]; then
+        final_status="$exit_code"
+    fi
+
+    finalize_current_test_root "$final_status"
+    cleanup
+}
+
+trap cleanup_on_exit EXIT
 
 check_precommit() {
     if ! command -v pre-commit &>/dev/null; then
@@ -53,24 +85,7 @@ check_precommit() {
     return 0
 }
 
-setup_repo() {
-    cleanup
-    mkdir -p "$TEST_DIR"
-    cd "$TEST_DIR"
-
-    # Initialize repo
-    git init -q
-    git config user.email "test@test.com"
-    git config user.name "Test User"
-
-    # Create initial files
-    echo "# Original README" > README.md
-    echo "# Original CLAUDE.md content" > CLAUDE.md
-
-    git add .
-    git commit -q -m "Initial commit"
-
-    # Create .pre-commit-config.yaml that uses our hooks from local path
+write_local_precommit_config() {
     cat > .pre-commit-config.yaml << EOF
 repos:
   - repo: local
@@ -105,10 +120,26 @@ repos:
         always_run: true
         pass_filenames: false
 EOF
+}
 
-    # Copy the lib file to where hooks expect it
-    mkdir -p .git/hooks
-    cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
+setup_seed_repo() {
+    SUITE_ROOT="$(create_test_root "precommit" "suite")"
+    setup_test_env "$SUITE_ROOT" "$PROJECT_DIR"
+    cd "$TEST_REPO"
+
+    # Initialize repo
+    git init -q
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+
+    # Create initial files
+    echo "# Original README" > README.md
+    echo "# Original CLAUDE.md content" > CLAUDE.md
+
+    git add .
+    git commit -q -m "Initial commit"
+
+    write_local_precommit_config
 
     # Create local-overrides config
     cat > .local-overrides.yaml << 'EOF'
@@ -122,8 +153,28 @@ EOF
     git add .pre-commit-config.yaml .local-overrides.yaml
     git commit -q -m "Add pre-commit config"
 
+    TEST_SEED_REPO="$SUITE_ROOT/artifacts/precommit-seed.git"
+    create_seed_repo "$TEST_REPO" "$TEST_SEED_REPO"
+}
+
+configure_test_repo() {
+    cd "$TEST_REPO"
+
+    mkdir -p .git/hooks
+    cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
+
     # Create local override file
     echo "# MY LOCAL CLAUDE.md - pre-commit test" > CLAUDE.local.md
+}
+
+setup_repo() {
+    CURRENT_TEST_ROOT="$(create_test_root "precommit" "$CURRENT_TEST_NAME")"
+    CURRENT_TEST_STATUS=0
+    setup_test_env "$CURRENT_TEST_ROOT" "$PROJECT_DIR"
+    clone_seed_repo "$TEST_SEED_REPO" "$TEST_REPO"
+    TEST_DIR="$TEST_REPO"
+    configure_test_repo
+    cd "$TEST_DIR"
 }
 
 #------------------------------------------------------------------------------
@@ -450,15 +501,31 @@ main() {
     echo "pre-commit version: $(pre-commit --version)"
     echo ""
 
-    setup_repo
+    setup_seed_repo
 
-    test_precommit_install
-    test_precommit_run_pre_commit
-    test_precommit_commit_flow
-    test_precommit_checkout_flow
-    test_precommit_with_other_hooks
-    test_precommit_skip_without_config
-    test_precommit_from_remote_repo
+    local test_fn
+    for test_fn in \
+        test_precommit_install \
+        test_precommit_run_pre_commit \
+        test_precommit_commit_flow \
+        test_precommit_checkout_flow \
+        test_precommit_with_other_hooks \
+        test_precommit_skip_without_config \
+        test_precommit_from_remote_repo; do
+        CURRENT_TEST_NAME="$test_fn"
+        setup_repo
+
+        set +e
+        "$test_fn"
+        CURRENT_TEST_STATUS=$?
+        set -e
+
+        if [[ $CURRENT_TEST_STATUS -ne 0 ]]; then
+            exit "$CURRENT_TEST_STATUS"
+        fi
+
+        finalize_current_test_root 0
+    done
 
     cleanup
 

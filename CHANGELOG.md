@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Local docs ignore rule**: Added `docs/` to `.gitignore` so local planning docs stay out of status by default
 
+- **Pre-commit integration isolation**: Migrated `tests/integration/test-precommit.sh` to phase 3 per-test isolation using `tests/test-lib.sh`
+  - Builds one suite seed repo, clones a fresh repo per case, and gives each case isolated temp home/config state for pre-commit caches and hooks
+  - Keeps pre-commit hook installation and local hook-library setup realistic while removing cross-test repository state
+
 ### Fixed
 
 - **Rebase regression coverage**: Added integration coverage for rebasing with divergent overridden files while skip-worktree is set
