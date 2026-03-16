@@ -2,8 +2,8 @@
 #
 # local-override-pre-rebase
 #
-# Clears skip-worktree flags and restores original content before rebase
-# so checkout/detach operations inside rebase are not blocked.
+# Restores original content before rebase so checkout/detach operations
+# inside rebase are not blocked.
 #
 set -euo pipefail
 
@@ -29,12 +29,8 @@ main() {
         [[ -z "$entry" ]] && continue
         target="${entry%%|*}"
 
-        # Always clear skip-worktree for rebase safety
-        git -C "$repo_root" update-index --no-skip-worktree "$target" 2>/dev/null || true
-
         # Restore tracked HEAD content in both index and working tree.
-        # Updating only the working tree can still leave index/worktree mismatches
-        # when prior skip-worktree branch switches kept stale index entries.
+        # Updating only the working tree can still leave index/worktree mismatches.
         if git -C "$repo_root" cat-file -e "HEAD:$target" 2>/dev/null; then
             GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" checkout -q HEAD -- "$target" 2>/dev/null || true
         fi

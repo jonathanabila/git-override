@@ -42,8 +42,8 @@
   pass_filenames: false
 
 - id: local-override-pre-rebase
-  name: Clear skip-worktree before rebase
-  description: Clears skip-worktree and restores originals for override targets so rebase checkout operations can proceed
+  name: Restore originals before rebase
+  description: Restores originals for override targets so rebase checkout operations can proceed
   entry: hooks/local-override-pre-rebase
   language: script
   stages: [pre-rebase]
