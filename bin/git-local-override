@@ -935,6 +935,96 @@ EOF
     echo "The 'pattern:' field is required."
 }
 
+cmd__get_active_targets() {
+    local repo_root
+    repo_root="$(get_repo_root)"
+
+    [[ -f "$repo_root/.local-overrides.yaml" ]] || return 0
+
+    local entry target override
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+
+        target="${entry%%|*}"
+        override="${entry#*|}"
+
+        if [[ -f "$repo_root/$override" && -f "$repo_root/$target" ]]; then
+            echo "$target"
+        fi
+    done < <(read_config "$repo_root")
+}
+
+cmd_shell_init() {
+    cat << 'SHELL_INIT'
+# git-local-override shell integration
+# Wraps git to transparently handle checkout/switch with overridden files.
+# Usage: eval "$(git-local-override shell-init)"
+git() {
+    # Fast path: no git-local-override CLI available
+    if ! command -v git-local-override >/dev/null 2>&1; then
+        command git "$@"
+        return $?
+    fi
+
+    # Detect checkout/switch subcommands
+    local subcmd=""
+    local has_dashdash=false
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--" ]]; then
+            has_dashdash=true
+            break
+        fi
+        # First non-flag argument is the subcommand
+        if [[ -z "$subcmd" && "$arg" != -* ]]; then
+            subcmd="$arg"
+        fi
+    done
+
+    # Only intercept checkout and switch (not file checkouts with --)
+    if [[ "$subcmd" != "checkout" && "$subcmd" != "switch" ]] || [[ "$has_dashdash" == true ]]; then
+        command git "$@"
+        return $?
+    fi
+
+    # Fast path: no config file
+    if [[ ! -f ".local-overrides.yaml" ]]; then
+        command git "$@"
+        return $?
+    fi
+
+    # Get active override targets
+    local targets
+    targets="$(git-local-override _get-active-targets 2>/dev/null)"
+
+    if [[ -z "$targets" ]]; then
+        command git "$@"
+        return $?
+    fi
+
+    # Before checkout: restore originals for each active override target
+    local target
+    while IFS= read -r target; do
+        [[ -z "$target" ]] && continue
+        GIT_LOCAL_OVERRIDE_DISABLE=1 command git checkout HEAD -- "$target" 2>/dev/null || true
+    done <<< "$targets"
+
+    # Run the actual git command
+    local git_status=0
+    command git "$@" || git_status=$?
+
+    # On failure: re-apply overrides on current branch
+    if [[ $git_status -ne 0 ]]; then
+        git-local-override apply 2>/dev/null || true
+    fi
+    # On success: smudge filter re-applies overrides automatically;
+    # post-checkout hook also copies override content as belt-and-suspenders
+
+    return $git_status
+}
+SHELL_INIT
+}
+
 cmd_help() {
     cat << 'EOF'
 git-local-override - Manage local file overrides
@@ -950,6 +1040,7 @@ COMMANDS:
     apply                   Manually apply all overrides (syncs filters)
     restore                 Manually restore all originals from git
     sync-filters            Sync filter driver with config (regenerate attributes)
+    shell-init              Output shell function wrapping git checkout/switch
     filter-smudge <path>    Filter helper: output local override or passthrough
     filter-clean <path>     Filter helper: output HEAD content or passthrough
     init-config             Create a .local-overrides.yaml template
@@ -976,6 +1067,9 @@ EXAMPLES:
 
     # Sync filter driver with config (useful after config changes)
     git-local-override sync-filters
+
+    # Enable shell integration for transparent checkout/switch
+    eval "$(git-local-override shell-init)"
 
 ENVIRONMENT VARIABLES:
     GIT_LOCAL_OVERRIDE_DISABLE=1
@@ -1049,6 +1143,8 @@ main() {
         apply)          cmd_apply "$@" ;;
         restore)        cmd_restore "$@" ;;
         sync-filters)   cmd_sync_filters "$@" ;;
+        shell-init)     cmd_shell_init "$@" ;;
+        _get-active-targets) cmd__get_active_targets "$@" ;;
         filter-smudge)  cmd_filter_smudge "$@" ;;
         filter-clean)   cmd_filter_clean "$@" ;;
         init-config)    cmd_init_config "$@" ;;
