@@ -764,7 +764,7 @@ cmd_restore() {
         # Only restore if there's an override file
         if [[ -f "$repo_root/$override" ]]; then
             if git -C "$repo_root" ls-files --error-unmatch "$target" &>/dev/null; then
-                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" checkout HEAD -- "$target" 2>/dev/null || true
+                git -C "$repo_root" show "HEAD:$target" > "$repo_root/$target" 2>/dev/null || true
                 echo "  Restored: $target"
                 ((count++)) || true
             fi
@@ -1006,7 +1006,7 @@ git() {
     local target
     while IFS= read -r target; do
         [[ -z "$target" ]] && continue
-        GIT_LOCAL_OVERRIDE_DISABLE=1 command git checkout HEAD -- "$target" 2>/dev/null || true
+        command git -c filter.local-override.smudge= checkout HEAD -- "$target" 2>/dev/null || true
     done <<< "$targets"
 
     # Run the actual git command

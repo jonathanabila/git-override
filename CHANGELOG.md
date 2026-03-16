@@ -26,8 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`cmd_restore()` smudge filter bypass**: Restore now uses `GIT_LOCAL_OVERRIDE_DISABLE=1` to prevent smudge filter from re-applying override during restore
-  - Previously, `git checkout HEAD -- <target>` would trigger the smudge filter, defeating the purpose of restore
+- **Bypass smudge filter in restore operations**: Replaced `GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD --` with approaches that reliably bypass the smudge filter across all platforms
+  - `cmd_restore()`: Uses `git show HEAD:<file>` to write original content directly (no filter involvement)
+  - Shell-init wrapper: Uses `git -c filter.local-override.smudge= checkout` to disable filter inline
+  - Pre-rebase hook: Uses `git -c filter.local-override.smudge= checkout` to disable filter inline
+  - Fixes macOS CI where env var didn't propagate to filter subprocess
+  - Fixes Alpine CI where filter bypass caused unstaged-changes errors
   - Matches the pattern already used correctly in the pre-rebase hook
 
 - **`git checkout` failure with divergent overridden files**: On git 2.37+, `git checkout <branch>` would fail when overridden files had different content between branches

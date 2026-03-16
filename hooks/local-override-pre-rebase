@@ -32,7 +32,7 @@ main() {
         # Restore tracked HEAD content in both index and working tree.
         # Updating only the working tree can still leave index/worktree mismatches.
         if git -C "$repo_root" cat-file -e "HEAD:$target" 2>/dev/null; then
-            GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" checkout -q HEAD -- "$target" 2>/dev/null || true
+            git -C "$repo_root" -c filter.local-override.smudge= checkout -q HEAD -- "$target" 2>/dev/null || true
         fi
     done < <(read_config "$repo_root")
 
