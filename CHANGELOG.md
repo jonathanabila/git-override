@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Shell integration command**: Added `git-local-override shell-init` for transparent `git checkout`/`git switch` support
+  - Outputs a shell function wrapping git to restore originals before checkout and let smudge filter re-apply on new branch
+  - Required for git 2.37+ when overridden files differ between branches
+  - Works with bash 3.2 and zsh
+  - Usage: `eval "$(git-local-override shell-init)"` in `.bashrc`/`.zshrc`
+
+- **Internal `_get-active-targets` command**: Helper for shell-init wrapper to list active override targets
+
+### Changed
+
+- **Removed skip-worktree dependency**: Clean/smudge filters now handle `git status`/`git diff` hiding without skip-worktree
+  - Removed `git update-index --skip-worktree` from all hooks (post-checkout, post-commit, pre-commit, pre-rebase)
+  - Removed `git update-index --skip-worktree` from CLI `apply` and `restore` commands
+  - Skip-worktree caused problems in newer git versions (sparse-checkout boundary enforcement, `git add` refusal)
+
+### Fixed
+
+- **`cmd_restore()` smudge filter bypass**: Restore now uses `GIT_LOCAL_OVERRIDE_DISABLE=1` to prevent smudge filter from re-applying override during restore
+  - Previously, `git checkout HEAD -- <target>` would trigger the smudge filter, defeating the purpose of restore
+  - Matches the pattern already used correctly in the pre-rebase hook
+
+- **`git checkout` failure with divergent overridden files**: On git 2.37+, `git checkout <branch>` would fail when overridden files had different content between branches
+  - The `shell-init` wrapper transparently restores originals before checkout
+  - Smudge filter automatically re-applies overrides on the new branch
+
+### Added
+
 - **Installer ambiguous-hook repair mode**: Added opt-in `--resolve-ambiguous-hooks` support to `scripts/install.sh`
   - Repairs ambiguous managed-hook states where an unmanaged canonical hook and existing `*.chained` file both exist
   - Backs up both pre-repair files into a timestamped hooks backup directory

@@ -289,27 +289,17 @@ The magic happens through git hooks that run automatically:
 | `git checkout` | post-checkout | Applies local overrides to working tree |
 | `git checkout` | filter driver (smudge) | Transparently applies local override content |
 | `git pull` | post-checkout | Applies local overrides after merge |
-| `git rebase` | pre-rebase | Clears skip-worktree and restores originals before rebase checkout/detach |
+| `git rebase` | pre-rebase | Restores originals before rebase checkout/detach |
 | `git commit` | pre-commit | Restores originals, stages them |
 | `git add` / staging | filter driver (clean) | Presents original content to git index |
 | After commit | post-commit | Re-applies local overrides |
 
 
-### Skip-Worktree Integration
-
-When overrides are applied, files are marked with git's `skip-worktree` flag. This means:
-
-- **Clean `git status`**: Modified files won't appear as changed
-- **Invisible to git**: Local changes are completely hidden from git's view
-- **Automatic management**: The hooks handle setting/clearing this flag automatically
-
 ### Seamless Branch Switching (Filter Drivers)
 
 git-local-override uses **smudge/clean filter drivers** (the same mechanism used by git-lfs and git-crypt) to enable seamless branch switching even when overridden files differ between branches.
 
-**The Problem**: `skip-worktree` hides files from `git status`, but doesn't prevent checkout conflicts when branches have different versions of an overridden file.
-
-**The Solution**: Filter drivers make git consider overridden files "clean" through a roundtrip property: `clean(smudge(original)) == original`. This means:
+Filter drivers make git consider overridden files "clean" through a roundtrip property: `clean(smudge(original)) == original`. This means:
 
 - **Smudge** (on checkout): Outputs local override content transparently
 - **Clean** (on staging): Presents original content from `HEAD` to git
@@ -317,7 +307,17 @@ git-local-override uses **smudge/clean filter drivers** (the same mechanism used
 
 Filter drivers are configured automatically during installation in `.git/info/attributes` (local-only, not tracked in `.gitattributes`).
 The filter commands use worktree-safe absolute paths so linked worktrees (`git worktree add`) work correctly.
-Hooks and filters work together: filters handle content transformation, hooks manage skip-worktree.
+
+### Shell Integration
+
+On git 2.37+, `git checkout` can fail with "Your local changes would be overwritten" when overridden files have different content between branches. The `shell-init` command provides a shell wrapper that transparently handles this:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc:
+eval "$(git-local-override shell-init)"
+```
+
+The wrapper intercepts `git checkout` and `git switch` commands, restores original content before the operation, then lets the smudge filter re-apply overrides on the new branch. File checkouts (`git checkout -- <file>`) are not intercepted.
 
 ---
 
@@ -397,6 +397,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 | `git-local-override apply` | Manually apply all overrides |
 | `git-local-override restore` | Manually restore all originals |
 | `git-local-override sync-filters` | Sync filter configuration with config file |
+| `git-local-override shell-init` | Output shell wrapper for transparent checkout/switch |
 | `git-local-override init-config` | Create a `.local-overrides.yaml` template |
 | `git-local-override help` | Show help |
 
@@ -464,7 +465,7 @@ GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
 ├── CLAUDE.local.md             # Your local version (gitignored)
 └── .git/hooks/
     ├── post-checkout           # Applies overrides after checkout
-    ├── pre-rebase              # Clears skip-worktree before rebase
+    ├── pre-rebase              # Restores originals before rebase
     ├── pre-commit              # Restores originals before commit
     ├── post-commit             # Re-applies overrides after commit
     ├── local-override-filter-smudge   # Filter: applies local content on checkout
@@ -608,7 +609,7 @@ Uninstall restores `.chained` hooks only when it is safe, and preserves newer un
 | Location | What | Purpose |
 |----------|------|---------|
 | `.git/hooks/pre-commit` | Hook script | Restores originals before commit |
-| `.git/hooks/pre-rebase` | Hook script | Clears skip-worktree before rebase |
+| `.git/hooks/pre-rebase` | Hook script | Restores originals before rebase |
 | `.git/hooks/post-commit` | Hook script | Re-applies overrides after commit |
 | `.git/hooks/post-checkout` | Hook script | Applies overrides after checkout |
 | `.git/hooks/local-override-filter-smudge` | Filter script | Applies local content on checkout |

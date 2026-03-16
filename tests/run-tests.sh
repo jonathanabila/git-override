@@ -214,22 +214,25 @@ test_override_is_applied() {
 }
 
 test_git_status_after_override() {
-    info "Testing git status hides file with skip-worktree..."
+    info "Testing git status hides file with clean filter..."
 
     cd "$TEST_REPO"
     create_config
 
     echo "# STATUS LOCAL CONTENT" > CLAUDE.local.md
+
+    # Set up filter driver so clean filter hides changes
+    git-local-override sync-filters >/dev/null
     git-local-override apply >/dev/null
 
-    # Git should NOT see the file as modified (skip-worktree hides it)
+    # Git should NOT see the file as modified (clean filter returns original)
     local status
     status=$(git status --porcelain)
 
     if [[ "$status" != *"CLAUDE.md"* ]]; then
-        pass "Git status hides file (skip-worktree active)"
+        pass "Git status hides file (clean filter active)"
     else
-        fail "Git status still shows file (skip-worktree not active)"
+        fail "Git status still shows file (clean filter not working)"
     fi
 }
 
@@ -356,11 +359,8 @@ test_pre_commit_hook() {
     echo "# LOCAL CONTENT FOR COMMIT TEST" > CLAUDE.local.md
     git-local-override apply
 
-    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
-    git update-index --no-skip-worktree CLAUDE.md
-
     # Stage the file
-    git add CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
 
     # Run the pre-commit hook
     .git/hooks/pre-commit
@@ -463,9 +463,8 @@ test_hooks_check_for_config() {
     # Create a local file that would be applied if config existed
     echo "# SHOULD NOT BE APPLIED" > CLAUDE.local.md
 
-    # Clear skip-worktree from any previous tests, then restore original
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
-    git checkout HEAD -- CLAUDE.md
+    # Restore original content (bypass smudge filter)
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
 
     # Run post-checkout - should exit early without config
     .git/hooks/post-checkout "" "" "1"
@@ -570,11 +569,8 @@ EOF
         return
     fi
 
-    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
-    git update-index --no-skip-worktree CLAUDE.md
-
-    # Stage ONLY CLAUDE.md
-    git add CLAUDE.md
+    # Stage ONLY CLAUDE.md (bypass clean filter to force staging)
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
 
     # Run pre-commit hook - should restore BOTH files
     .git/hooks/pre-commit
@@ -588,9 +584,7 @@ EOF
 
     # Restore
     rm -f COMBINED.local.md
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
-    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
-    git checkout HEAD -- CLAUDE.md AGENTS.md 2>/dev/null || true
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md AGENTS.md 2>/dev/null || true
     create_config
 }
 

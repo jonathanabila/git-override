@@ -205,17 +205,14 @@ test_commit_staged_override_file() {
 
     cd "$TEST_DIR"
 
-    git update-index --no-skip-worktree CLAUDE.md
-
     echo "# TEMPORARY CHANGE - should be filtered" > CLAUDE.md
     GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
 
     if ! git commit -q -m "Commit CLAUDE.md" 2>/dev/null; then
         info "No changes to commit (clean filter returned original)"
         pass "Clean filter prevented staging different content"
-        
+
         cp CLAUDE.local.md CLAUDE.md 2>/dev/null || true
-        git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
         return 0
     fi
 
@@ -231,7 +228,6 @@ test_commit_staged_override_file() {
     fi
 
     cp CLAUDE.local.md CLAUDE.md 2>/dev/null || true
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
 
     if grep -q "MY LOCAL" CLAUDE.md; then
         pass "Working tree restored to local content"
@@ -343,8 +339,8 @@ test_multiple_files_override() {
     fi
 }
 
-test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
-    info "Testing rebase succeeds with divergent override when skip-worktree is set..."
+test_rebase_with_divergent_overridden_file() {
+    info "Testing rebase succeeds with divergent override (filter-driven)..."
 
     cd "$TEST_DIR"
 
@@ -361,23 +357,16 @@ test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
 
     # Main branch changes overridden file content in git history
     git checkout -q "$default_branch"
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
     echo "# Upstream CLAUDE update" > CLAUDE.md
     GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
     git commit -q --no-verify -m "Upstream updates CLAUDE"
 
-    # Back to feature branch with local override active + skip-worktree set
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    # Back to feature branch with overrides active (clean filter hides changes)
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout -q rebase-diverge-feature
-    # Remove local override files to avoid environment-specific rebase guards
-    # around untracked files; this test only validates divergent tracked target
-    # behavior with skip-worktree set.
-    rm -f CLAUDE.local.md config.local.yaml
-
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
-    echo "# MY LOCAL CLAUDE.md - customized for rebase test" > CLAUDE.md
+    # Keep override files so clean filter works
+    git-local-override apply 2>/dev/null || true
 
     local rebase_output
     local rebase_status
@@ -389,11 +378,7 @@ test_rebase_with_divergent_overridden_file_clears_skip_worktree() {
     if [[ $rebase_status -ne 0 ]]; then
         local pre_rebase_status
         pre_rebase_status=$(git status --porcelain 2>/dev/null || true)
-        if echo "$rebase_output" | grep -q "would be overwritten by checkout"; then
-            fail "Rebase failed due to skip-worktree checkout protection: $rebase_output"
-        else
-            fail "Rebase failed: $rebase_output; pre-rebase status: $pre_rebase_status"
-        fi
+        fail "Rebase failed: $rebase_output; pre-rebase status: $pre_rebase_status"
         git rebase --abort 2>/dev/null || true
         git checkout -q "$default_branch" 2>/dev/null || true
         return 1
@@ -451,59 +436,20 @@ test_rebase_succeeds_with_override_file_present() {
 
     git branch -D rebase-override-present 2>/dev/null || true
 
-    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
     git checkout -q -b rebase-override-present
     echo "feature-line" >> README.md
     git add README.md
     git commit -q -m "Feature commit for rebase reproduction"
 
     git checkout -q "$default_branch"
-    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
     echo "# Upstream AGENTS change" > AGENTS.md
     GIT_LOCAL_OVERRIDE_DISABLE=1 git add AGENTS.md
     git commit -q --no-verify -m "Upstream updates AGENTS"
 
-    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
-    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
-    git update-index --skip-worktree config.yaml 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout -q rebase-override-present
     git-local-override apply 2>/dev/null || true
-
-    cp AGENTS.local.md AGENTS.md
-    printf '\nlocal-override-marker-present-test\n' >> AGENTS.md
-    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
-
-    local working_hash
-    local head_hash
-    working_hash=$(git hash-object AGENTS.md)
-    head_hash=$(git show HEAD:AGENTS.md | git hash-object --stdin)
-
-    if [[ "$working_hash" == "$head_hash" ]]; then
-        fail "Setup invalid: AGENTS.md working tree does not differ from HEAD"
-        return 1
-    fi
-
-    local status_output
-    status_output=$(git status --porcelain=v2 -- AGENTS.md 2>/dev/null || true)
-
-    if [[ -n "$status_output" ]]; then
-        fail "Setup invalid: AGENTS.md already visible in status: $status_output"
-        return 1
-    fi
-
-    # Confirm cleanliness here comes from skip-worktree masking, not equal content.
-    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
-    local status_without_skip
-    status_without_skip=$(git status --porcelain=v2 -- AGENTS.md 2>/dev/null || true)
-    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
-
-    if [[ -z "$status_without_skip" ]]; then
-        fail "Setup invalid: AGENTS.md should be visible when skip-worktree is cleared"
-        return 1
-    fi
 
     if [[ ! -f AGENTS.local.md ]]; then
         fail "Setup invalid: override file missing before rebase"
@@ -548,24 +494,18 @@ test_rebase_succeeds_when_override_file_removed_before_rebase() {
 
     git branch -D rebase-override-workaround 2>/dev/null || true
 
-    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
     git checkout -q -b rebase-override-workaround
     echo "feature-line" >> README.md
     git add README.md
     git commit -q -m "Feature commit for workaround rebase"
 
     git checkout -q "$default_branch"
-    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
     echo "# Upstream AGENTS change" > AGENTS.md
     GIT_LOCAL_OVERRIDE_DISABLE=1 git add AGENTS.md
     git commit -q --no-verify -m "Upstream updates AGENTS for workaround"
 
-    git update-index --no-skip-worktree AGENTS.md 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
-    git update-index --skip-worktree AGENTS.md 2>/dev/null || true
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
-    git update-index --skip-worktree config.yaml 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout -q rebase-override-workaround
 
     if [[ ! -f AGENTS.local.md ]]; then
@@ -574,8 +514,6 @@ test_rebase_succeeds_when_override_file_removed_before_rebase() {
     fi
 
     rm -f AGENTS.local.md
-    git update-index --no-skip-worktree AGENTS.md
-    git update-index --no-assume-unchanged AGENTS.md 2>/dev/null || true
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- AGENTS.md
 
     local attrs_tmp
@@ -626,11 +564,8 @@ test_no_override_without_local_file() {
     # Remove the local file for config.yaml
     rm -f config.local.yaml
 
-    # Clear skip-worktree before restore (git checkout doesn't work with skip-worktree)
-    git update-index --no-skip-worktree config.yaml
-
-    # Restore original
-    git checkout HEAD -- config.yaml
+    # Restore original (bypass smudge filter)
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- config.yaml
 
     # Apply overrides
     git-local-override apply
@@ -662,28 +597,13 @@ test_restore_command() {
 
     git-local-override restore
 
-    local skip_worktree_cleared=true
-    if git ls-files -v | grep -q "^S.*CLAUDE.md"; then
-        skip_worktree_cleared=false
-    fi
-
-    if [[ "$skip_worktree_cleared" == true ]]; then
-        pass "Restore cleared skip-worktree flags"
+    # After restore with GIT_LOCAL_OVERRIDE_DISABLE=1, original content should be present
+    if grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        pass "Restore returned original content"
     else
-        fail "Restore did not clear skip-worktree"
+        fail "Restore did not return original content"
+        cat CLAUDE.md
         return 1
-    fi
-
-    if grep -q "MY LOCAL" CLAUDE.md; then
-        pass "With filters active, smudge applies local content (expected behavior)"
-    else
-        info "Checking if filters disabled..."
-        if grep -q "Original CLAUDE.md content" CLAUDE.md; then
-            pass "Original content visible (filters bypassed)"
-        else
-            fail "Unexpected content state"
-            return 1
-        fi
     fi
 
     git-local-override apply
@@ -696,17 +616,15 @@ test_dirty_working_tree_commit() {
 
     echo "Unstaged change" >> README.md
 
-    git update-index --no-skip-worktree config.yaml
-
     echo "temp_value: false" > config.yaml
-    git add config.yaml
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add config.yaml
 
     if git diff --cached --quiet; then
         info "Clean filter returned original (matches HEAD)"
         pass "Clean filter working correctly with dirty tree"
         git checkout HEAD -- README.md
         cp config.local.yaml config.yaml 2>/dev/null || true
-        git update-index --skip-worktree config.yaml 2>/dev/null || true
+    
         return 0
     fi
 
@@ -728,7 +646,6 @@ test_dirty_working_tree_commit() {
     fi
 
     cp config.local.yaml config.yaml 2>/dev/null || true
-    git update-index --skip-worktree config.yaml 2>/dev/null || true
 
     if grep -q "local_value" config.yaml; then
         pass "Local content restored in working tree"
@@ -756,10 +673,6 @@ test_hooks_skip_without_config() {
 
     # Remove config
     rm -f .local-overrides.yaml .local-overrides
-
-    # Clear skip-worktree before checkout (git checkout doesn't work with skip-worktree)
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
-    git update-index --no-skip-worktree config.yaml 2>/dev/null || true
 
     # Restore original content deterministically (bypass smudge filter)
     git show "HEAD:CLAUDE.md" > CLAUDE.md
@@ -800,8 +713,8 @@ EOF
 # Filter Integration Tests
 #------------------------------------------------------------------------------
 
-test_checkout_with_divergent_overridden_file() {
-    info "Testing checkout with divergent branches (PRIMARY BUG FIX)..."
+test_checkout_with_override_active() {
+    info "Testing checkout with override active (non-divergent files)..."
 
     cd "$TEST_DIR"
 
@@ -824,7 +737,6 @@ test_checkout_with_divergent_overridden_file() {
         echo "# MY LOCAL CLAUDE.md - personal instructions" > CLAUDE.local.md
     fi
 
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
     cp CLAUDE.local.md CLAUDE.md
 
     local checkout_output
@@ -847,7 +759,7 @@ test_checkout_with_divergent_overridden_file() {
 
     local status_output
     status_output=$(git status --porcelain | grep -v "^??" || true)
-    
+
     if [[ -z "$status_output" ]]; then
         pass "Git status is clean after checkout (ignoring untracked files)"
     else
@@ -857,6 +769,144 @@ test_checkout_with_divergent_overridden_file() {
     fi
 
     git checkout -q "$default_branch"
+}
+
+test_checkout_with_truly_divergent_overridden_file() {
+    info "Testing checkout with truly divergent overridden file..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    if git show-ref --verify --quiet "refs/heads/feature-divergent-override"; then
+        git branch -D feature-divergent-override 2>/dev/null || true
+    fi
+
+    # Create feature branch with different CLAUDE.md content
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
+    git checkout -q -b feature-divergent-override
+    echo "# Feature branch CLAUDE.md content - DIFFERENT" > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Change CLAUDE.md on feature branch"
+
+    # Back on main, create override
+    git checkout -q "$default_branch"
+
+    if [[ ! -f "CLAUDE.local.md" ]]; then
+        echo "# MY LOCAL CLAUDE.md - personal instructions" > CLAUDE.local.md
+    fi
+
+    # Apply override (working tree has override content)
+    git-local-override apply 2>/dev/null || true
+
+    # Verify override is active
+    if ! grep -q "MY LOCAL" CLAUDE.md; then
+        fail "Pre-condition: override not applied"
+        return 1
+    fi
+
+    # git checkout feature — must succeed
+    local checkout_output
+    checkout_output=$(git checkout feature-divergent-override 2>&1)
+    local checkout_status=$?
+
+    if [[ $checkout_status -ne 0 ]]; then
+        fail "Checkout to feature branch failed: $checkout_output"
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    # Verify override still active (smudge filter re-applied)
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "Checkout succeeded to feature branch with override preserved"
+    else
+        fail "Override lost after checkout to feature branch"
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    # git checkout main — must succeed back
+    checkout_output=$(git checkout "$default_branch" 2>&1)
+    checkout_status=$?
+
+    if [[ $checkout_status -ne 0 ]]; then
+        fail "Checkout back to $default_branch failed: $checkout_output"
+        return 1
+    fi
+
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "Checkout back to $default_branch succeeded with override preserved"
+    else
+        fail "Override lost after checkout back to $default_branch"
+        return 1
+    fi
+}
+
+test_shell_init_checkout_with_divergent_file() {
+    info "Testing shell-init wrapper with divergent overridden file..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    if git show-ref --verify --quiet "refs/heads/feature-shell-init"; then
+        git branch -D feature-shell-init 2>/dev/null || true
+    fi
+
+    # Create feature branch with different CLAUDE.md content
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
+    git checkout -q -b feature-shell-init
+    echo "# Shell-init feature branch CLAUDE.md" > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Diverge CLAUDE.md for shell-init test"
+
+    # Back on main, apply override
+    git checkout -q "$default_branch"
+
+    if [[ ! -f "CLAUDE.local.md" ]]; then
+        echo "# MY LOCAL CLAUDE.md - shell-init test" > CLAUDE.local.md
+    fi
+
+    git-local-override apply 2>/dev/null || true
+
+    if ! grep -q "MY LOCAL" CLAUDE.md; then
+        fail "Pre-condition: override not applied"
+        return 1
+    fi
+
+    # Source the shell-init wrapper
+    eval "$(git-local-override shell-init)"
+
+    # Use the wrapper to checkout (this calls the git function)
+    local checkout_output
+    local checkout_status=0
+    checkout_output=$(git checkout feature-shell-init 2>&1) || checkout_status=$?
+
+    if [[ $checkout_status -ne 0 ]]; then
+        fail "Shell-init wrapper checkout failed: $checkout_output"
+        unset -f git
+        command git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "Shell-init wrapper checkout preserved override"
+    else
+        fail "Shell-init wrapper checkout lost override"
+        unset -f git
+        command git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    # Checkout back
+    git checkout "$default_branch" 2>/dev/null || true
+
+    # Unset the wrapper function
+    unset -f git
+
+    pass "Shell-init wrapper handles divergent files correctly"
 }
 
 test_switch_with_divergent_overridden_file() {
@@ -885,7 +935,7 @@ test_switch_with_divergent_overridden_file() {
         echo "# MY LOCAL CLAUDE.md - personal instructions" > CLAUDE.local.md
     fi
 
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+
     cp CLAUDE.local.md CLAUDE.md
 
     if ! git switch -q feature-switch-test 2>/dev/null; then
@@ -934,7 +984,7 @@ test_pull_with_overridden_file() {
     git commit -q -m "Remote-like change"
     git checkout -q "$default_branch"
 
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+
     cp CLAUDE.local.md CLAUDE.md
 
     if ! git merge -q --no-edit feature-pull 2>/dev/null; then
@@ -979,7 +1029,7 @@ test_merge_with_overridden_file() {
     git commit -q -m "Change on merge branch"
     git checkout -q "$default_branch"
 
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+
     cp CLAUDE.local.md CLAUDE.md
 
     if ! git merge -q --no-edit merge-test-branch 2>/dev/null; then
@@ -1023,7 +1073,7 @@ test_rebase_with_overridden_file() {
     git add rebase-file.txt
     git commit -q -m "Commit for rebase"
 
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+
     cp CLAUDE.local.md CLAUDE.md
 
     if ! git rebase -q "$default_branch" 2>/dev/null; then
@@ -1097,7 +1147,7 @@ test_commit_still_contains_original() {
 
     cd "$TEST_DIR"
 
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+
     cp CLAUDE.local.md CLAUDE.md
 
     local claude_before
@@ -1124,8 +1174,8 @@ test_filter_and_hooks_coexist() {
 
     cd "$TEST_DIR"
 
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
-    git update-index --skip-worktree config.yaml 2>/dev/null || true
+
+
 
     cp CLAUDE.local.md CLAUDE.md 2>/dev/null || true
     cp config.local.yaml config.yaml 2>/dev/null || true
@@ -1166,7 +1216,7 @@ test_no_override_file_normal_checkout() {
 
     rm -f config.local.yaml
 
-    git update-index --no-skip-worktree config.yaml 2>/dev/null || true
+
     git checkout HEAD -- config.yaml
 
     local default_branch
@@ -1199,11 +1249,13 @@ test_disable_env_var_allows_restore() {
         cp CLAUDE.local.md CLAUDE.md 2>/dev/null || true
     fi
 
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+
 
     local expected_content
     expected_content=$(git show HEAD:CLAUDE.md 2>/dev/null || echo "")
 
+    # Remove file first to force git to re-run the smudge filter
+    rm -f CLAUDE.md
     GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
 
     if [[ "$(cat CLAUDE.md 2>/dev/null || echo "")" == "$expected_content" ]]; then
@@ -1215,7 +1267,7 @@ test_disable_env_var_allows_restore() {
     fi
 
     cp CLAUDE.local.md CLAUDE.md 2>/dev/null || true
-    git update-index --skip-worktree CLAUDE.md 2>/dev/null || true
+
 }
 
 test_worktree_add_with_filters() {
@@ -1278,12 +1330,14 @@ main() {
         test_multiple_files_override \
         test_rebase_succeeds_when_override_file_removed_before_rebase \
         test_rebase_succeeds_with_override_file_present \
-        test_rebase_with_divergent_overridden_file_clears_skip_worktree \
+        test_rebase_with_divergent_overridden_file \
         test_no_override_without_local_file \
         test_restore_command \
         test_dirty_working_tree_commit \
         test_hooks_skip_without_config \
-        test_checkout_with_divergent_overridden_file \
+        test_checkout_with_override_active \
+        test_checkout_with_truly_divergent_overridden_file \
+        test_shell_init_checkout_with_divergent_file \
         test_switch_with_divergent_overridden_file \
         test_pull_with_overridden_file \
         test_merge_with_overridden_file \

@@ -113,7 +113,7 @@ repos:
         pass_filenames: false
 
       - id: local-override-pre-rebase
-        name: Clear skip-worktree before rebase
+        name: Restore originals before rebase
         entry: $PROJECT_DIR/hooks/local-override-pre-rebase
         language: script
         stages: [pre-rebase]
@@ -258,8 +258,8 @@ test_precommit_commit_flow() {
 
     # Make a change and commit
     echo "Pre-commit flow test" >> README.md
-    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    # Ensure file can be staged
+
     git add README.md CLAUDE.md
 
     # Commit (this triggers pre-commit hooks)
@@ -362,8 +362,8 @@ EOF
 
     # Make a commit
     echo "Multiple hooks test" >> README.md
-    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    # Ensure file can be staged
+
     git add README.md CLAUDE.md
 
     if git commit -m "Test multiple hooks"; then
@@ -381,8 +381,8 @@ test_precommit_skip_without_config() {
 
     # Remove the config file
     rm -f .local-overrides.yaml .local-overrides
-    # Clear skip-worktree before checkout (git checkout doesn't work with skip-worktree)
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    # Restore original content
+
     git checkout HEAD -- CLAUDE.md
 
     # Make a commit
@@ -465,8 +465,8 @@ EOF
 
     # Try a commit
     echo "test" >> README.md
-    # Clear skip-worktree before staging (git add doesn't work with skip-worktree)
-    git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+    # Ensure file can be staged
+
     git add README.md CLAUDE.md
 
     if git commit -m "Test remote repo hooks"; then
