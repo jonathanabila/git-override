@@ -725,8 +725,8 @@ cmd_apply() {
 
         if [[ -f "$full_override" && -f "$full_target" ]]; then
             cp "$full_override" "$full_target"
-            # Mark as skip-worktree so git status doesn't show the change
-            git -C "$repo_root" update-index --skip-worktree "$target" 2>/dev/null || true
+            # Update index via clean filter so git status sees file as clean
+            git -C "$repo_root" add "$target" 2>/dev/null || true
             echo "  Applied: $target <- $override"
             ((count++)) || true
         fi
@@ -764,9 +764,7 @@ cmd_restore() {
         # Only restore if there's an override file
         if [[ -f "$repo_root/$override" ]]; then
             if git -C "$repo_root" ls-files --error-unmatch "$target" &>/dev/null; then
-                # Clear skip-worktree so git can see the file
-                git -C "$repo_root" update-index --no-skip-worktree "$target" 2>/dev/null || true
-                git -C "$repo_root" checkout HEAD -- "$target" 2>/dev/null || true
+                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" checkout HEAD -- "$target" 2>/dev/null || true
                 echo "  Restored: $target"
                 ((count++)) || true
             fi
