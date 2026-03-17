@@ -355,6 +355,42 @@ $override"
     done < <(read_config "$repo_root")
 }
 
+# Duplicated from hooks/local-override-lib.sh so the CLI can self-heal
+# repositories even before hooks are reinstalled.
+clear_legacy_skip_worktree() {
+    local repo_root="$1"
+    local repaired_count=0
+    local seen_targets=""
+    local entry target ls_output
+
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+
+        target="${entry%%|*}"
+        [[ -n "$target" ]] || continue
+
+        if echo "$seen_targets" | grep -qxF "$target"; then
+            continue
+        fi
+        seen_targets="$seen_targets
+$target"
+
+        if ! git -C "$repo_root" ls-files --error-unmatch -- "$target" >/dev/null 2>&1; then
+            continue
+        fi
+
+        ls_output="$(git -C "$repo_root" ls-files -v -- "$target" 2>/dev/null || true)"
+        if [[ "${ls_output:0:1}" != "S" ]]; then
+            continue
+        fi
+
+        git -C "$repo_root" update-index --no-skip-worktree -- "$target"
+        ((repaired_count++)) || true
+    done < <(read_config "$repo_root")
+
+    printf '%s\n' "$repaired_count"
+}
+
 #------------------------------------------------------------------------------
 # Commands
 #------------------------------------------------------------------------------
@@ -816,6 +852,12 @@ cmd_sync_filters() {
     # Sync .git/info/attributes from config
     sync_attributes "$repo_root"
 
+    local repaired_count
+    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
+    if [[ "$repaired_count" -gt 0 ]]; then
+        info "Cleared legacy skip-worktree on $repaired_count managed file(s)"
+    fi
+
     # Count filtered files
     local attributes_file
     local filter_count=0
@@ -1039,7 +1081,7 @@ COMMANDS:
     status                  Show detailed status (includes filter driver status)
     apply                   Manually apply all overrides (syncs filters)
     restore                 Manually restore all originals from git
-    sync-filters            Sync filter driver with config (regenerate attributes)
+    sync-filters            Sync filter driver with config and clear legacy skip-worktree
     shell-init              Output shell function wrapping git checkout/switch
     filter-smudge <path>    Filter helper: output local override or passthrough
     filter-clean <path>     Filter helper: output HEAD content or passthrough

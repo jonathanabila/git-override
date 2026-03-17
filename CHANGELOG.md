@@ -19,12 +19,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Legacy skip-worktree self-healing**: Repo reinstall, `git-local-override sync-filters`, and runtime hooks now automatically clear stale `skip-worktree` bits on configured managed files from older installs
+  - Repair stays scoped to tracked managed targets from `.local-overrides.yaml`
+  - `install.sh` and `sync-filters` print a one-line info message only when repairs occur
+  - Runtime hooks print a terse stderr notice only when repairs occur
+
 - **Removed skip-worktree dependency**: Clean/smudge filters now handle `git status`/`git diff` hiding without skip-worktree
   - Removed `git update-index --skip-worktree` from all hooks (post-checkout, post-commit, pre-commit, pre-rebase)
   - Removed `git update-index --skip-worktree` from CLI `apply` and `restore` commands
   - Skip-worktree caused problems in newer git versions (sparse-checkout boundary enforcement, `git add` refusal)
 
 ### Fixed
+
+- **Hook chaining reachability**: Managed wrapper hooks now continue into `*.chained` hooks again after successful execution
+  - Replaced `exit` calls inside hook `main()` functions with `return` so wrapper-appended chain logic is reachable
+  - Managed hook failures still stop the chain as before
+
+- **Git-ops passthrough test flake**: Stabilized passthrough tests to restore tracked content with `git show` instead of `git checkout HEAD --`
+  - Avoids nondeterministic filter/index stat-cache behavior when no override file is present
+  - Avoids relying on `GIT_LOCAL_OVERRIDE_DISABLE=1` propagating to filter subprocesses during test setup
 
 - **Bypass smudge filter in restore operations**: Replaced `GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD --` with approaches that reliably bypass the smudge filter across all platforms
   - `cmd_restore()`: Uses `git show HEAD:<file>` to write original content directly (no filter involvement)

@@ -14,14 +14,20 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local repo_root
-    repo_root="$(get_repo_root)" || exit 0
+    repo_root="$(get_repo_root)" || return 0
 
     if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
-        exit 0
+        return 0
     fi
 
     if ! validate_config "$repo_root"; then
-        exit 1
+        return 1
+    fi
+
+    local repaired_count
+    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
+    if [[ "$repaired_count" -gt 0 ]]; then
+        printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
     fi
 
     local entry target
@@ -36,7 +42,7 @@ main() {
         fi
     done < <(read_config "$repo_root")
 
-    exit 0
+    return 0
 }
 
 main "$@"

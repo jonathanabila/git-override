@@ -145,6 +145,93 @@ setup_repo() {
     cd "$TEST_DIR"
 }
 
+get_index_flag() {
+    local target="$1"
+    local ls_output=""
+
+    ls_output="$(git ls-files -v -- "$target" 2>/dev/null || true)"
+    printf '%s\n' "${ls_output:0:1}"
+}
+
+setup_legacy_skip_worktree_state() {
+    local target="${1:-CLAUDE.md}"
+    local override_file="${2:-CLAUDE.local.md}"
+
+    if [[ ! -f "$override_file" ]]; then
+        fail "Pre-condition: missing override file $override_file"
+        return 1
+    fi
+
+    cp "$override_file" "$target"
+
+    if cmp -s "$target" <(git show "HEAD:$target"); then
+        fail "Pre-condition: $target does not differ from HEAD before forcing skip-worktree"
+        return 1
+    fi
+
+    git update-index --skip-worktree -- "$target"
+    return 0
+}
+
+assert_legacy_hidden_mismatch_state() {
+    local target="$1"
+    local status_output
+    local index_flag
+
+    if ! cmp -s "$target" <(git show "HEAD:$target"); then
+        pass "Legacy state keeps $target different from HEAD"
+    else
+        fail "Expected $target to differ from HEAD in legacy state"
+        return 1
+    fi
+
+    index_flag="$(get_index_flag "$target")"
+    if [[ "$index_flag" == "S" ]]; then
+        pass "Legacy skip-worktree bit is set on $target"
+    else
+        fail "Expected skip-worktree bit on $target"
+        return 1
+    fi
+
+    status_output="$(git status --porcelain -- "$target" 2>/dev/null || true)"
+    if [[ -z "$status_output" ]]; then
+        pass "Legacy mismatch stays hidden from git status"
+    else
+        fail "Expected hidden mismatch for $target, got: $status_output"
+        return 1
+    fi
+}
+
+assert_skip_worktree_cleared() {
+    local target="$1"
+    local index_flag
+
+    index_flag="$(get_index_flag "$target")"
+    if [[ "$index_flag" != "S" ]]; then
+        pass "Legacy skip-worktree bit cleared for $target"
+    else
+        fail "Legacy skip-worktree bit still set for $target"
+        return 1
+    fi
+}
+
+assert_reset_hard_succeeds() {
+    local reset_output
+    local reset_status
+
+    set +e
+    reset_output="$(git reset --hard 2>&1)"
+    reset_status=$?
+    set -e
+
+    if [[ $reset_status -eq 0 ]]; then
+        pass "git reset --hard succeeds after repair"
+    else
+        fail "git reset --hard failed after repair: $reset_output"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Tests
 #------------------------------------------------------------------------------
@@ -337,6 +424,123 @@ test_multiple_files_override() {
         fail "Some files lost local content after commit"
         return 1
     fi
+}
+
+test_install_self_heals_legacy_skip_worktree() {
+    info "Testing install.sh self-heals legacy skip-worktree state..."
+
+    cd "$TEST_DIR"
+
+    if ! setup_legacy_skip_worktree_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    if ! assert_legacy_hidden_mismatch_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    local output_file="$TEST_ROOT/install-self-heal.log"
+    if ! "$PROJECT_DIR/scripts/install.sh" --repo > "$output_file" 2>&1; then
+        fail "install.sh --repo failed during legacy self-heal test"
+        cat "$output_file" || true
+        return 1
+    fi
+
+    if ! assert_skip_worktree_cleared "CLAUDE.md"; then
+        return 1
+    fi
+
+    if grep -q "Cleared legacy skip-worktree on 1 managed file(s)" "$output_file"; then
+        pass "install.sh reported repaired managed files"
+    else
+        fail "install.sh did not report legacy skip-worktree repair"
+        cat "$output_file" || true
+        return 1
+    fi
+
+    assert_reset_hard_succeeds
+}
+
+test_sync_filters_self_heals_legacy_skip_worktree() {
+    info "Testing sync-filters self-heals legacy skip-worktree state..."
+
+    cd "$TEST_DIR"
+
+    if ! setup_legacy_skip_worktree_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    if ! assert_legacy_hidden_mismatch_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    local output_file="$TEST_ROOT/sync-filters-self-heal.log"
+    if ! git-local-override sync-filters > "$output_file" 2>&1; then
+        fail "git-local-override sync-filters failed during legacy self-heal test"
+        cat "$output_file" || true
+        return 1
+    fi
+
+    if ! assert_skip_worktree_cleared "CLAUDE.md"; then
+        return 1
+    fi
+
+    if grep -q "Cleared legacy skip-worktree on 1 managed file(s)" "$output_file"; then
+        pass "sync-filters reported repaired managed files"
+    else
+        fail "sync-filters did not report legacy skip-worktree repair"
+        cat "$output_file" || true
+        return 1
+    fi
+
+    assert_reset_hard_succeeds
+}
+
+test_post_checkout_self_heals_legacy_skip_worktree() {
+    info "Testing post-checkout self-heals legacy skip-worktree state..."
+
+    cd "$TEST_DIR"
+
+    if ! setup_legacy_skip_worktree_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    if ! assert_legacy_hidden_mismatch_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    local checkout_output
+    local checkout_status
+    set +e
+    checkout_output="$(git checkout -q -b legacy-self-heal-branch 2>&1)"
+    checkout_status=$?
+    set -e
+
+    if [[ $checkout_status -ne 0 ]]; then
+        fail "git checkout failed during runtime self-heal test: $checkout_output"
+        return 1
+    fi
+
+    if ! assert_skip_worktree_cleared "CLAUDE.md"; then
+        return 1
+    fi
+
+    if grep -q "git-local-override: cleared legacy skip-worktree on 1 managed file(s)" <<< "$checkout_output"; then
+        pass "post-checkout emitted runtime repair notice"
+    else
+        fail "post-checkout did not emit runtime repair notice"
+        printf '%s\n' "$checkout_output"
+        return 1
+    fi
+
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "post-checkout preserved local override content"
+    else
+        fail "post-checkout did not preserve local override content"
+        return 1
+    fi
+
+    assert_reset_hard_succeeds
 }
 
 test_rebase_with_divergent_overridden_file() {
@@ -564,8 +768,8 @@ test_no_override_without_local_file() {
     # Remove the local file for config.yaml
     rm -f config.local.yaml
 
-    # Restore original (bypass smudge filter)
-    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- config.yaml
+    # Restore original deterministically without invoking smudge/filter state
+    git show "HEAD:config.yaml" > config.yaml
 
     # Apply overrides
     git-local-override apply
@@ -1217,7 +1421,7 @@ test_no_override_file_normal_checkout() {
     rm -f config.local.yaml
 
 
-    git checkout HEAD -- config.yaml
+    git show "HEAD:config.yaml" > config.yaml
 
     local default_branch
     default_branch=$(git rev-parse --abbrev-ref HEAD)
@@ -1328,6 +1532,9 @@ main() {
         test_branch_checkout_applies_overrides \
         test_git_switch_applies_overrides \
         test_multiple_files_override \
+        test_install_self_heals_legacy_skip_worktree \
+        test_sync_filters_self_heals_legacy_skip_worktree \
+        test_post_checkout_self_heals_legacy_skip_worktree \
         test_rebase_succeeds_when_override_file_removed_before_rebase \
         test_rebase_succeeds_with_override_file_present \
         test_rebase_with_divergent_overridden_file \

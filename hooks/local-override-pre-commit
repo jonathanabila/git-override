@@ -24,24 +24,30 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local repo_root
-    repo_root="$(get_repo_root)" || exit 0
+    repo_root="$(get_repo_root)" || return 0
 
     # Quick exit if no config file
     if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
-        exit 0
+        return 0
+    fi
+
+    # Validate config
+    if ! validate_config "$repo_root"; then
+        return 1
+    fi
+
+    local repaired_count
+    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
+    if [[ "$repaired_count" -gt 0 ]]; then
+        printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
     fi
 
     # Get list of staged files
     local staged_files
-    staged_files=$(git -C "$repo_root" diff --cached --name-only 2>/dev/null) || exit 0
+    staged_files=$(git -C "$repo_root" diff --cached --name-only 2>/dev/null) || return 0
 
     # Quick exit if nothing staged
-    [[ -z "$staged_files" ]] && exit 0
-
-    # Validate config
-    if ! validate_config "$repo_root"; then
-        exit 1
-    fi
+    [[ -z "$staged_files" ]] && return 0
 
     # First pass: find which override files have staged targets
     # We need to restore ALL targets for each such override file
@@ -68,7 +74,7 @@ $override"
     done < <(read_config "$repo_root")
 
     # Quick exit if no overrides need restoring
-    [[ -z "$overrides_to_restore" ]] && exit 0
+    [[ -z "$overrides_to_restore" ]] && return 0
 
     # Second pass: for each override file to restore, restore ALL its targets
     local override_file
@@ -94,7 +100,7 @@ $override"
 
     # The post-commit hook will re-apply overrides after commit completes
 
-    exit 0
+    return 0
 }
 
 main "$@"

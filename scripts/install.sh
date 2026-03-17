@@ -439,6 +439,24 @@ install_filters() {
     sync_attributes "$repo_root"
 }
 
+repair_legacy_skip_worktree() {
+    local repo_root="$1"
+    local lib_file="$2"
+    local repaired_count="0"
+
+    [[ -f "$repo_root/.local-overrides.yaml" ]] || return 0
+    [[ -f "$lib_file" ]] || return 0
+
+    repaired_count="$({
+        source "$lib_file"
+        clear_legacy_skip_worktree "$repo_root"
+    })"
+
+    if [[ -n "$repaired_count" && "$repaired_count" -gt 0 ]]; then
+        info "Cleared legacy skip-worktree on $repaired_count managed file(s)"
+    fi
+}
+
 # Install hooks to a directory
 install_hooks_to_dir() {
     local hooks_dir="$1"
@@ -517,6 +535,7 @@ install_to_repo() {
     info "Installing hooks to repository: $repo_root"
     install_hooks_to_dir "$hooks_dir" "$lib_dir" "$resolve_ambiguous_hooks"
     install_filters "$repo_root" "$hooks_dir"
+    repair_legacy_skip_worktree "$repo_root" "$lib_dir/local-override-lib.sh"
 }
 
 # Install to git template directory (affects new clones)

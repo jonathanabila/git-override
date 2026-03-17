@@ -163,6 +163,8 @@ You want to customize a tracked file for your local environment:
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
 ```
 
+Re-running install in an existing repository is the supported upgrade path. It now also clears legacy `skip-worktree` bits on configured managed files and prints a one-line repair notice only when it repairs old state.
+
 If install warns about an ambiguous hook state such as an unmanaged `pre-commit` plus an existing `pre-commit.chained`, the default behavior stays conservative and preserves both files. To repair that state during reinstall, run:
 
 ```bash
@@ -308,6 +310,8 @@ Filter drivers make git consider overridden files "clean" through a roundtrip pr
 Filter drivers are configured automatically during installation in `.git/info/attributes` (local-only, not tracked in `.gitattributes`).
 The filter commands use worktree-safe absolute paths so linked worktrees (`git worktree add`) work correctly.
 
+Reinstalling with `install.sh --repo` and running `git-local-override sync-filters` both auto-heal legacy `skip-worktree` bits that may still exist from older installs. Runtime hooks also self-heal this old repo state; when they repair anything, they emit one terse notice to stderr and stay silent otherwise.
+
 ### Shell Integration
 
 On git 2.37+, `git checkout` can fail with "Your local changes would be overwritten" when overridden files have different content between branches. The `shell-init` command provides a shell wrapper that transparently handles this:
@@ -396,7 +400,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 | `git-local-override status` | Show detailed system status |
 | `git-local-override apply` | Manually apply all overrides |
 | `git-local-override restore` | Manually restore all originals |
-| `git-local-override sync-filters` | Sync filter configuration with config file |
+| `git-local-override sync-filters` | Sync filter configuration and clear legacy managed `skip-worktree` bits |
 | `git-local-override shell-init` | Output shell wrapper for transparent checkout/switch |
 | `git-local-override init-config` | Create a `.local-overrides.yaml` template |
 | `git-local-override help` | Show help |
@@ -438,6 +442,8 @@ git-local-override chains with your existing hooks:
 .git/hooks/pre-commit           # Our wrapper
 .git/hooks/pre-commit.chained   # Your original hook (called after ours)
 ```
+
+Managed wrappers run first and then continue into the matching `*.chained` hook only if the managed hook succeeds.
 
 If install finds both an unmanaged canonical hook and an existing `*.chained` backup for the same managed hook, it warns and leaves both files untouched by default. Re-run install with `--resolve-ambiguous-hooks` to back up both files, move the old `*.chained` file to `*.chained.stale-<timestamp>`, promote the canonical hook to the new `*.chained`, and install the managed wrapper.
 
@@ -574,6 +580,11 @@ Re-running `install.sh` is the supported upgrade path and is safe:
 - managed wrapper hooks are refreshed in place
 - existing `*.chained` backups of your hooks are preserved
 - filter config and `.git/info/attributes` managed entries are re-synced
+- legacy managed `skip-worktree` bits are cleared automatically when found
+
+If you prefer the CLI upgrade path, `git-local-override sync-filters` performs the same legacy `skip-worktree` cleanup for configured managed files.
+
+Runtime hooks also repair this older repo state automatically. When a repair happens during `git checkout`, `git commit`, or `git rebase`, the hook prints a terse `git-local-override: cleared legacy skip-worktree ...` notice to stderr; if nothing needed repair, nothing is printed.
 
 If reinstall reports a warning like `Ambiguous state for pre-commit: unmanaged hook with existing pre-commit.chained; preserving both`, it means the installer found a user-managed hook at the canonical path and also found an older chained backup. This warning is intentionally conservative.
 
