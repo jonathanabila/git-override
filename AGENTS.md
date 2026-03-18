@@ -23,7 +23,7 @@ git-local-override/
 ├── scripts/                      # Installation and release scripts
 │   ├── install.sh
 │   ├── uninstall.sh
-│   └── release.sh                # Changelog version assignment
+│   └── release.sh                # Changelog release prep helper
 ├── tests/                        # Test suite
 │   ├── run-tests.sh              # Main test runner
 │   ├── run-docker.sh             # Docker test launcher
@@ -38,7 +38,7 @@ git-local-override/
 ├── .github/                      # GitHub configuration
 │   ├── workflows/
 │   │   ├── test.yml              # CI test workflow
-│   │   └── release.yml           # Automated release workflow
+│   │   └── release.yml           # Tag-triggered GitHub release publish
 │   ├── ISSUE_TEMPLATE/           # Issue templates
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   ├── CODEOWNERS
@@ -440,4 +440,4 @@ Example:
 - Bug where Y happened when Z
 ```
 
-**Version numbers are assigned automatically during release via GitHub Actions.**
+**Releases are prepared locally from `[Unreleased]`, then published by GitHub Actions when maintainers push a signed annotated `vX.Y.Z` tag from `origin/main`.**

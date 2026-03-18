@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Release publishing flow**: Switched releases to a maintainer-run signed commit plus signed annotated tag flow, with GitHub Actions publishing from pushed `vX.Y.Z` tags instead of committing or pushing `main`
+- **Release docs and workflow guardrails**: Clarified maintainer-only stable release steps, recovery commands, and release workflow wording around tag-derived versions and existing-release protection
+
 ## [0.3.0] - 2026-03-18
 
 ### Added

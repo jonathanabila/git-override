@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Release script for git-local-override
-# Converts [Unreleased] section to a versioned release
+# Converts [Unreleased] section to a versioned release before the signed commit/tag step
 
 VERSION="${1:-}"
 DATE=$(date +%Y-%m-%d)
@@ -16,6 +16,7 @@ die() {
 usage() {
     echo "Usage: $0 <version>" >&2
     echo "Example: $0 0.0.6" >&2
+    echo "Prepares CHANGELOG.md for a stable release; signed commit, signed tag, and publish happen separately." >&2
     exit 1
 }
 
@@ -82,7 +83,8 @@ rm -f "${CHANGELOG}.bak"
 echo "Released version $VERSION"
 echo ""
 echo "Next steps:"
-echo "  1. Review changes: git diff CHANGELOG.md"
-echo "  2. Commit: git add CHANGELOG.md && git commit -m 'chore(release): v$VERSION'"
-echo "  3. Tag: git tag v$VERSION"
-echo "  4. Push: git push origin main --tags"
+echo "  1. Review changes: git diff -- CHANGELOG.md"
+echo "  2. Signed commit: git add CHANGELOG.md && git commit -S -m 'chore(release): v$VERSION'"
+echo "  3. Signed tag: git tag -s v$VERSION -m 'v$VERSION'"
+echo "  4. Push commit: git push origin main"
+echo "  5. Push tag to publish GitHub release: git push origin v$VERSION"

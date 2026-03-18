@@ -1,12 +1,9 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., 0.0.6)'
-        required: true
-        type: string
+  push:
+    tags:
+      - 'v*.*.*'
 
 jobs:
   release:
@@ -20,53 +17,83 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate version format
+      - name: Resolve version from pushed tag
+        id: version
         run: |
-          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Error: Invalid version format. Use semantic versioning (e.g., 0.0.6)"
+          if ! echo "${GITHUB_REF_NAME}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Invalid tag format. Use stable semantic version tags like v0.0.6"
             exit 1
           fi
 
-      - name: Check version doesn't exist
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch origin/main
         run: |
-          if git tag | grep -q "^v${{ inputs.version }}$"; then
-            echo "Error: Tag v${{ inputs.version }} already exists"
+          git fetch --no-tags origin main
+
+      - name: Verify tag is annotated
+        run: |
+          tag_type=$(git for-each-ref --format='%(objecttype)' "refs/tags/${GITHUB_REF_NAME}")
+
+          if [[ "$tag_type" != "tag" ]]; then
+            echo "Error: ${GITHUB_REF_NAME} must be an annotated tag"
             exit 1
           fi
 
-      - name: Check for unreleased changes
+      - name: Verify tagged commit is on origin/main
         run: |
-          if ! grep -A2 "## \[Unreleased\]" CHANGELOG.md | grep -q "^###"; then
-            echo "Error: No changes found in [Unreleased] section"
+          tag_commit=$(git rev-list -n 1 "${GITHUB_REF_NAME}")
+
+          if ! git merge-base --is-ancestor "$tag_commit" "origin/main"; then
+            echo "Error: ${GITHUB_REF_NAME} does not point to a commit reachable from origin/main"
             exit 1
           fi
 
-      - name: Update changelog
+      - name: Fail if release already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          chmod +x scripts/release.sh
-          ./scripts/release.sh "${{ inputs.version }}"
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Error: GitHub release ${GITHUB_REF_NAME} already exists"
+            exit 1
+          fi
 
       - name: Extract release notes
         id: release_notes
         run: |
-          # Extract the content for this version (between this version header and the next)
-          awk '/^## \[${{ inputs.version }}\]/{found=1; next} /^## \[/{if(found) exit} found{print}' CHANGELOG.md > release_notes.md
-          echo "Release notes:"
-          cat release_notes.md
+          version="${{ steps.version.outputs.version }}"
 
-      - name: Commit and tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "chore(release): v${{ inputs.version }}"
-          git tag "v${{ inputs.version }}"
-          git push origin main --tags
+          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "Error: CHANGELOG.md does not contain a section for $version"
+            exit 1
+          fi
+
+          awk -v version="$version" '
+            $0 ~ "^## \\[" version "\\]" { found=1; next }
+            /^## \[/ { if (found) exit }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+
+          if [[ ! -s release_notes.md ]]; then
+            echo "Error: No release notes found for $version"
+            exit 1
+          fi
+
+          echo "Release notes:"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          notes = Path("release_notes.md").read_text().strip()
+          Path("release_notes.md").write_text(notes + "\n")
+          print(notes)
+          PY
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ inputs.version }}
-          name: v${{ inputs.version }}
-          body_path: release_notes.md
-          generate_release_notes: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release_notes.md \
+            --verify-tag

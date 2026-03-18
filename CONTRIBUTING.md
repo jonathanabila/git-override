@@ -298,17 +298,97 @@ Include:
 
 ## Release Process
 
-Releases are automated via GitHub Actions:
+Releases are cut locally by maintainers and published by GitHub Actions from a pushed signed annotated tag. GitHub Actions never commits to or pushes `main`, and only stable `X.Y.Z` versions are supported.
 
-1. Ensure all changes are in the `[Unreleased]` section of CHANGELOG.md
-2. Go to **Actions** → **Release** workflow → **Run workflow**
-3. Enter the version number (e.g., `0.2.1`)
-4. The workflow will:
-   - Run `scripts/release.sh` to update CHANGELOG.md
-   - Commit, tag, and push
-   - Create a GitHub Release with release notes
+### Preflight Checklist
 
-For manual releases (if needed): `./scripts/release.sh <version>`
+Before cutting a release, make sure:
+
+1. Your working tree is clean
+2. `main` is checked out and up to date with `origin/main`
+3. The full local CI-equivalent suite is passing
+4. `CHANGELOG.md` has complete notes under `[Unreleased]`
+5. Commit signing and tag signing are configured locally
+
+Recommended verification commands:
+
+```bash
+git status --short
+git checkout main
+git pull --ff-only origin main
+make test-docker
+make test-docker-bash3
+make test
+tests/integration/test-install.sh
+tests/integration/test-git-ops.sh
+tests/integration/test-precommit.sh
+```
+
+### Maintainer Release Flow
+
+Only maintainers should cut releases. If you want GitHub to enforce that policy, add tag protection for `v*` tags.
+
+1. Prepare the changelog for the new stable version:
+
+   ```bash
+   ./scripts/release.sh X.Y.Z
+   ```
+
+   This moves the current `[Unreleased]` notes into `## [X.Y.Z] - YYYY-MM-DD` and updates the compare links in `CHANGELOG.md`.
+
+2. Review the changelog update and create a signed release commit:
+
+   ```bash
+   git diff -- CHANGELOG.md
+   git add CHANGELOG.md
+   git commit -S -m "chore(release): vX.Y.Z"
+   ```
+
+3. Create a signed annotated tag for that commit:
+
+   ```bash
+   git tag -s "vX.Y.Z" -m "vX.Y.Z"
+   ```
+
+4. Push `main`, then push the tag:
+
+   ```bash
+   git push origin main
+   git push origin "vX.Y.Z"
+   ```
+
+5. The `Release` workflow runs on the pushed `vX.Y.Z` tag and will:
+    - Validate that the tag is stable semver and annotated
+    - Verify the tagged commit is reachable from `origin/main`
+    - Read the matching `## [X.Y.Z]` section from `CHANGELOG.md`
+    - Fail if a GitHub release for that tag already exists
+    - Publish the GitHub release for that tag
+
+Exact maintainer command sequence:
+
+```bash
+git checkout main
+git pull --ff-only origin main
+./scripts/release.sh X.Y.Z
+git add CHANGELOG.md
+git commit -S -m "chore(release): vX.Y.Z"
+git tag -s "vX.Y.Z" -m "vX.Y.Z"
+git push origin main
+git push origin "vX.Y.Z"
+```
+
+### Recovery
+
+- If the publish job fails for a good tag, fix the workflow issue and rerun the failed workflow when possible; no new commit or tag is needed unless the tag itself is wrong
+- If `CHANGELOG.md` or the tag version is wrong, delete the local and remote tag, fix the release commit or changelog on `main`, recreate the signed annotated tag, and push it again:
+
+  ```bash
+  git tag -d "vX.Y.Z"
+  git push origin :refs/tags/vX.Y.Z
+  ```
+
+- If the version already exists as a tag or GitHub release, do not reuse it; prepare the next correct version instead
+- If you accidentally tagged the wrong commit, delete the bad tag, return to `origin/main`, rebuild the release commit if needed, and recreate the signed annotated tag on the correct commit
 
 ## Questions?
 
