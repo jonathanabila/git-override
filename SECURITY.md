@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.3.x   | :white_check_mark: |
 | 0.2.x   | :white_check_mark: |
 | 0.1.x   | :white_check_mark: |
 | 0.0.x   | :x:                |
@@ -57,11 +58,20 @@ We will not pursue legal action against researchers who follow these guidelines.
 
 ## Security Best Practices for Users
 
-1. **Review the config file** (`.local-overrides.yaml`) before using in a repository - it's controlled by the repo maintainer
-2. **Inspect local override files** before creating them in untrusted repositories
-3. **Keep git-local-override updated** to receive security fixes
+### Current Trust Model
+
+- `git-local-override` discovers `.local-overrides.yaml` recursively, not just at the repository root.
+- The nearest config owns its subtree, so a nested config can change override behavior for files under that directory.
+- Config `override:` and `replaces:` paths are resolved relative to the config file they appear in.
+- Current behavior includes nested config files discovered from git's tracked and untracked file sets. Treat both committed and local `.local-overrides.yaml` files as authoritative inputs when evaluating repository behavior.
+
+### Best Practices for Users
+
+1. **Review all `.local-overrides.yaml` files**, not just the root one, before using the tool in a repository.
+2. **Inspect local override files** before creating them in untrusted repositories.
+3. **Keep git-local-override updated** to receive security fixes.
 4. **Use version pinning** when installing via curl to ensure reproducible installs:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.2.0/scripts/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.3.0/scripts/install.sh | bash
    ```
