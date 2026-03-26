@@ -1000,6 +1000,107 @@ EOF
     fi
 }
 
+test_recursive_three_level_nearest_config_wins() {
+    info "Testing three-level nearest config ownership..."
+
+    cd "$TEST_REPO"
+
+    mkdir -p backend/services/foo
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    cat > backend/services/.local-overrides.yaml << 'EOF'
+pattern: ".deep"
+files:
+  - override: CLAUDE.deep.md
+    replaces:
+      - foo/CLAUDE.md
+EOF
+
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+    echo "# BACKEND PRIVATE" > backend/CLAUDE.private.md
+    echo "# SERVICES DEEP" > backend/services/CLAUDE.deep.md
+    echo "# Original backend CLAUDE" > backend/CLAUDE.md
+    echo "# Original foo CLAUDE" > backend/services/foo/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add \
+        backend/CLAUDE.md \
+        backend/services/foo/CLAUDE.md \
+        .local-overrides.yaml \
+        backend/.local-overrides.yaml \
+        backend/services/.local-overrides.yaml
+
+    git-local-override apply >/dev/null
+
+    if grep -q "ROOT LOCAL" CLAUDE.md && \
+       grep -q "BACKEND PRIVATE" backend/CLAUDE.md && \
+       grep -q "SERVICES DEEP" backend/services/foo/CLAUDE.md; then
+        pass "Nearest config wins across three levels"
+    else
+        fail "Three-level ownership did not apply expected overrides"
+    fi
+}
+
+test_recursive_three_level_add_uses_nearest_pattern() {
+    info "Testing add uses nearest pattern across three levels..."
+
+    cd "$TEST_REPO"
+
+    mkdir -p backend/services/foo
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    cat > backend/services/.local-overrides.yaml << 'EOF'
+pattern: ".deep"
+files:
+  - override: AGENTS.deep.md
+    replaces:
+      - foo/AGENTS.md
+EOF
+
+    echo "# Deep nested target" > backend/services/foo/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add \
+        backend/services/foo/CLAUDE.md \
+        .local-overrides.yaml \
+        backend/.local-overrides.yaml \
+        backend/services/.local-overrides.yaml
+
+    git-local-override add backend/services/foo/CLAUDE.md >/dev/null 2>&1 || true
+
+    if [[ -f "backend/services/foo/CLAUDE.deep.md" ]]; then
+        pass "Add uses nearest pattern across three levels"
+    else
+        fail "Add did not use nearest pattern across three levels"
+    fi
+}
+
 test_list_shows_grouped_targets() {
     info "Testing list command shows grouped targets..."
     cd "$TEST_REPO"
@@ -1358,6 +1459,8 @@ main() {
         test_recursive_override_path_escape_errors \
         test_recursive_target_path_escape_errors \
         test_recursive_escape_is_rejected_by_hook_validation \
+        test_recursive_three_level_nearest_config_wins \
+        test_recursive_three_level_add_uses_nearest_pattern \
         test_missing_pattern_error \
         test_init_config_has_pattern \
         test_list_shows_pattern \
