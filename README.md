@@ -101,6 +101,11 @@ Run `git-local-override status` (if CLI installed) or check that:
 - `.git/hooks/pre-commit` exists and contains "local-override"
 - `git config --local filter.local-override.smudge` returns a path (filter driver configured)
 
+Security note:
+- Review all `.local-overrides.yaml` files in the repository, not just the root one.
+- Current recursive discovery includes nested configs from tracked and untracked files.
+- Do not rely on symlinked managed targets or symlinked override files when repository-boundary guarantees matter.
+
 ### Key Behavior
 
 - **On commit**: Original file content is committed (local changes are protected)
@@ -365,7 +370,10 @@ When you commit, if ANY file in a group is staged, ALL files in that group are r
 - The nearest config owns its directory subtree
 - A child config fully replaces parent behavior for that subtree
 - Paths inside a nested config are resolved relative to that config's directory
+- A child config can inherit `pattern:` from the nearest ancestor config if it does not define its own
 - Parent configs may not keep targeting files inside a child-owned subtree
+- An empty child config still claims its subtree and blocks parent targets there
+- A deeper config can still take ownership below an empty child config
 
 Example:
 
@@ -391,6 +399,12 @@ In that setup:
 - root `CLAUDE.md` uses `CLAUDE.local.md`
 - `backend/CLAUDE.md` uses `backend/CLAUDE.private.md`
 - the root config no longer applies inside `backend/`
+
+Additional recursive behavior:
+
+- If `backend/.local-overrides.yaml` omits `pattern:`, it inherits the nearest ancestor pattern.
+- A child config with only `pattern:` and no `files:` still blocks parent entries from targeting that subtree.
+- A deeper config can still own a nested subtree below that empty child.
 
 ### Custom Patterns
 
@@ -660,6 +674,7 @@ Uninstall restores `.chained` hooks only when it is safe, and preserves newer un
 | `.git/hooks/local-override-filter-smudge` | Filter script | Applies local content on checkout |
 | `.git/hooks/local-override-filter-clean` | Filter script | Presents original content to git |
 | `.git/hooks/local-override-lib.sh` | Shared library | Common functions for hooks |
+| `.git/hooks/local-override-resolver.sh` | Shared resolver | Recursive config discovery and lookup |
 | `.git/hooks/*.chained` | Backup | Your existing hooks (preserved) |
 | `.git/info/attributes` | Filter config | Maps files to filter driver (local only) |
 | `git config filter.local-override.*` | Git config | Filter commands pointing to absolute hook script paths |
@@ -667,7 +682,7 @@ Uninstall restores `.chained` hooks only when it is safe, and preserves newer un
 
 With `--global`: Also installs to `~/.config/git/template/hooks/` for new repos.
 
-With `--cli`: Installs CLI to `~/.local/bin/git-local-override`.
+With `--cli`: Installs CLI to `~/.local/bin/git-local-override` and installs `local-override-resolver.sh` to `~/.local/share/git-local-override`.
 
 ---
 
@@ -691,11 +706,14 @@ git-local-override/
 │   └── git-local-override
 ├── hooks/                        # Git hook scripts
 │   ├── local-override-lib.sh     # Shared library
+│   ├── local-override-resolver.sh # Installed shared resolver runtime copy
 │   ├── local-override-filter-smudge   # Smudge filter (checkout)
 │   ├── local-override-filter-clean    # Clean filter (staging)
 │   ├── local-override-post-checkout
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
+├── shared/
+│   └── local-override-resolver.sh # Shared recursive config resolver source
 ├── scripts/                      # Installation and release scripts
 │   ├── install.sh
 │   ├── uninstall.sh
