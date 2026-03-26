@@ -22,6 +22,13 @@ fi
 # shellcheck source=local-override-resolver.sh
 source "$SHARED_RESOLVER_PATH"
 
+get_override_for_file() {
+    local repo_root="$1"
+    local file_path="$2"
+
+    get_override_for_target "$file_path" "$repo_root" || return 0
+}
+
 get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null
 }

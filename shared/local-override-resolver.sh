@@ -432,13 +432,6 @@ get_override_for_target() {
     return 1
 }
 
-get_override_for_file() {
-    local repo_root="$1"
-    local file_path="$2"
-
-    get_override_for_target "$file_path" "$repo_root" || return 0
-}
-
 get_config_for_target() {
     local target_path="$1"
     local repo_root="$2"
