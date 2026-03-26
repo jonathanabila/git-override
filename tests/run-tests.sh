@@ -789,6 +789,116 @@ EOF
     fi
 }
 
+test_recursive_child_inherits_parent_pattern() {
+    info "Testing child config inherits parent pattern..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend
+    cat > backend/.local-overrides.yaml << 'EOF'
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    echo "# BACKEND INHERITED LOCAL" > backend/CLAUDE.local.md
+    echo "# Original backend CLAUDE" > backend/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add backend/CLAUDE.md .local-overrides.yaml backend/.local-overrides.yaml
+
+    git-local-override apply >/dev/null
+
+    if grep -q "BACKEND INHERITED LOCAL" backend/CLAUDE.md; then
+        pass "Child config inherits parent pattern"
+    else
+        fail "Child config did not inherit parent pattern behavior"
+    fi
+}
+
+test_recursive_grandchild_overrides_inherited_pattern() {
+    info "Testing grandchild overrides inherited pattern..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend/services/foo
+    cat > backend/.local-overrides.yaml << 'EOF'
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    cat > backend/services/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - foo/CLAUDE.md
+EOF
+
+    echo "# BACKEND INHERITED LOCAL" > backend/CLAUDE.local.md
+    echo "# SERVICES PRIVATE" > backend/services/CLAUDE.private.md
+    echo "# Original foo CLAUDE" > backend/services/foo/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add backend/services/foo/CLAUDE.md .local-overrides.yaml backend/.local-overrides.yaml backend/services/.local-overrides.yaml
+
+    git-local-override apply >/dev/null
+
+    if grep -q "SERVICES PRIVATE" backend/services/foo/CLAUDE.md; then
+        pass "Grandchild explicit pattern overrides inherited pattern"
+    else
+        fail "Grandchild explicit pattern did not override inherited behavior"
+    fi
+}
+
+test_recursive_add_uses_inherited_pattern() {
+    info "Testing add uses inherited parent pattern..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend/services/foo
+    cat > backend/.local-overrides.yaml << 'EOF'
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    echo "# Backend nested target" > backend/services/foo/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add backend/services/foo/CLAUDE.md backend/.local-overrides.yaml .local-overrides.yaml
+
+    git-local-override add backend/services/foo/CLAUDE.md >/dev/null 2>&1 || true
+
+    if [[ -f "backend/services/foo/CLAUDE.local.md" ]]; then
+        pass "Add uses inherited parent pattern"
+    else
+        fail "Add did not use inherited parent pattern"
+    fi
+}
+
 test_list_shows_grouped_targets() {
     info "Testing list command shows grouped targets..."
     cd "$TEST_REPO"
@@ -1141,6 +1251,9 @@ main() {
         test_recursive_child_config_overrides_parent_subtree \
         test_recursive_parent_targeting_child_subtree_errors \
         test_recursive_add_uses_nearest_config_pattern \
+        test_recursive_child_inherits_parent_pattern \
+        test_recursive_grandchild_overrides_inherited_pattern \
+        test_recursive_add_uses_inherited_pattern \
         test_missing_pattern_error \
         test_init_config_has_pattern \
         test_list_shows_pattern \
