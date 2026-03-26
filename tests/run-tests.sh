@@ -1101,6 +1101,84 @@ EOF
     fi
 }
 
+test_recursive_empty_child_blocks_parent_targets() {
+    info "Testing empty child config blocks parent subtree targets..."
+
+    cd "$TEST_REPO"
+
+    mkdir -p backend
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: backend/CLAUDE.local.md
+    replaces:
+      - backend/CLAUDE.md
+EOF
+
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override list 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"belongs to a child subtree config"* ]]; then
+        pass "Empty child config blocks parent subtree targets"
+    else
+        fail "Expected empty child config to block parent subtree targets (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_recursive_empty_child_still_allows_deeper_config() {
+    info "Testing empty child config still allows deeper ownership..."
+
+    cd "$TEST_REPO"
+
+    mkdir -p backend/services/foo
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+EOF
+
+    cat > backend/services/.local-overrides.yaml << 'EOF'
+pattern: ".deep"
+files:
+  - override: CLAUDE.deep.md
+    replaces:
+      - foo/CLAUDE.md
+EOF
+
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+    echo "# SERVICES DEEP" > backend/services/CLAUDE.deep.md
+    echo "# Original foo CLAUDE" > backend/services/foo/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add \
+        backend/services/foo/CLAUDE.md \
+        .local-overrides.yaml \
+        backend/.local-overrides.yaml \
+        backend/services/.local-overrides.yaml
+
+    git-local-override apply >/dev/null
+
+    if grep -q "ROOT LOCAL" CLAUDE.md && grep -q "SERVICES DEEP" backend/services/foo/CLAUDE.md; then
+        pass "Empty child config still allows deeper config ownership"
+    else
+        fail "Deeper config did not apply beneath empty child config"
+    fi
+}
+
 test_list_shows_grouped_targets() {
     info "Testing list command shows grouped targets..."
     cd "$TEST_REPO"
@@ -1461,6 +1539,8 @@ main() {
         test_recursive_escape_is_rejected_by_hook_validation \
         test_recursive_three_level_nearest_config_wins \
         test_recursive_three_level_add_uses_nearest_pattern \
+        test_recursive_empty_child_blocks_parent_targets \
+        test_recursive_empty_child_still_allows_deeper_config \
         test_missing_pattern_error \
         test_init_config_has_pattern \
         test_list_shows_pattern \
