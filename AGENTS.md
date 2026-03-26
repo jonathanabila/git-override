@@ -14,12 +14,15 @@ git-local-override/
 │   └── git-local-override        # Main command-line interface
 ├── hooks/                        # Git hook scripts
 │   ├── local-override-lib.sh     # Shared library functions
+│   ├── local-override-resolver.sh # Installed shared resolver runtime copy
 │   ├── local-override-filter-smudge   # Smudge filter (checkout)
 │   ├── local-override-filter-clean    # Clean filter (staging)
 │   ├── local-override-post-checkout
 │   ├── local-override-pre-rebase
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
+├── shared/                       # Shared shell modules
+│   └── local-override-resolver.sh # Canonical recursive config resolver
 ├── scripts/                      # Installation and release scripts
 │   ├── install.sh
 │   ├── uninstall.sh
@@ -89,7 +92,7 @@ git-local-override uses **smudge/clean filter drivers** (same mechanism as git-l
 - **Roundtrip**: `clean(smudge(original)) == original` makes git consider files unchanged
 - **Configuration**: Via `.git/info/attributes` (local, not tracked) and `git config filter.local-override.*`
 - **Bypass**: Set `GIT_LOCAL_OVERRIDE_DISABLE=1` to temporarily disable filters
-- **Coexistence**: Filters and hooks work together — filters handle content transformation, hooks handle skip-worktree management
+- **Coexistence**: Filters and hooks work together — filters handle content transformation, while hooks/CLI handle restore/reapply flows and clear legacy `skip-worktree` bits from older installs when found
 
 ## Code Guidelines
 
@@ -298,7 +301,7 @@ Called before commit. Key behavior:
 
 Called before `git rebase`. Key behavior:
 
-- Clears skip-worktree on configured target files
+- Clears legacy skip-worktree bits on configured target files when present
 - Restores original tracked content for configured targets before rebase starts
 - Prevents rebase checkout/detach failures like "local changes would be overwritten by checkout"
 - Fast exit if no config file
@@ -332,13 +335,13 @@ Optional CLI tool. Key functions:
 - `cmd_remove()` - Remove override, restore original
 - `cmd_list()` - Show configured files and status
 - `cmd_status()` - Show detailed system status (config, hooks, pattern, filter status)
-- `cmd_apply()` - Manually apply all overrides (sets skip-worktree, syncs filters)
-- `cmd_restore()` - Manually restore all originals (clears skip-worktree)
-- `cmd_sync_filters()` - Sync filter configuration with config file
+- `cmd_apply()` - Manually apply all overrides using the shared recursive resolver
+- `cmd_restore()` - Manually restore all originals
+- `cmd_sync_filters()` - Sync filter configuration with the effective recursive config and clear legacy managed `skip-worktree` bits
 - `cmd_filter_smudge()` - Internal: smudge filter for git filter driver
 - `cmd_filter_clean()` - Internal: clean filter for git filter driver
 - `cmd_init_config()` - Create a `.local-overrides.yaml` template
-- `read_config()` - Parse config file (duplicated from lib for standalone operation)
+- The CLI loads `shared/local-override-resolver.sh` from the repo checkout during development or its installed support directory at runtime
 
 ## Common Tasks
 
