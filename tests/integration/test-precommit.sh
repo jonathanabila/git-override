@@ -162,6 +162,7 @@ configure_test_repo() {
 
     mkdir -p .git/hooks
     cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
+    cp "$PROJECT_DIR/shared/local-override-resolver.sh" .git/hooks/
 
     # Create local override file
     echo "# MY LOCAL CLAUDE.md - pre-commit test" > CLAUDE.local.md
@@ -438,6 +439,7 @@ EOF
     # Copy lib to hooks dir (needed for hooks to work)
     mkdir -p .git/hooks
     cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
+    cp "$PROJECT_DIR/shared/local-override-resolver.sh" .git/hooks/
 
     # Create local-overrides config
     cat > .local-overrides.yaml << 'EOF'

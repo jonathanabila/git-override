@@ -120,6 +120,7 @@ install_test_hooks() {
     mkdir -p "$common_git_dir/hooks"
 
     cp "$project_dir/hooks/local-override-lib.sh" "$common_git_dir/hooks/"
+    cp "$project_dir/shared/local-override-resolver.sh" "$common_git_dir/hooks/"
     cp "$project_dir/hooks/local-override-filter-smudge" "$common_git_dir/hooks/"
     cp "$project_dir/hooks/local-override-filter-clean" "$common_git_dir/hooks/"
 

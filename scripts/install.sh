@@ -78,6 +78,14 @@ get_lib_content() {
     fi
 }
 
+get_shared_resolver_content() {
+    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
+        cat "$PROJECT_DIR/shared/local-override-resolver.sh"
+    else
+        curl -fsSL "$REMOTE_BASE/shared/local-override-resolver.sh"
+    fi
+}
+
 get_cli_content() {
     if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/bin/git-local-override" ]]; then
         cat "$PROJECT_DIR/bin/git-local-override"
@@ -269,18 +277,18 @@ read_config_pairs() {
     local repo_root="$1"
     local lib_file=""
 
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/hooks/local-override-lib.sh" ]]; then
-        lib_file="$PROJECT_DIR/hooks/local-override-lib.sh"
+    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
+        lib_file="$PROJECT_DIR/shared/local-override-resolver.sh"
     else
         lib_file="$(mktemp)"
-        get_lib_content > "$lib_file"
+        get_shared_resolver_content > "$lib_file"
     fi
 
     # shellcheck disable=SC1090
     source "$lib_file"
     read_config "$repo_root"
 
-    if [[ -z "$PROJECT_DIR" || "$lib_file" != "$PROJECT_DIR/hooks/local-override-lib.sh" ]]; then
+    if [[ -z "$PROJECT_DIR" || "$lib_file" != "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
         rm -f "$lib_file"
     fi
 }
@@ -296,6 +304,15 @@ install_filter_scripts_to_dir() {
         chmod +x "$hooks_dir/$filter_script"
         success "Installed: $hooks_dir/$filter_script"
     done
+}
+
+install_shared_resolver_to_dir() {
+    local target_dir="$1"
+
+    mkdir -p "$target_dir"
+    get_shared_resolver_content > "$target_dir/local-override-resolver.sh"
+    chmod +x "$target_dir/local-override-resolver.sh"
+    success "Installed: $target_dir/local-override-resolver.sh"
 }
 
 sync_attributes() {
@@ -426,6 +443,7 @@ install_hooks_to_dir() {
     get_lib_content > "$lib_dir/local-override-lib.sh"
     chmod +x "$lib_dir/local-override-lib.sh"
     success "Installed: $lib_dir/local-override-lib.sh"
+    install_shared_resolver_to_dir "$lib_dir"
 
     # Install each hook
     for hook_type in post-checkout pre-commit post-commit pre-rebase; do
@@ -520,12 +538,17 @@ install_to_template() {
 # Install CLI tool
 install_cli() {
     local bin_dir="${HOME}/.local/bin"
+    local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override"
     mkdir -p "$bin_dir"
+    mkdir -p "$data_dir"
 
     info "Installing CLI tool..."
     get_cli_content > "$bin_dir/git-local-override"
     chmod +x "$bin_dir/git-local-override"
     success "Installed: $bin_dir/git-local-override"
+    get_shared_resolver_content > "$data_dir/local-override-resolver.sh"
+    chmod +x "$data_dir/local-override-resolver.sh"
+    success "Installed: $data_dir/local-override-resolver.sh"
 
     # Check if bin_dir is in PATH
     if [[ ":$PATH:" != *":$bin_dir:"* ]]; then

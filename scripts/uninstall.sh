@@ -5,6 +5,7 @@
 # Removes the git local-override system.
 # This removes:
 #   - CLI tool from ~/.local/bin
+#   - CLI shared resolver from ~/.local/share/git-local-override
 #   - Repository managed hooks/config (when run inside a repository)
 #   - Global template managed hooks (if --global was used)
 #   - Global filter.local-override.* config
@@ -16,6 +17,7 @@ set -euo pipefail
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/git"
 TEMPLATE_HOOKS_DIR="$CONFIG_DIR/template/hooks"
 BIN_DIR="${HOME}/.local/bin"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override"
 
 # Exact marker used to identify installer-managed wrapper hooks.
 MANAGED_HOOK_MARKER_PREFIX="# git-local-override-managed-hook:"
@@ -155,6 +157,7 @@ remove_managed_hook_artifacts() {
 
     for artifact in \
         local-override-lib.sh \
+        local-override-resolver.sh \
         local-override-filter-smudge \
         local-override-filter-clean \
         local-override-post-checkout \
@@ -224,6 +227,16 @@ remove_cli_tool() {
         success "Removed: $cli_tool"
     else
         info "CLI tool not found (already removed?)"
+    fi
+
+    local resolver_file="$DATA_DIR/local-override-resolver.sh"
+    if [[ -f "$resolver_file" ]]; then
+        rm "$resolver_file"
+        success "Removed: $resolver_file"
+    fi
+
+    if [[ -d "$DATA_DIR" ]] && [[ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]]; then
+        rmdir "$DATA_DIR" 2>/dev/null || true
     fi
 }
 

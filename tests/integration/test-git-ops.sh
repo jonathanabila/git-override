@@ -94,6 +94,7 @@ setup_seed_repo() {
     # Install hooks directly (simulating install.sh --repo)
     mkdir -p .git/hooks
     cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
+    cp "$PROJECT_DIR/shared/local-override-resolver.sh" .git/hooks/
     cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
     cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
     cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit

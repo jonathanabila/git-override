@@ -992,6 +992,7 @@ test_install_cli() {
 
     # Check CLI was installed
     local cli_path="$HOME/.local/bin/git-local-override"
+    local resolver_path="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override/local-override-resolver.sh"
     if [[ -f "$cli_path" ]]; then
         pass "CLI tool installed"
     else
@@ -1004,6 +1005,13 @@ test_install_cli() {
         pass "CLI tool is executable"
     else
         fail "CLI tool not executable"
+        return 1
+    fi
+
+    if [[ -f "$resolver_path" ]]; then
+        pass "CLI shared resolver installed"
+    else
+        fail "CLI shared resolver not installed"
         return 1
     fi
 
@@ -1519,6 +1527,7 @@ EOF
         post-checkout \
         pre-rebase \
         local-override-lib.sh \
+        local-override-resolver.sh \
         local-override-filter-smudge \
         local-override-filter-clean \
         local-override-pre-rebase; do
@@ -1575,8 +1584,9 @@ EOF
     }
 
     if [[ ! -f "$common_hooks_dir/local-override-filter-smudge" ]] ||
-       [[ ! -f "$common_hooks_dir/local-override-filter-clean" ]]; then
-        fail "Pre-condition: linked worktree filter scripts missing from common hooks directory"
+       [[ ! -f "$common_hooks_dir/local-override-filter-clean" ]] ||
+       [[ ! -f "$common_hooks_dir/local-override-resolver.sh" ]]; then
+        fail "Pre-condition: linked worktree managed helper scripts missing from common hooks directory"
         return 1
     fi
 
@@ -1605,11 +1615,12 @@ EOF
     pass "Linked worktree filter config removed"
 
     if [[ -f "$common_hooks_dir/local-override-filter-smudge" ]] ||
-       [[ -f "$common_hooks_dir/local-override-filter-clean" ]]; then
-        fail "Managed filter scripts were not removed from common hooks directory"
+       [[ -f "$common_hooks_dir/local-override-filter-clean" ]] ||
+       [[ -f "$common_hooks_dir/local-override-resolver.sh" ]]; then
+        fail "Managed helper scripts were not removed from common hooks directory"
         return 1
     fi
-    pass "Managed filter scripts removed from common hooks directory"
+    pass "Managed helper scripts removed from common hooks directory"
 
     if [[ -f "$attributes_file" ]] && grep -q "filter=local-override" "$attributes_file"; then
         fail "Linked worktree attributes still contains managed filter entries"
@@ -1647,6 +1658,11 @@ EOF
 
     if [[ ! -f ".git/hooks/local-override-filter-clean" ]]; then
         fail "Filter clean script not installed"
+        return 1
+    fi
+
+    if [[ ! -f ".git/hooks/local-override-resolver.sh" ]]; then
+        fail "Shared resolver script not installed"
         return 1
     fi
 
