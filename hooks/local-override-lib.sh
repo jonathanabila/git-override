@@ -29,6 +29,42 @@ get_override_for_file() {
     get_override_for_target "$file_path" "$repo_root" || return 0
 }
 
+clear_legacy_skip_worktree() {
+    local repo_root="$1"
+    local repaired_count=0
+    local seen_targets=""
+    local entry=""
+    local target=""
+    local ls_output=""
+
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+
+        target="${entry%%|*}"
+        [[ -n "$target" ]] || continue
+
+        if echo "$seen_targets" | grep -qxF "$target"; then
+            continue
+        fi
+        seen_targets="$seen_targets
+$target"
+
+        if ! git -C "$repo_root" ls-files --error-unmatch -- "$target" >/dev/null 2>&1; then
+            continue
+        fi
+
+        ls_output="$(git -C "$repo_root" ls-files -v -- "$target" 2>/dev/null || true)"
+        if [[ "${ls_output:0:1}" != "S" ]]; then
+            continue
+        fi
+
+        git -C "$repo_root" update-index --no-skip-worktree -- "$target"
+        ((repaired_count++)) || true
+    done < <(read_config "$repo_root")
+
+    printf '%s\n' "$repaired_count"
+}
+
 get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null
 }
