@@ -4,7 +4,7 @@ This document provides guidelines for AI agents working on the git-local-overrid
 
 ## Project Overview
 
-git-local-override is a bash-based tool that allows users to maintain local modifications to git-tracked files without committing them. It uses git hooks to transparently manage file content based on a config file (`.local-overrides.yaml`) in the repository.
+git-local-override is a bash-based tool that allows users to maintain local modifications to git-tracked files without committing them. It uses git hooks to transparently manage file content based on recursive config files (`.local-overrides.yaml`) in the repository.
 
 ## Repository Structure
 
@@ -64,7 +64,7 @@ git-local-override/
 
 The system is config-driven, not registry-based:
 
-1. **Config file** (`.local-overrides.yaml`): Checked into repo, lists files that can be overridden
+1. **Config files** (`.local-overrides.yaml`): Checked into repo, discovered recursively, list files that can be overridden
 2. **Local files** (`.local.*`): User creates these locally, gitignored
 3. **Hooks**: Read config, apply/restore local files automatically
 
@@ -270,7 +270,7 @@ Shared library sourced by all hooks. Key functions:
 
 - `get_repo_root()` - Get repository root directory
 - `read_pattern()` - Read the `pattern:` field from config file
-- `read_config()` - Parse `.local-overrides.yaml`, returns `target|override` pairs
+- `read_config()` - Parse recursive `.local-overrides.yaml` files, returns effective `target|override` pairs
 - `get_active_overrides()` - Get files with existing override files
 - `get_override_files()` - List unique override files from config
 - `get_targets_for_override()` - Get all target files for a specific override

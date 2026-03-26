@@ -24,38 +24,317 @@
 #         - CLAUDE.md
 #
 
+CONFIG_FILE_NAME=".local-overrides.yaml"
+
 # Get repo root
 get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null
 }
 
-# Read the pattern field from config file
-# Returns the pattern string, or empty if not found
-read_pattern() {
+trim_config_value() {
+    local value="$1"
+
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+
+    printf '%s\n' "$value"
+}
+
+config_dir_for_path() {
+    local config_path="$1"
+
+    if [[ "$config_path" == */* ]]; then
+        printf '%s\n' "${config_path%/*}"
+    else
+        printf '.\n'
+    fi
+}
+
+path_is_within_dir() {
+    local path="$1"
+    local dir="$2"
+
+    if [[ "$dir" == "." ]]; then
+        return 0
+    fi
+
+    [[ "$path" == "$dir" || "$path" == "$dir/"* ]]
+}
+
+dir_is_descendant_of() {
+    local parent_dir="$1"
+    local child_dir="$2"
+
+    if [[ "$parent_dir" == "." ]]; then
+        [[ "$child_dir" != "." ]]
+        return
+    fi
+
+    [[ "$child_dir" == "$parent_dir/"* ]]
+}
+
+normalize_config_path() {
+    local base_dir="$1"
+    local raw_path="$2"
+    local combined_path=""
+    local part=""
+    local normalized=""
+    local last_index=0
+    local -a path_parts
+    local -a normalized_parts
+
+    [[ -n "$raw_path" ]] || return 1
+    [[ "$raw_path" != /* ]] || return 1
+
+    if [[ "$base_dir" == "." || -z "$base_dir" ]]; then
+        combined_path="$raw_path"
+    else
+        combined_path="$base_dir/$raw_path"
+    fi
+
+    IFS='/' read -r -a path_parts <<< "$combined_path"
+    for part in "${path_parts[@]}"; do
+        if [[ -z "$part" || "$part" == "." ]]; then
+            continue
+        fi
+
+        if [[ "$part" == ".." ]]; then
+            if [[ ${#normalized_parts[@]} -eq 0 ]]; then
+                return 1
+            fi
+            last_index=$((${#normalized_parts[@]} - 1))
+            unset "normalized_parts[$last_index]"
+            continue
+        fi
+
+        normalized_parts+=("$part")
+    done
+
+    for part in "${normalized_parts[@]}"; do
+        if [[ -n "$normalized" ]]; then
+            normalized="$normalized/$part"
+        else
+            normalized="$part"
+        fi
+    done
+
+    [[ -n "$normalized" ]] || return 1
+    printf '%s\n' "$normalized"
+}
+
+discover_config_files() {
     local repo_root="$1"
-    local config_file="$repo_root/.local-overrides.yaml"
+    local seen=""
+    local path=""
+
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        [[ -n "$path" ]] || continue
+        [[ "$path" == "$CONFIG_FILE_NAME" || "$path" == */$CONFIG_FILE_NAME ]] || continue
+        [[ -f "$repo_root/$path" ]] || continue
+
+        if echo "$seen" | grep -qxF "$path"; then
+            continue
+        fi
+
+        seen="$seen
+$path"
+        printf '%s\n' "$path"
+    done < <(git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name 2>/dev/null | LC_ALL=C sort)
+}
+
+has_any_config() {
+    local repo_root="$1"
+    local config_path=""
+
+    while IFS= read -r config_path || [[ -n "$config_path" ]]; do
+        [[ -n "$config_path" ]] || continue
+        return 0
+    done < <(discover_config_files "$repo_root")
+
+    return 1
+}
+
+read_pattern_from_config() {
+    local repo_root="$1"
+    local config_path="$2"
+    local config_file="$repo_root/$config_path"
+    local line=""
 
     [[ -f "$config_file" ]] || return 0
 
-    local line
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip empty lines and comments
         [[ -z "$line" || "$line" == \#* ]] && continue
-        # Match pattern: "pattern: .something" or 'pattern: ".something"'
+
         if [[ "$line" =~ ^pattern:[[:space:]]*(.+)$ ]]; then
-            local pattern="${BASH_REMATCH[1]}"
-            # Remove quotes if present
-            pattern="${pattern#\"}"
-            pattern="${pattern%\"}"
-            pattern="${pattern#\'}"
-            pattern="${pattern%\'}"
-            # Trim whitespace
-            pattern="${pattern#"${pattern%%[![:space:]]*}"}"
-            pattern="${pattern%"${pattern##*[![:space:]]}"}"
-            echo "$pattern"
-            return
+            trim_config_value "${BASH_REMATCH[1]}"
+            return 0
         fi
     done < "$config_file"
+
+    return 0
+}
+
+# Read the root config pattern for backward-compatible callers.
+read_pattern() {
+    local repo_root="$1"
+    read_pattern_from_config "$repo_root" "$CONFIG_FILE_NAME"
+}
+
+find_nearest_config_for_path() {
+    local repo_root="$1"
+    local path="$2"
+    local current_dir=""
+    local candidate=""
+
+    if [[ "$path" == */* ]]; then
+        current_dir="${path%/*}"
+    else
+        current_dir="."
+    fi
+
+    while true; do
+        if [[ "$current_dir" == "." ]]; then
+            candidate="$CONFIG_FILE_NAME"
+        else
+            candidate="$current_dir/$CONFIG_FILE_NAME"
+        fi
+
+        if [[ -f "$repo_root/$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+
+        if [[ "$current_dir" == "." ]]; then
+            break
+        fi
+
+        if [[ "$current_dir" == */* ]]; then
+            current_dir="${current_dir%/*}"
+        else
+            current_dir="."
+        fi
+    done
+
+    return 1
+}
+
+get_effective_pattern_for_config() {
+    local repo_root="$1"
+    local config_path="$2"
+    local current_config="$config_path"
+    local current_dir=""
+    local pattern=""
+
+    while true; do
+        pattern="$(read_pattern_from_config "$repo_root" "$current_config")"
+        if [[ -n "$pattern" ]]; then
+            printf '%s\n' "$pattern"
+            return 0
+        fi
+
+        current_dir="$(config_dir_for_path "$current_config")"
+        if [[ "$current_dir" == "." ]]; then
+            break
+        fi
+
+        if [[ "$current_dir" == */* ]]; then
+            current_dir="${current_dir%/*}"
+            current_config="$current_dir/$CONFIG_FILE_NAME"
+        else
+            current_config="$CONFIG_FILE_NAME"
+        fi
+    done
+
+    return 0
+}
+
+read_config_entries_for_file() {
+    local repo_root="$1"
+    local config_path="$2"
+    local config_file="$repo_root/$config_path"
+    local config_dir=""
+    local current_override=""
+    local in_files_section=false
+    local in_replaces_section=false
+    local line=""
+    local target=""
+
+    [[ -f "$config_file" ]] || return 0
+
+    config_dir="$(config_dir_for_path "$config_path")"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+
+        if [[ "$line" =~ ^files:[[:space:]]*$ ]]; then
+            in_files_section=true
+            in_replaces_section=false
+            continue
+        fi
+
+        if [[ "$line" =~ ^pattern: ]]; then
+            continue
+        fi
+
+        if [[ "$line" =~ ^[a-z_]+:[[:space:]]*$ && ! "$line" =~ ^[[:space:]] ]]; then
+            in_files_section=false
+            in_replaces_section=false
+            continue
+        fi
+
+        [[ "$in_files_section" == true ]] || continue
+
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+override:[[:space:]]+(.+)$ ]]; then
+            current_override="$(trim_config_value "${BASH_REMATCH[1]}")"
+            current_override="$(normalize_config_path "$config_dir" "$current_override")" || return 1
+            in_replaces_section=false
+            continue
+        fi
+
+        if [[ -n "$current_override" && "$line" =~ ^[[:space:]]+replaces:[[:space:]]*$ ]]; then
+            in_replaces_section=true
+            continue
+        fi
+
+        if [[ "$in_replaces_section" == true && "$line" =~ ^[[:space:]]+-[[:space:]]+(.+)$ ]]; then
+            target="$(trim_config_value "${BASH_REMATCH[1]}")"
+            target="$(normalize_config_path "$config_dir" "$target")" || return 1
+            [[ -n "$target" ]] && printf '%s|%s\n' "$target" "$current_override"
+            continue
+        fi
+
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]]; then
+            in_replaces_section=false
+            current_override=""
+        fi
+    done < "$config_file"
+}
+
+target_is_shadowed_by_child_config() {
+    local repo_root="$1"
+    local config_path="$2"
+    local target="$3"
+    local config_dir=""
+    local child_config=""
+    local child_dir=""
+
+    config_dir="$(config_dir_for_path "$config_path")"
+
+    while IFS= read -r child_config || [[ -n "$child_config" ]]; do
+        [[ -n "$child_config" ]] || continue
+        [[ "$child_config" != "$config_path" ]] || continue
+
+        child_dir="$(config_dir_for_path "$child_config")"
+        if dir_is_descendant_of "$config_dir" "$child_dir" && path_is_within_dir "$target" "$child_dir"; then
+            return 0
+        fi
+    done < <(discover_config_files "$repo_root")
+
+    return 1
 }
 
 # Validate config file format
@@ -63,134 +342,104 @@ read_pattern() {
 # Outputs warning/error messages to stderr
 validate_config() {
     local repo_root="$1"
-    local config_file="$repo_root/.local-overrides.yaml"
-
-    # Check if config exists
-    if [[ ! -f "$config_file" ]]; then
-        return 0  # No config is valid (nothing to do)
-    fi
-
-    # Check for required pattern field
-    local pattern
-    pattern="$(read_pattern "$repo_root")"
-    if [[ -z "$pattern" ]]; then
-        echo "Error: Missing required 'pattern:' field in .local-overrides.yaml" >&2
-        echo "  Add a pattern field at the top of your config:" >&2
-        echo "    pattern: \".local\"" >&2
-        return 1
-    fi
-
-    # Check for duplicate target files
     local seen_targets=""
-    local entry target override
-    while IFS= read -r entry || [[ -n "$entry" ]]; do
-        [[ -z "$entry" ]] && continue
-        target="${entry%%|*}"
-        override="${entry#*|}"
+    local config_path=""
+    local config_dir=""
+    local pattern=""
+    local entry=""
+    local target=""
+    local override=""
 
-        # Check if target was already seen
-        if echo "$seen_targets" | grep -qxF "$target"; then
-            echo "Error: Duplicate target file '$target' in config" >&2
-            echo "  Each file can only appear in one 'replaces:' list" >&2
+    if ! has_any_config "$repo_root"; then
+        return 0
+    fi
+
+    while IFS= read -r config_path || [[ -n "$config_path" ]]; do
+        [[ -n "$config_path" ]] || continue
+
+        pattern="$(get_effective_pattern_for_config "$repo_root" "$config_path")"
+        if [[ -z "$pattern" ]]; then
+            echo "Error: Missing required 'pattern:' field for '$config_path'" >&2
+            echo "  Add a pattern field there or in an ancestor $CONFIG_FILE_NAME:" >&2
+            echo "    pattern: \".local\"" >&2
             return 1
         fi
-        seen_targets="$seen_targets
+
+        config_dir="$(config_dir_for_path "$config_path")"
+
+        while IFS= read -r entry || [[ -n "$entry" ]]; do
+            [[ -n "$entry" ]] || continue
+            target="${entry%%|*}"
+            override="${entry#*|}"
+
+            if ! path_is_within_dir "$target" "$config_dir"; then
+                echo "Error: Target '$target' in '$config_path' escapes its subtree" >&2
+                return 1
+            fi
+
+            if ! path_is_within_dir "$override" "$config_dir"; then
+                echo "Error: Override '$override' in '$config_path' escapes its subtree" >&2
+                return 1
+            fi
+
+            if [[ "$target" == "$override" ]]; then
+                echo "Error: Target '$target' in '$config_path' cannot replace itself" >&2
+                return 1
+            fi
+
+            if [[ "$target" == "$CONFIG_FILE_NAME" || "$target" == */$CONFIG_FILE_NAME ]]; then
+                echo "Error: '$config_path' cannot manage another $CONFIG_FILE_NAME file ('$target')" >&2
+                return 1
+            fi
+
+            if target_is_shadowed_by_child_config "$repo_root" "$config_path" "$target"; then
+                echo "Error: Target '$target' in '$config_path' belongs to a child subtree config" >&2
+                return 1
+            fi
+
+            if echo "$seen_targets" | grep -qxF "$target"; then
+                echo "Error: Duplicate target file '$target' across recursive configs" >&2
+                echo "  Each file can only appear in one effective 'replaces:' list" >&2
+                return 1
+            fi
+
+            seen_targets="$seen_targets
 $target"
-    done < <(read_config "$repo_root")
+        done < <(read_config_entries_for_file "$repo_root" "$config_path")
+    done < <(discover_config_files "$repo_root")
 
     return 0
 }
 
-# Read config file and output list of target|override pairs
+# Read all effective config entries across recursive configs.
 # Output format: target|override (one line per target file)
-#
-# Example config:
-#   files:
-#     - override: AGENTS.local.md
-#       replaces:
-#         - AGENTS.md
-#         - CLAUDE.md
-#
-# Example output:
-#   AGENTS.md|AGENTS.local.md
-#   CLAUDE.md|AGENTS.local.md
-#
 read_config() {
     local repo_root="$1"
-    local config_file="$repo_root/.local-overrides.yaml"
+    local seen_targets=""
+    local config_path=""
+    local entry=""
+    local target=""
 
-    [[ -f "$config_file" ]] || return 0
+    while IFS= read -r config_path || [[ -n "$config_path" ]]; do
+        [[ -n "$config_path" ]] || continue
 
-    local in_files_section=false
-    local in_replaces_section=false
-    local current_override=""
-    local line
+        while IFS= read -r entry || [[ -n "$entry" ]]; do
+            [[ -n "$entry" ]] || continue
+            target="${entry%%|*}"
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip empty lines and comments
-        [[ -z "$line" || "$line" == \#* ]] && continue
+            if target_is_shadowed_by_child_config "$repo_root" "$config_path" "$target"; then
+                continue
+            fi
 
-        # Check for files: section start
-        if [[ "$line" =~ ^files:[[:space:]]*$ ]]; then
-            in_files_section=true
-            in_replaces_section=false
-            continue
-        fi
+            if echo "$seen_targets" | grep -qxF "$target"; then
+                continue
+            fi
 
-        # Skip pattern: line
-        if [[ "$line" =~ ^pattern: ]]; then
-            continue
-        fi
-
-        # Stop if we hit another top-level key (non-indented, ends with :)
-        if [[ "$line" =~ ^[a-z_]+:[[:space:]]*$ && ! "$line" =~ ^[[:space:]] ]]; then
-            in_files_section=false
-            in_replaces_section=false
-            continue
-        fi
-
-        [[ "$in_files_section" != true ]] && continue
-
-        # Handle override: line "  - override: AGENTS.local.md"
-        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+override:[[:space:]]+(.+)$ ]]; then
-            current_override="${BASH_REMATCH[1]}"
-            # Clean up quotes and whitespace
-            current_override="${current_override#\"}"
-            current_override="${current_override%\"}"
-            current_override="${current_override#\'}"
-            current_override="${current_override%\'}"
-            current_override="${current_override#"${current_override%%[![:space:]]*}"}"
-            current_override="${current_override%"${current_override##*[![:space:]]}"}"
-            in_replaces_section=false
-            continue
-        fi
-
-        # Handle replaces: section start
-        if [[ -n "$current_override" && "$line" =~ ^[[:space:]]+replaces:[[:space:]]*$ ]]; then
-            in_replaces_section=true
-            continue
-        fi
-
-        # Handle target files in replaces section "      - AGENTS.md"
-        if [[ "$in_replaces_section" == true && "$line" =~ ^[[:space:]]+-[[:space:]]+(.+)$ ]]; then
-            local target="${BASH_REMATCH[1]}"
-            # Clean up quotes and whitespace
-            target="${target#\"}"
-            target="${target%\"}"
-            target="${target#\'}"
-            target="${target%\'}"
-            target="${target#"${target%%[![:space:]]*}"}"
-            target="${target%"${target##*[![:space:]]}"}"
-            [[ -n "$target" ]] && echo "${target}|${current_override}"
-            continue
-        fi
-
-        # If we encounter a new list item without replaces, reset state
-        if [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]]; then
-            in_replaces_section=false
-            current_override=""
-        fi
-    done < "$config_file"
+            seen_targets="$seen_targets
+$target"
+            printf '%s\n' "$entry"
+        done < <(read_config_entries_for_file "$repo_root" "$config_path")
+    done < <(discover_config_files "$repo_root")
 }
 
 # Get override file path for a configured target file

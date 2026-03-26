@@ -32,7 +32,7 @@ main() {
         return 0
     fi
 
-    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
+    if ! has_any_config "$repo_root"; then
         cat
         return 0
     fi

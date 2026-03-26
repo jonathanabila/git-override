@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 
 ### Step 2: Create the config file
 
-Create `.local-overrides.yaml` in the repository root:
+Create `.local-overrides.yaml` in the repository root, or inside a subtree you want to own independently:
 
 ```yaml
 # .local-overrides.yaml
@@ -357,6 +357,40 @@ files:
 ```
 
 When you commit, if ANY file in a group is staged, ALL files in that group are restored to ensure consistency.
+
+### Recursive Configs
+
+`git-local-override` discovers `.local-overrides.yaml` recursively.
+
+- The nearest config owns its directory subtree
+- A child config fully replaces parent behavior for that subtree
+- Paths inside a nested config are resolved relative to that config's directory
+- Parent configs may not keep targeting files inside a child-owned subtree
+
+Example:
+
+```yaml
+# .local-overrides.yaml
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+```
+
+```yaml
+# backend/.local-overrides.yaml
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - CLAUDE.md
+```
+
+In that setup:
+- root `CLAUDE.md` uses `CLAUDE.local.md`
+- `backend/CLAUDE.md` uses `backend/CLAUDE.private.md`
+- the root config no longer applies inside `backend/`
 
 ### Custom Patterns
 

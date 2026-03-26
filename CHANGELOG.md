@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Recursive config discovery**: Added support for nested `.local-overrides.yaml` files with nearest-config-wins subtree ownership
+  - Child configs fully replace parent config behavior for their subtree
+  - Nested config `override:` and `replaces:` paths resolve relative to the config file's directory
+
 ### Changed
 
 - **Release publishing flow**: Switched releases to a maintainer-run signed commit plus signed annotated tag flow, with GitHub Actions publishing from pushed `vX.Y.Z` tags instead of committing or pushing `main`
 - **Release docs and workflow guardrails**: Clarified maintainer-only stable release steps, recovery commands, and release workflow wording around tag-derived versions and existing-release protection
+- **Validation and filter sync**: Recursive config validation now rejects parent entries targeting child-owned subtrees, and `.git/info/attributes` sync now emits only effective recursive targets
 
 ## [0.3.0] - 2026-03-18
 

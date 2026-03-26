@@ -5,7 +5,7 @@
 # Restores original content for overridden files before commit.
 # This ensures commits contain the original tracked content, not local overrides.
 #
-# This hook reads .local-overrides.yaml from the repo root and restores
+# This hook reads recursive .local-overrides.yaml files and restores
 # originals for any staged files that have local overrides.
 #
 # IMPORTANT: If ANY target in a group is staged, ALL targets in that group
@@ -26,8 +26,7 @@ main() {
     local repo_root
     repo_root="$(get_repo_root)" || return 0
 
-    # Quick exit if no config file
-    if [[ ! -f "$repo_root/.local-overrides.yaml" ]]; then
+    if ! has_any_config "$repo_root"; then
         return 0
     fi
 

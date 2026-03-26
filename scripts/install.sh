@@ -267,70 +267,22 @@ get_common_git_dir() {
 # Output format: target|override (one line per target file)
 read_config_pairs() {
     local repo_root="$1"
-    local config_file="$repo_root/.local-overrides.yaml"
+    local lib_file=""
 
-    [[ -f "$config_file" ]] || return 0
+    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/hooks/local-override-lib.sh" ]]; then
+        lib_file="$PROJECT_DIR/hooks/local-override-lib.sh"
+    else
+        lib_file="$(mktemp)"
+        get_lib_content > "$lib_file"
+    fi
 
-    local in_files_section=false
-    local in_replaces_section=false
-    local current_override=""
-    local line
+    # shellcheck disable=SC1090
+    source "$lib_file"
+    read_config "$repo_root"
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ -z "$line" || "$line" == \#* ]] && continue
-
-        if [[ "$line" =~ ^files:[[:space:]]*$ ]]; then
-            in_files_section=true
-            in_replaces_section=false
-            continue
-        fi
-
-        if [[ "$line" =~ ^pattern: ]]; then
-            continue
-        fi
-
-        if [[ "$line" =~ ^[a-z_]+:[[:space:]]*$ && ! "$line" =~ ^[[:space:]] ]]; then
-            in_files_section=false
-            in_replaces_section=false
-            continue
-        fi
-
-        [[ "$in_files_section" != true ]] && continue
-
-        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+override:[[:space:]]+(.+)$ ]]; then
-            current_override="${BASH_REMATCH[1]}"
-            current_override="${current_override#\"}"
-            current_override="${current_override%\"}"
-            current_override="${current_override#\'}"
-            current_override="${current_override%\'}"
-            current_override="${current_override#"${current_override%%[![:space:]]*}"}"
-            current_override="${current_override%"${current_override##*[![:space:]]}"}"
-            in_replaces_section=false
-            continue
-        fi
-
-        if [[ -n "$current_override" && "$line" =~ ^[[:space:]]+replaces:[[:space:]]*$ ]]; then
-            in_replaces_section=true
-            continue
-        fi
-
-        if [[ "$in_replaces_section" == true && "$line" =~ ^[[:space:]]+-[[:space:]]+(.+)$ ]]; then
-            local target="${BASH_REMATCH[1]}"
-            target="${target#\"}"
-            target="${target%\"}"
-            target="${target#\'}"
-            target="${target%\'}"
-            target="${target#"${target%%[![:space:]]*}"}"
-            target="${target%"${target##*[![:space:]]}"}"
-            [[ -n "$target" ]] && echo "${target}|${current_override}"
-            continue
-        fi
-
-        if [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]]; then
-            in_replaces_section=false
-            current_override=""
-        fi
-    done < "$config_file"
+    if [[ -z "$PROJECT_DIR" || "$lib_file" != "$PROJECT_DIR/hooks/local-override-lib.sh" ]]; then
+        rm -f "$lib_file"
+    fi
 }
 
 install_filter_scripts_to_dir() {
@@ -348,7 +300,6 @@ install_filter_scripts_to_dir() {
 
 sync_attributes() {
     local repo_root="$1"
-    local config_file="$repo_root/.local-overrides.yaml"
     local attributes_file
     local temp_file
 
@@ -379,7 +330,7 @@ sync_attributes() {
         done < "$attributes_file"
     fi
 
-    if [[ -f "$config_file" ]]; then
+    if git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name 2>/dev/null | grep -qxE '(.*/)?\.local-overrides\.yaml'; then
         local seen_targets=""
         local entry
         local target
@@ -444,7 +395,9 @@ repair_legacy_skip_worktree() {
     local lib_file="$2"
     local repaired_count="0"
 
-    [[ -f "$repo_root/.local-overrides.yaml" ]] || return 0
+    if ! git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name 2>/dev/null | grep -qxE '(.*/)?\.local-overrides\.yaml'; then
+        return 0
+    fi
     [[ -f "$lib_file" ]] || return 0
 
     repaired_count="$({

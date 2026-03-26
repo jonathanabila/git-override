@@ -679,10 +679,113 @@ test_list_shows_pattern() {
     local output
     output=$(git-local-override list)
 
-    if [[ "$output" == *"pattern:"* && "$output" == *".local"* ]]; then
-        pass "List command shows pattern"
+    if [[ "$output" == *"Configured overrides:"* ]]; then
+        pass "List command shows configured overrides"
     else
-        fail "List command does not show pattern"
+        fail "List command does not show configured overrides"
+    fi
+}
+
+test_recursive_child_config_overrides_parent_subtree() {
+    info "Testing child config overrides parent subtree..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+    echo "# BACKEND PRIVATE" > backend/CLAUDE.private.md
+    echo "# Original backend CLAUDE" > backend/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add backend/CLAUDE.md .local-overrides.yaml backend/.local-overrides.yaml
+
+    git-local-override apply >/dev/null
+
+    if grep -q "ROOT LOCAL" CLAUDE.md && grep -q "BACKEND PRIVATE" backend/CLAUDE.md; then
+        pass "Nearest child config owns its subtree"
+    else
+        fail "Recursive child config did not override parent subtree correctly"
+    fi
+}
+
+test_recursive_parent_targeting_child_subtree_errors() {
+    info "Testing parent config cannot target child-owned subtree..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: backend/CLAUDE.local.md
+    replaces:
+      - backend/CLAUDE.md
+EOF
+
+    mkdir -p backend
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override list 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"belongs to a child subtree config"* ]]; then
+        pass "Shadowed parent targets are rejected"
+    else
+        fail "Expected validation error for parent target in child subtree (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_recursive_add_uses_nearest_config_pattern() {
+    info "Testing add uses nearest config pattern..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend/services/foo
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: AGENTS.private.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    echo "# Backend nested target" > backend/services/foo/CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add backend/services/foo/CLAUDE.md backend/.local-overrides.yaml .local-overrides.yaml
+
+    git-local-override add backend/services/foo/CLAUDE.md >/dev/null 2>&1 || true
+
+    if [[ -f "backend/services/foo/CLAUDE.private.md" ]]; then
+        pass "Add uses nearest config pattern for nested target"
+    else
+        fail "Add did not use nearest config pattern"
     fi
 }
 
@@ -1035,6 +1138,9 @@ main() {
         test_file_not_in_config_error \
         test_hooks_check_for_config \
         test_custom_pattern \
+        test_recursive_child_config_overrides_parent_subtree \
+        test_recursive_parent_targeting_child_subtree_errors \
+        test_recursive_add_uses_nearest_config_pattern \
         test_missing_pattern_error \
         test_init_config_has_pattern \
         test_list_shows_pattern \
