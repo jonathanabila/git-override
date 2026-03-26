@@ -899,6 +899,107 @@ EOF
     fi
 }
 
+test_recursive_override_path_escape_errors() {
+    info "Testing override path cannot escape child subtree..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: ../CLAUDE.private.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override list 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"escapes its subtree"* ]]; then
+        pass "Override path escape is rejected"
+    else
+        fail "Expected override path escape validation error (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_recursive_target_path_escape_errors() {
+    info "Testing target path cannot escape child subtree..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - ../CLAUDE.md
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override list 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"escapes its subtree"* ]]; then
+        pass "Target path escape is rejected"
+    else
+        fail "Expected target path escape validation error (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_recursive_escape_is_rejected_by_hook_validation() {
+    info "Testing hook validation rejects nested path escapes..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - ../CLAUDE.md
+EOF
+
+    echo "# INVALID" > backend/CLAUDE.private.md
+
+    local output
+    local exit_code=0
+    output=$(.git/hooks/post-checkout "" "" "1" 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"escapes its subtree"* ]]; then
+        pass "Hook validation rejects escaped nested paths"
+    else
+        fail "Expected hook validation error for escaped nested path (exit: $exit_code, output: $output)"
+    fi
+}
+
 test_list_shows_grouped_targets() {
     info "Testing list command shows grouped targets..."
     cd "$TEST_REPO"
@@ -1254,6 +1355,9 @@ main() {
         test_recursive_child_inherits_parent_pattern \
         test_recursive_grandchild_overrides_inherited_pattern \
         test_recursive_add_uses_inherited_pattern \
+        test_recursive_override_path_escape_errors \
+        test_recursive_target_path_escape_errors \
+        test_recursive_escape_is_rejected_by_hook_validation \
         test_missing_pattern_error \
         test_init_config_has_pattern \
         test_list_shows_pattern \
