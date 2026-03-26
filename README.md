@@ -710,6 +710,7 @@ git-local-override/
 │   ├── local-override-filter-smudge   # Smudge filter (checkout)
 │   ├── local-override-filter-clean    # Clean filter (staging)
 │   ├── local-override-post-checkout
+│   ├── local-override-pre-rebase
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
 ├── shared/
@@ -734,8 +735,10 @@ git-local-override/
 <summary><strong>Running Tests</strong></summary>
 
 ```bash
-make test           # Run test suite
-make clean          # Clean test artifacts
+make test-docker        # Full Docker test matrix
+make test-docker-bash3  # Bash 3.2 compatibility matrix
+make test               # Quick local check
+make clean              # Clean test artifacts
 ```
 
 </details>

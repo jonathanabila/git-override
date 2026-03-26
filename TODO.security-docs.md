@@ -17,7 +17,7 @@
 - [completed] TODO 3: Define and document the symlink / path-boundary security position in `SECURITY.md` and only where else needed for accuracy.
 - [completed] TODO 4: Refresh `README.md` for recursive config behavior, edge cases, and shared resolver packaging details, aligned with the finalized security wording.
 - [completed] TODO 5: Refresh `AGENTS.md` for the shared resolver architecture and legacy skip-worktree repair behavior.
-- [pending] TODO 6: Do a final consistency pass across `SECURITY.md`, `README.md`, `AGENTS.md`, and `CHANGELOG.md`, then mark this tracker complete.
+- [completed] TODO 6: Do a final consistency pass across `SECURITY.md`, `README.md`, `AGENTS.md`, and `CHANGELOG.md`, then mark this tracker complete.
 
 ## Progress Log
 
@@ -26,3 +26,4 @@
 - 2026-03-26: Completed TODO 3 by documenting the current lexical-only path validation model and the symlink boundary limitation in `SECURITY.md`.
 - 2026-03-26: Completed TODO 4 by updating `README.md` for recursive edge cases, security notes, and shared resolver installation details.
 - 2026-03-26: Completed TODO 5 by updating `AGENTS.md` for the shared resolver layout and legacy skip-worktree repair behavior.
+- 2026-03-26: Completed TODO 6 with a final consistency pass across `SECURITY.md`, `README.md`, `AGENTS.md`, and `CHANGELOG.md`, including README development docs and changelog alignment.

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release docs and workflow guardrails**: Clarified maintainer-only stable release steps, recovery commands, and release workflow wording around tag-derived versions and existing-release protection
 - **Validation and filter sync**: Recursive config validation now rejects parent entries targeting child-owned subtrees, and `.git/info/attributes` sync now emits only effective recursive targets
 - **Resolver architecture**: Extracted the recursive config resolver into a shared module used by hooks, the CLI, and installer/runtime packaging to reduce duplication while preserving standalone CLI installs
+- **Documentation alignment**: Updated security, user, and maintainer docs for recursive config trust boundaries, shared resolver packaging, inherited nested patterns, empty-child subtree ownership, and current legacy `skip-worktree` repair behavior
 
 ## [0.3.0] - 2026-03-18
 
