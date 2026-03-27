@@ -22,6 +22,45 @@ fi
 # shellcheck source=local-override-resolver.sh
 source "$SHARED_RESOLVER_PATH"
 
+local_override_log() {
+    printf 'git-local-override: %s\n' "$*" >&2
+}
+
+local_override_trace_enabled() {
+    [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
+}
+
+run_with_lifecycle_logging() {
+    local operation_name="$1"
+    shift
+
+    local exit_code=0
+
+    local_override_log "$operation_name started"
+    "$@"
+    exit_code=$?
+
+    if [[ "$exit_code" -eq 0 ]]; then
+        local_override_log "$operation_name finished"
+        return 0
+    fi
+
+    local_override_log "$operation_name failed (exit $exit_code)"
+    return "$exit_code"
+}
+
+run_with_trace_logging() {
+    local operation_name="$1"
+    shift
+
+    if local_override_trace_enabled; then
+        run_with_lifecycle_logging "$operation_name" "$@"
+        return $?
+    fi
+
+    "$@"
+}
+
 get_override_for_file() {
     local repo_root="$1"
     local file_path="$2"

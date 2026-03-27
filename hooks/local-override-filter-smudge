@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=local-override-lib.sh
 source "$SCRIPT_DIR/local-override-lib.sh"
 
-main() {
+run_smudge_filter() {
     local file_path="${1:-}"
 
     if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
@@ -47,6 +47,17 @@ main() {
     fi
 
     cat
+}
+
+main() {
+    local file_path="${1:-}"
+    local operation_name="filter-smudge"
+
+    if [[ -n "$file_path" ]]; then
+        operation_name="$operation_name $file_path"
+    fi
+
+    run_with_trace_logging "$operation_name" run_smudge_filter "$@"
 }
 
 main "$@"

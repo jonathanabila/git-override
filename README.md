@@ -111,6 +111,24 @@ Security note:
 
 </details>
 
+<details>
+<summary><strong>Trace Checkout Hook Execution</strong></summary>
+
+Branch checkouts now emit lifecycle logs to stderr when the `post-checkout` hook runs:
+
+```text
+git-local-override: post-checkout started
+git-local-override: post-checkout finished
+```
+
+For deeper branch-switch debugging, set `GIT_LOCAL_OVERRIDE_TRACE=1` before checkout to also log smudge filter start/end events per file:
+
+```bash
+GIT_LOCAL_OVERRIDE_TRACE=1 git checkout dev
+```
+
+</details>
+
 ---
 
 ## ✨ What It Does
@@ -557,6 +575,23 @@ git-local-override status
 ```
 
 If hooks show "not installed", reinstall them.
+
+</details>
+
+<details>
+<summary><strong>Branch switching feels slow</strong></summary>
+
+Watch the hook lifecycle logs during checkout:
+
+```bash
+git checkout dev
+```
+
+If you need to see whether the smudge filter is spending time on many files, enable trace mode:
+
+```bash
+GIT_LOCAL_OVERRIDE_TRACE=1 git checkout dev
+```
 
 </details>
 

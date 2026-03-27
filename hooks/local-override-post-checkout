@@ -24,13 +24,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=local-override-lib.sh
 source "$SCRIPT_DIR/local-override-lib.sh"
 
-main() {
-    # Only apply on branch checkouts (3rd arg = 1), not file checkouts (3rd arg = 0)
-    # This allows `git checkout HEAD -- file` to work for restoring originals
-    local is_branch_checkout="${3:-1}"
-    if [[ "$is_branch_checkout" == "0" ]]; then
-        return 0
-    fi
+run_post_checkout() {
+    local _previous_head="${1:-}"
+    local _new_head="${2:-}"
 
     local repo_root
     repo_root="$(get_repo_root)" || return 0
@@ -75,6 +71,17 @@ main() {
     done < <(read_config "$repo_root")
 
     return 0
+}
+
+main() {
+    # Only apply on branch checkouts (3rd arg = 1), not file checkouts (3rd arg = 0)
+    # This allows `git checkout HEAD -- file` to work for restoring originals
+    local is_branch_checkout="${3:-1}"
+    if [[ "$is_branch_checkout" == "0" ]]; then
+        return 0
+    fi
+
+    run_with_lifecycle_logging "post-checkout" run_post_checkout "$@"
 }
 
 main "$@"

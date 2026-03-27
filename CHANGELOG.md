@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Checkout lifecycle logging**: `post-checkout` now emits `git-local-override: ... started` and `... finished` stderr logs so slow branch switches are visible while they happen
+- **Optional trace mode**: `GIT_LOCAL_OVERRIDE_TRACE=1` now adds start/end stderr logs for smudge filter executions during checkout debugging
+
 ### Changed
 
 - **`sync-filters` now shows progress logging**: Added `info` messages before each major step (validating config, syncing filter driver, syncing attributes, checking legacy skip-worktree) so users can see what the command is doing

@@ -381,6 +381,25 @@ test_post_checkout_hook() {
     fi
 }
 
+test_post_checkout_hook_logs_lifecycle() {
+    info "Testing post-checkout hook emits lifecycle logs..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# POST CHECKOUT LOG TEST" > CLAUDE.local.md
+
+    local output
+    output=$(.git/hooks/post-checkout "" "" "1" 2>&1)
+
+    if [[ "$output" == *"git-local-override: post-checkout started"* ]] &&
+       [[ "$output" == *"git-local-override: post-checkout finished"* ]]; then
+        pass "Post-checkout hook emits start and finish logs"
+    else
+        fail "Post-checkout hook did not emit lifecycle logs (output: $output)"
+    fi
+}
+
 test_pre_commit_hook() {
     info "Testing pre-commit hook behavior..."
 
@@ -1300,6 +1319,33 @@ test_filter_smudge_passthrough() {
     fi
 }
 
+test_filter_smudge_trace_env_var() {
+    info "Testing smudge filter trace logging when GIT_LOCAL_OVERRIDE_TRACE=1..."
+    cd "$TEST_REPO"
+    create_config
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+
+    if [[ ! -f "$smudge_script" ]]; then
+        fail "Smudge filter script not found"
+        return
+    fi
+
+    echo "# LOCAL TRACE CONTENT" > CLAUDE.local.md
+
+    local stdout_file="$CURRENT_TEST_ROOT/smudge-trace.stdout"
+    local stderr_file="$CURRENT_TEST_ROOT/smudge-trace.stderr"
+    printf '# Original content from git\n' | GIT_LOCAL_OVERRIDE_TRACE=1 "$smudge_script" CLAUDE.md > "$stdout_file" 2> "$stderr_file"
+
+    if grep -q "LOCAL TRACE CONTENT" "$stdout_file" &&
+       grep -q "git-local-override: filter-smudge CLAUDE.md started" "$stderr_file" &&
+       grep -q "git-local-override: filter-smudge CLAUDE.md finished" "$stderr_file"; then
+        pass "Smudge filter trace logs go to stderr"
+    else
+        fail "Smudge filter trace logging missing or redirected incorrectly"
+    fi
+}
+
 test_filter_clean_returns_original() {
     info "Testing clean filter returns original content from git..."
     cd "$TEST_REPO"
@@ -1555,6 +1601,7 @@ main() {
         test_remove_with_delete \
         test_nested_override \
         test_post_checkout_hook \
+        test_post_checkout_hook_logs_lifecycle \
         test_pre_commit_hook \
         test_post_commit_hook \
         test_status_command \
@@ -1584,6 +1631,7 @@ main() {
         test_list_shows_grouped_targets \
         test_filter_smudge_applies_override \
         test_filter_smudge_passthrough \
+        test_filter_smudge_trace_env_var \
         test_filter_clean_returns_original \
         test_filter_clean_passthrough \
         test_filter_roundtrip \
