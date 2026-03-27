@@ -119,7 +119,11 @@ discover_config_files() {
         seen="$seen
 $path"
         printf '%s\n' "$path"
-    done < <(git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name 2>/dev/null | LC_ALL=C sort)
+    done < <({
+        git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name 2>/dev/null
+        git -C "$repo_root" ls-files --others --ignored --exclude-standard --full-name \
+            -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null
+    } | LC_ALL=C sort)
 }
 
 has_any_config() {

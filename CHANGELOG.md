@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Config discovery now finds gitignored config files**: `discover_config_files()` now includes a second `git ls-files` pass for ignored files, so `.local-overrides.yaml` files that are untracked and gitignored (e.g. via `.git/info/exclude`) are no longer invisible to the tool
+
 ### Added
 
 - **CLI version command**: Added `git-local-override version` and `git-local-override --version` backed by a checked-in `VERSION` file so repo and installed CLI copies report the same release number
