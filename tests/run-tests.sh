@@ -245,6 +245,69 @@ test_override_is_applied() {
     fi
 }
 
+test_apply_shows_progress_output() {
+    info "Testing apply shows progress output..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# APPLY PROGRESS CLAUDE" > CLAUDE.local.md
+    echo "# APPLY PROGRESS AGENTS" > AGENTS.local.md
+
+    local output
+    output=$(git-local-override apply 2>&1)
+
+    if [[ "$output" == *"Applying overrides..."* ]] &&
+       [[ "$output" == *"Validating config..."* ]] &&
+       [[ "$output" == *"Resolving effective override map..."* ]] &&
+       [[ "$output" == *"Configured targets: 3; active overrides: 2"* ]] &&
+       [[ "$output" == *"Applying active overrides..."* ]] &&
+       [[ "$output" == *"Applied 1/2: ./CLAUDE.md <- ./CLAUDE.local.md"* ]] &&
+       [[ "$output" == *"Applied 2/2: ./AGENTS.md <- ./AGENTS.local.md"* ]] &&
+       [[ "$output" == *"Syncing attributes..."* ]] &&
+       [[ "$output" == *"Applied 2 override(s) in "* ]]; then
+        pass "Apply command shows progress output"
+    else
+        fail "Apply command did not show expected progress output (output: $output)"
+    fi
+}
+
+test_apply_shows_nested_paths() {
+    info "Testing apply shows nested relative paths..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# APPLY PROGRESS NESTED" > backend/services/foo/AGENTS.local.md
+
+    local output
+    output=$(git-local-override apply 2>&1)
+
+    if [[ "$output" == *"Applied 1/1: backend/services/foo/AGENTS.md <- backend/services/foo/AGENTS.local.md"* ]]; then
+        pass "Apply command shows nested relative paths"
+    else
+        fail "Apply command did not show nested relative paths (output: $output)"
+    fi
+}
+
+test_apply_reports_no_active_overrides() {
+    info "Testing apply explains when no override files are active..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local output
+    output=$(git-local-override apply 2>&1)
+
+    if [[ "$output" == *"Configured targets: 3; active overrides: 0"* ]] &&
+       [[ "$output" == *"No active override files found; syncing attributes only"* ]] &&
+       [[ "$output" == *"Applied 0 override(s) in "* ]]; then
+        pass "Apply command explains zero active overrides"
+    else
+        fail "Apply command did not explain zero active overrides (output: $output)"
+    fi
+}
+
 test_git_status_after_override() {
     info "Testing git status hides file with clean filter..."
 
@@ -1594,6 +1657,9 @@ main() {
         test_list_no_config \
         test_add_override \
         test_override_is_applied \
+        test_apply_shows_progress_output \
+        test_apply_shows_nested_paths \
+        test_apply_reports_no_active_overrides \
         test_git_status_after_override \
         test_restore_originals \
         test_list_overrides \

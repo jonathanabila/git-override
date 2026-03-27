@@ -127,6 +127,8 @@ For deeper branch-switch debugging, set `GIT_LOCAL_OVERRIDE_TRACE=1` before chec
 GIT_LOCAL_OVERRIDE_TRACE=1 git checkout dev
 ```
 
+The CLI `apply` command now also prints step-by-step progress so long recursive config validation or attribute sync work is visible while it runs.
+
 </details>
 
 ---
@@ -592,6 +594,8 @@ If you need to see whether the smudge filter is spending time on many files, ena
 ```bash
 GIT_LOCAL_OVERRIDE_TRACE=1 git checkout dev
 ```
+
+For manual runs, `git-local-override apply` now reports validation, config resolution, active override counts, apply progress, attribute sync, and total elapsed time.
 
 </details>
 

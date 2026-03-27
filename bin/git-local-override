@@ -55,6 +55,46 @@ success() {
     echo -e "${GREEN}Success:${NC} $*"
 }
 
+trace_enabled() {
+    [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
+}
+
+now_milliseconds() {
+    if command -v perl >/dev/null 2>&1; then
+        perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'
+        return 0
+    fi
+
+    printf '%s000\n' "$(date +%s)"
+}
+
+elapsed_milliseconds() {
+    local start_ms="$1"
+    local end_ms
+
+    end_ms="$(now_milliseconds)"
+    printf '%s\n' "$((end_ms - start_ms))"
+}
+
+log_step_duration() {
+    local label="$1"
+    local start_ms="$2"
+    local elapsed_ms
+
+    elapsed_ms="$(elapsed_milliseconds "$start_ms")"
+    info "$label in ${elapsed_ms}ms"
+}
+
+display_relative_path() {
+    local path="$1"
+
+    if [[ "$path" == */* ]]; then
+        printf '%s\n' "$path"
+    else
+        printf './%s\n' "$path"
+    fi
+}
+
 # Get the root directory of the current git repository
 get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null || die "Not in a git repository"
@@ -638,7 +678,13 @@ cmd_status() {
 
 cmd_apply() {
     local repo_root
+    local apply_start_ms
+    local step_start_ms
+    local config_entries=""
+    local configured_count=0
+    local active_count=0
     repo_root="$(get_repo_root)"
+    apply_start_ms="$(now_milliseconds)"
 
     if ! has_any_config "$repo_root"; then
         die "No $CONFIG_FILE_NAME found"
@@ -647,37 +693,82 @@ cmd_apply() {
     cache_config_files "$repo_root"
     trap 'clear_config_files_cache' RETURN
 
-    # Validate config
+    info "Applying overrides..."
+
+    step_start_ms="$(now_milliseconds)"
+    info "Validating config..."
     if ! validate_config "$repo_root"; then
         exit 1
     fi
+    log_step_duration "Validated config" "$step_start_ms"
 
-    info "Applying all overrides..."
+    step_start_ms="$(now_milliseconds)"
+    info "Resolving effective override map..."
+    config_entries="$(read_config "$repo_root")"
+
+    local entry target override
+    local full_target=""
+    local full_override=""
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+
+        ((configured_count++)) || true
+
+        target="${entry%%|*}"
+        override="${entry#*|}"
+        full_target="$repo_root/$target"
+        full_override="$repo_root/$override"
+
+        if [[ -f "$full_override" && -f "$full_target" ]]; then
+            ((active_count++)) || true
+        fi
+    done <<< "$config_entries"
+    log_step_duration "Resolved override map" "$step_start_ms"
+    info "Configured targets: $configured_count; active overrides: $active_count"
+
+    if [[ "$active_count" -eq 0 ]]; then
+        info "No active override files found; syncing attributes only"
+    fi
 
     local count=0
-    local entry target override
+    step_start_ms="$(now_milliseconds)"
+    info "Applying active overrides..."
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
         target="${entry%%|*}"
         override="${entry#*|}"
 
-        local full_target="$repo_root/$target"
-        local full_override="$repo_root/$override"
+        full_target="$repo_root/$target"
+        full_override="$repo_root/$override"
 
         if [[ -f "$full_override" && -f "$full_target" ]]; then
             cp "$full_override" "$full_target"
             # Update index via clean filter so git status sees file as clean
             git -C "$repo_root" add "$target" 2>/dev/null || true
-            echo "  Applied: $target <- $override"
             ((count++)) || true
+
+            local display_target
+            local display_override
+            display_target="$(display_relative_path "$target")"
+            display_override="$(display_relative_path "$override")"
+
+            if trace_enabled; then
+                info "Applied $count/$active_count: $display_target <- $display_override"
+            else
+                echo "  Applied $count/$active_count: $display_target <- $display_override"
+            fi
         fi
-    done < <(read_config "$repo_root")
+    done <<< "$config_entries"
+    log_step_duration "Applied overrides" "$step_start_ms"
 
     # Sync .git/info/attributes to match config
-    sync_attributes "$repo_root"
+    step_start_ms="$(now_milliseconds)"
+    info "Syncing attributes..."
+    sync_attributes "$repo_root" "$config_entries"
+    log_step_duration "Synced attributes" "$step_start_ms"
 
-    success "Applied $count override(s)"
+    success "Applied $count override(s) in $(elapsed_milliseconds "$apply_start_ms")ms"
 }
 
 cmd_restore() {
