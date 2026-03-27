@@ -173,6 +173,8 @@ discover_config_files() {
     local repo_root="$1"
     local seen=""
     local path=""
+    local discover_output=""
+    local strategy="git"
     local trace_on=false
     local discover_start_ms
     local tracked_start_ms
@@ -189,22 +191,34 @@ discover_config_files() {
         tracked_start_ms="$discover_start_ms"
     fi
 
-    tracked_output="$(git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
+    if command -v fd >/dev/null 2>&1; then
+        strategy="fd"
+        discover_output="$(fd --hidden --no-ignore --glob "$CONFIG_FILE_NAME" "$repo_root" 2>/dev/null || true)"
+        combined_output="$(printf '%s\n' "$discover_output" | LC_ALL=C sort)"
+        tracked_output="$combined_output"
+        if [[ "$trace_on" == true ]]; then
+            tracked_ms="$(resolver_elapsed_milliseconds "$tracked_start_ms")"
+        fi
+    else
+        tracked_output="$(git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
 
-    if [[ "$trace_on" == true ]]; then
-        tracked_ms="$(resolver_elapsed_milliseconds "$tracked_start_ms")"
-        ignored_start_ms="$(resolver_now_milliseconds)"
-    fi
+        if [[ "$trace_on" == true ]]; then
+            tracked_ms="$(resolver_elapsed_milliseconds "$tracked_start_ms")"
+            ignored_start_ms="$(resolver_now_milliseconds)"
+        fi
 
-    ignored_output="$(git -C "$repo_root" ls-files --others --ignored --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
-    combined_output="$({ printf '%s\n' "$tracked_output"; printf '%s\n' "$ignored_output"; } | LC_ALL=C sort)"
+        ignored_output="$(git -C "$repo_root" ls-files --others --ignored --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
+        combined_output="$({ printf '%s\n' "$tracked_output"; printf '%s\n' "$ignored_output"; } | LC_ALL=C sort)"
 
-    if [[ "$trace_on" == true ]]; then
-        ignored_ms="$(resolver_elapsed_milliseconds "$ignored_start_ms")"
+        if [[ "$trace_on" == true ]]; then
+            ignored_ms="$(resolver_elapsed_milliseconds "$ignored_start_ms")"
+        fi
     fi
 
     while IFS= read -r path || [[ -n "$path" ]]; do
         [[ -n "$path" ]] || continue
+        path="${path#"$repo_root"/}"
+        path="${path#./}"
         [[ "$path" == "$CONFIG_FILE_NAME" || "$path" == */$CONFIG_FILE_NAME ]] || continue
         [[ -f "$repo_root/$path" ]] || continue
 
@@ -218,7 +232,7 @@ $path"
     done <<< "$combined_output"
 
     if [[ "$trace_on" == true ]]; then
-        local_override_trace_log "discover_config_files tracked_ms=${tracked_ms} ignored_ms=${ignored_ms} total_ms=$(resolver_elapsed_milliseconds "$discover_start_ms") count=$(count_list_entries "$seen")"
+        local_override_trace_log "discover_config_files strategy=${strategy} tracked_ms=${tracked_ms} ignored_ms=${ignored_ms} total_ms=$(resolver_elapsed_milliseconds "$discover_start_ms") count=$(count_list_entries "$seen")"
     fi
 }
 
@@ -538,9 +552,13 @@ $target"
 get_override_for_target() {
     local target_path="$1"
     local repo_root="$2"
+    local owner_config=""
     local entry=""
     local target=""
     local override=""
+
+    owner_config="$(find_nearest_config_for_path "$repo_root" "$target_path" 2>/dev/null || true)"
+    [[ -n "$owner_config" ]] || return 1
 
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
@@ -550,7 +568,7 @@ get_override_for_target() {
             printf '%s\n' "$override"
             return 0
         fi
-    done < <(read_config "$repo_root")
+    done < <(read_config_entries_for_file "$repo_root" "$owner_config")
 
     return 1
 }

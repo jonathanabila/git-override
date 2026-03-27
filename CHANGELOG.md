@@ -19,11 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`sync-filters` now shows progress logging**: Added `info` messages before each major step (validating config, syncing filter driver, syncing attributes, checking legacy skip-worktree) so users can see what the command is doing
 - **`apply` config reuse**: `git-local-override apply` now resolves effective config entries once and reuses them for the apply loop and attribute sync instead of reparsing recursive config multiple times
+- **Config discovery strategy**: Full config discovery now prefers `fd` for exact filename lookup when available, and `apply` caches config discovery before checking for config presence so startup avoids an extra whole-repo scan
+- **Large-monorepo performance docs**: README and contributor docs now recommend installing `fd` on `PATH` to speed config discovery and explain how to verify the active strategy with trace output
 
 ### Fixed
 
 - **`sync-filters` performance**: Cached `discover_config_files` results to eliminate repeated `git ls-files` calls (previously called O(N) times per entry via `target_is_shadowed_by_child_config`), and cached `read_config` output to avoid parsing config twice
 - **All commands slow in large repos**: `discover_config_files` listed every file in the repo via unfiltered `git ls-files`, then filtered in bash. Now passes `-- .local-overrides.yaml */.local-overrides.yaml` path filter to git directly. Also added config file caching to `apply` and `restore` commands
+- **Monorepo filter latency**: Clean and smudge filters now resolve single-file overrides from the nearest ancestor config instead of triggering full recursive config discovery, avoiding repeated whole-repo scans during `git add`
 
 ## [0.4.1] - 2026-03-27
 

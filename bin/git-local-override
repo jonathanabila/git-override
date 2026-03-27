@@ -739,20 +739,20 @@ cmd_apply() {
     fi
 
     trace_step_start_ms="$(now_milliseconds)"
-    if ! has_any_config "$repo_root"; then
-        die "No $CONFIG_FILE_NAME found"
-    fi
-    if trace_enabled; then
-        local_override_trace "Checked for config files in $(elapsed_milliseconds "$trace_step_start_ms")ms"
-    fi
-
-    trace_step_start_ms="$(now_milliseconds)"
     cache_config_files "$repo_root"
     trap 'clear_config_files_cache' RETURN
     if trace_enabled; then
         local config_file_count
         config_file_count="$(count_nonempty_lines "$(get_cached_config_files "$repo_root")")"
         local_override_trace "Cached $config_file_count config file(s) in $(elapsed_milliseconds "$trace_step_start_ms")ms"
+    fi
+
+    trace_step_start_ms="$(now_milliseconds)"
+    if ! has_any_config "$repo_root"; then
+        die "No $CONFIG_FILE_NAME found"
+    fi
+    if trace_enabled; then
+        local_override_trace "Checked for config files in $(elapsed_milliseconds "$trace_step_start_ms")ms"
     fi
 
     step_start_ms="$(now_milliseconds)"

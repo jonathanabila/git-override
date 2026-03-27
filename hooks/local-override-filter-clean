@@ -44,12 +44,6 @@ main() {
         return 0
     }
 
-    if ! has_any_config "$repo_root"; then
-        cat "$stdin_tmp"
-        rm -f "$stdin_tmp"
-        return 0
-    fi
-
     override_file="$(get_override_for_file "$repo_root" "$file_path")"
     if [[ "$trace_on" == true ]]; then
         resolve_override_ms="$(local_override_elapsed_milliseconds "$total_start_ms")"

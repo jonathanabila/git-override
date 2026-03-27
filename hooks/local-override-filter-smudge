@@ -32,11 +32,6 @@ run_smudge_filter() {
         return 0
     fi
 
-    if ! has_any_config "$repo_root"; then
-        cat
-        return 0
-    fi
-
     local override_file
     override_file="$(get_override_for_file "$repo_root" "$file_path")"
 

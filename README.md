@@ -184,6 +184,14 @@ You want to customize a tracked file for your local environment:
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 ```
 
+For large monorepos, install `fd` too. `git-local-override` will use it automatically for much faster `.local-overrides.yaml` discovery.
+
+```bash
+brew install fd
+```
+
+On Debian/Ubuntu, install `fd-find` and make sure the executable is available as `fd` on your `PATH`.
+
 Re-running install in an existing repository is the supported upgrade path. It now also clears legacy `skip-worktree` bits on configured managed files and prints a one-line repair notice only when it repairs old state.
 
 If install warns about an ambiguous hook state such as an unmanaged `pre-commit` plus an existing `pre-commit.chained`, the default behavior stays conservative and preserves both files. To repair that state during reinstall, run:
@@ -552,6 +560,8 @@ Hooks are optimized for speed:
 | 10 overrides, post-checkout | < 50ms | ~30ms |
 | 100 staged files, 10 overrides | < 100ms | ~25ms |
 
+For large monorepos, `fd` is strongly recommended. When `fd` is available on `PATH`, `git-local-override` prefers it for config discovery and avoids slow ignored-file scans through Git.
+
 ---
 
 ## 🔍 Troubleshooting
@@ -596,6 +606,32 @@ GIT_LOCAL_OVERRIDE_TRACE=1 git checkout dev
 ```
 
 For manual runs, `git-local-override apply` now reports validation, config resolution, active override counts, apply progress, attribute sync, and total elapsed time.
+
+</details>
+
+<details>
+<summary><strong>`git-local-override apply` is slow in a large monorepo</strong></summary>
+
+Enable trace mode:
+
+```bash
+GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override apply
+```
+
+Then look for the config discovery line:
+
+- `discover_config_files strategy=fd` means the fast path is active
+- `discover_config_files strategy=git` means the slower fallback path is active
+
+If you see `strategy=git` in a large repo, install `fd` and rerun. `git-local-override` will pick it up automatically when the `fd` executable is available on `PATH`.
+
+Example install:
+
+```bash
+brew install fd
+```
+
+On Debian/Ubuntu, install `fd-find` and expose it as `fd` on `PATH`.
 
 </details>
 
@@ -724,6 +760,10 @@ With `--cli`: Installs CLI to `~/.local/bin/git-local-override` and installs `lo
 - **Git** 2.0+
 - Standard Unix tools: `grep`, `cp`, `mv`, `mkdir`, `chmod`, `dirname`, `basename`
 - `curl` (for remote installation only)
+
+Optional but strongly recommended for large monorepos:
+
+- `fd` on `PATH` for fast `.local-overrides.yaml` discovery
 
 ---
 

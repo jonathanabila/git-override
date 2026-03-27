@@ -308,6 +308,23 @@ test_apply_reports_no_active_overrides() {
     fi
 }
 
+test_apply_with_ignored_config_file() {
+    info "Testing apply finds ignored config files..."
+    cd "$TEST_REPO"
+    create_config
+
+    echo ".local-overrides.yaml" >> .git/info/exclude
+    echo "# IGNORED CONFIG CONTENT" > CLAUDE.local.md
+
+    git-local-override apply >/dev/null
+
+    if grep -q "IGNORED CONFIG CONTENT" CLAUDE.md; then
+        pass "Apply discovered ignored config file"
+    else
+        fail "Apply did not discover ignored config file"
+    fi
+}
+
 test_git_status_after_override() {
     info "Testing git status hides file with clean filter..."
 
@@ -1660,6 +1677,7 @@ main() {
         test_apply_shows_progress_output \
         test_apply_shows_nested_paths \
         test_apply_reports_no_active_overrides \
+        test_apply_with_ignored_config_file \
         test_git_status_after_override \
         test_restore_originals \
         test_list_overrides \
