@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-26
+
 ### Added
 
 - **Recursive config discovery**: Added support for nested `.local-overrides.yaml` files with nearest-config-wins subtree ownership
@@ -533,6 +535,7 @@ files:
 - **0.0.2** - Config-driven architecture
 - **0.0.1** - Initial release with full feature set
 
+[0.4.0]: https://github.com/jonathanabila/git-override/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jonathanabila/git-override/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jonathanabila/git-override/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jonathanabila/git-override/compare/v0.0.7...v0.1.0
