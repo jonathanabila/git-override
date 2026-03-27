@@ -334,13 +334,13 @@ Only maintainers should cut releases. If you want GitHub to enforce that policy,
    ./scripts/release.sh X.Y.Z
    ```
 
-   This moves the current `[Unreleased]` notes into `## [X.Y.Z] - YYYY-MM-DD` and updates the compare links in `CHANGELOG.md`.
+   This moves the current `[Unreleased]` notes into `## [X.Y.Z] - YYYY-MM-DD`, updates the compare links in `CHANGELOG.md`, and syncs the root `VERSION` file to the same release.
 
 2. Review the changelog update and create a signed release commit:
 
    ```bash
-   git diff -- CHANGELOG.md
-   git add CHANGELOG.md
+   git diff -- CHANGELOG.md VERSION
+   git add CHANGELOG.md VERSION
    git commit -S -m "chore(release): vX.Y.Z"
    ```
 
@@ -370,7 +370,7 @@ Exact maintainer command sequence:
 git checkout main
 git pull --ff-only origin main
 ./scripts/release.sh X.Y.Z
-git add CHANGELOG.md
+git add CHANGELOG.md VERSION
 git commit -S -m "chore(release): vX.Y.Z"
 git tag -s "vX.Y.Z" -m "vX.Y.Z"
 git push origin main

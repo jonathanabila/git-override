@@ -7,6 +7,7 @@ set -euo pipefail
 VERSION="${1:-}"
 DATE=$(date +%Y-%m-%d)
 CHANGELOG="CHANGELOG.md"
+VERSION_FILE="VERSION"
 
 die() {
     echo "Error: $*" >&2
@@ -33,6 +34,10 @@ fi
 # Check changelog exists
 if [[ ! -f "$CHANGELOG" ]]; then
     die "CHANGELOG.md not found"
+fi
+
+if [[ ! -f "$VERSION_FILE" ]]; then
+    die "VERSION not found"
 fi
 
 # Check if [Unreleased] section has content
@@ -80,11 +85,13 @@ awk -v version="$VERSION" -v prev="$PREV_VERSION" '
 # Remove backup on success
 rm -f "${CHANGELOG}.bak"
 
+printf '%s\n' "$VERSION" > "$VERSION_FILE"
+
 echo "Released version $VERSION"
 echo ""
 echo "Next steps:"
-echo "  1. Review changes: git diff -- CHANGELOG.md"
-echo "  2. Signed commit: git add CHANGELOG.md && git commit -S -m 'chore(release): v$VERSION'"
+echo "  1. Review changes: git diff -- CHANGELOG.md VERSION"
+echo "  2. Signed commit: git add CHANGELOG.md VERSION && git commit -S -m 'chore(release): v$VERSION'"
 echo "  3. Signed tag: git tag -s v$VERSION -m 'v$VERSION'"
 echo "  4. Push commit: git push origin main"
 echo "  5. Push tag to publish GitHub release: git push origin v$VERSION"

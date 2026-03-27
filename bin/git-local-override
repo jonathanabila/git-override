@@ -90,10 +90,40 @@ get_attributes_file_path() {
 }
 
 CONFIG_FILE_NAME=".local-overrides.yaml"
+VERSION_FILE_NAME="VERSION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_SUPPORT_DIR_DEFAULT="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override"
 SHARED_RESOLVER_PATH=""
+
+get_version_path() {
+    local repo_version_path="$SCRIPT_DIR/../$VERSION_FILE_NAME"
+    local installed_version_path="$CLI_SUPPORT_DIR_DEFAULT/$VERSION_FILE_NAME"
+
+    if [[ -f "$repo_version_path" ]]; then
+        printf '%s\n' "$repo_version_path"
+        return 0
+    fi
+
+    if [[ -f "$installed_version_path" ]]; then
+        printf '%s\n' "$installed_version_path"
+        return 0
+    fi
+
+    return 1
+}
+
+get_version() {
+    local version_path
+
+    version_path="$(get_version_path 2>/dev/null || true)"
+    if [[ -n "$version_path" && -f "$version_path" ]]; then
+        tr -d '\r' < "$version_path"
+        return 0
+    fi
+
+    printf '%s\n' "unknown"
+}
 
 if [[ -f "$SCRIPT_DIR/../shared/local-override-resolver.sh" ]]; then
     SHARED_RESOLVER_PATH="$SCRIPT_DIR/../shared/local-override-resolver.sh"
@@ -105,6 +135,10 @@ fi
 
 # shellcheck source=../shared/local-override-resolver.sh
 source "$SHARED_RESOLVER_PATH"
+
+cmd_version() {
+    get_version
+}
 
 # Convert path to local override path using specified pattern
 # Used by the 'add' command to generate default override filenames
@@ -533,7 +567,7 @@ cmd_status() {
         echo ""
         echo "Install hooks with one of:"
         echo "  - pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout"
-        echo "  - curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash"
+        echo "  - curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli"
     fi
 
     # Check filter driver status
@@ -583,7 +617,7 @@ cmd_status() {
         echo -e "Filter:     ${YELLOW}not installed${NC}"
         echo ""
         echo "Install filter with:"
-        echo "  curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash"
+        echo "  curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli"
     fi
 
     echo ""
@@ -947,6 +981,7 @@ COMMANDS:
     filter-smudge <path>    Filter helper: output local override or passthrough
     filter-clean <path>     Filter helper: output HEAD content or passthrough
     init-config             Create a .local-overrides.yaml template
+    version                 Show the CLI version
     help                    Show this help message
 
 EXAMPLES:
@@ -1016,17 +1051,18 @@ INSTALLATION:
       Add to .pre-commit-config.yaml:
         repos:
           - repo: https://github.com/jonathanabila/git-override
-            rev: v0.1.0  # Use latest version
+            rev: v0.4.0  # Use latest version
             hooks:
               - id: local-override-pre-commit
               - id: local-override-post-commit
               - id: local-override-post-checkout
+              - id: local-override-pre-rebase
 
       Then run:
-        pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout
+        pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type post-checkout --hook-type pre-rebase
 
     Standalone:
-      curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+      curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 EOF
 }
 
@@ -1051,6 +1087,7 @@ main() {
         filter-smudge)  cmd_filter_smudge "$@" ;;
         filter-clean)   cmd_filter_clean "$@" ;;
         init-config)    cmd_init_config "$@" ;;
+        version|--version) cmd_version ;;
         help|--help|-h) cmd_help ;;
         *)              die "Unknown command: $cmd. Run 'git-local-override help' for usage." ;;
     esac

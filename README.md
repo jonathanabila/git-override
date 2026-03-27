@@ -38,14 +38,10 @@ If you are an AI assistant (Claude, GPT, Gemini, etc.) and a user asks you to in
 Run the installation script in the user's repository:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
-```
-
-For CLI tools as well, use:
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 ```
+
+This installs the git hooks to the current repository and the `git-local-override` CLI to `~/.local/bin`.
 
 ### Step 2: Create the config file
 
@@ -165,7 +161,7 @@ You want to customize a tracked file for your local environment:
 ### Install (One Command)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 ```
 
 Re-running install in an existing repository is the supported upgrade path. It now also clears legacy `skip-worktree` bits on configured managed files and prints a one-line repair notice only when it repairs old state.
@@ -173,7 +169,7 @@ Re-running install in an existing repository is the supported upgrade path. It n
 If install warns about an ambiguous hook state such as an unmanaged `pre-commit` plus an existing `pre-commit.chained`, the default behavior stays conservative and preserves both files. To repair that state during reinstall, run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --resolve-ambiguous-hooks
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli --resolve-ambiguous-hooks
 ```
 
 <details>
@@ -184,7 +180,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jonathanabila/git-override
-    rev: v0.2.0  # Use latest version
+    rev: v0.4.0  # Use latest version
     hooks:
       - id: local-override-pre-commit
       - id: local-override-post-commit
@@ -204,7 +200,7 @@ pre-commit install --hook-type pre-commit --hook-type post-commit --hook-type po
 <summary>🌐 Global Installation (All Repos)</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --global
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --global --cli
 ```
 
 </details>
@@ -213,7 +209,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 <summary>📌 Pin to Specific Version</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.2.0/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.4.0/scripts/install.sh | bash -s -- --cli
 ```
 
 </details>
@@ -434,11 +430,7 @@ Override files typically use the pattern inserted before the extension:
 
 ## 🛠️ CLI Commands
 
-The optional CLI provides utility commands. Install with:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
-```
+The CLI provides utility commands (included with the default install):
 
 | Command | Description |
 |---------|-------------|
@@ -451,6 +443,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 | `git-local-override sync-filters` | Sync filter configuration and clear legacy managed `skip-worktree` bits |
 | `git-local-override shell-init` | Output shell wrapper for transparent checkout/switch |
 | `git-local-override init-config` | Create a `.local-overrides.yaml` template |
+| `git-local-override --version` | Show the CLI version |
 | `git-local-override help` | Show help |
 
 ---
@@ -593,7 +586,7 @@ files:
 git-local-override sync-filters
 
 # Or reinstall
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 ```
 
 If still failing, check filter configuration:
@@ -618,7 +611,7 @@ ensure your install includes the `pre-rebase` hook. Re-run install or pre-commit
 If you installed using the curl method (not pre-commit) and the project adds new hooks in an update, you need to re-run the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 ```
 
 This is because the curl method installs hooks directly to `.git/hooks/` at install time. Unlike pre-commit, which manages hooks dynamically, the curl method requires manual reinstallation to pick up new hooks.
@@ -639,7 +632,7 @@ If reinstall reports a warning like `Ambiguous state for pre-commit: unmanaged h
 Use repair mode only when you want the installer to reconcile that state for you:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --resolve-ambiguous-hooks
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli --resolve-ambiguous-hooks
 ```
 
 Repair mode:

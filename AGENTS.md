@@ -444,3 +444,5 @@ Example:
 ```
 
 **Releases are prepared locally from `[Unreleased]`, then published by GitHub Actions when maintainers push a signed annotated `vX.Y.Z` tag from `origin/main`.**
+
+When preparing a new tagged release, keep the checked-in `VERSION` file in sync with the release tag. The release prep flow should update both `CHANGELOG.md` and `VERSION` together before the signed release commit and annotated `vX.Y.Z` tag are created.

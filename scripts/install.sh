@@ -86,6 +86,14 @@ get_shared_resolver_content() {
     fi
 }
 
+get_version_content() {
+    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/VERSION" ]]; then
+        cat "$PROJECT_DIR/VERSION"
+    else
+        curl -fsSL "$REMOTE_BASE/VERSION"
+    fi
+}
+
 get_cli_content() {
     if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/bin/git-local-override" ]]; then
         cat "$PROJECT_DIR/bin/git-local-override"
@@ -580,6 +588,8 @@ install_cli() {
     get_shared_resolver_content > "$data_dir/local-override-resolver.sh"
     chmod +x "$data_dir/local-override-resolver.sh"
     success "Installed: $data_dir/local-override-resolver.sh"
+    get_version_content > "$data_dir/VERSION"
+    success "Installed: $data_dir/VERSION"
 
     # Check if bin_dir is in PATH
     if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
@@ -629,7 +639,7 @@ Options:
 
 Examples:
   # Install to current repo
-  curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --cli
 
   # Install globally (template) + CLI
   curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scripts/install.sh | bash -s -- --global --cli

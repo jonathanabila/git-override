@@ -141,6 +141,38 @@ test_cli_help() {
     fi
 }
 
+test_cli_version() {
+    info "Testing CLI version command..."
+
+    local expected_version
+    local output
+
+    expected_version="$(tr -d '\r' < "$PROJECT_DIR/VERSION")"
+    output="$(git-local-override version)"
+
+    if [[ "$output" == "$expected_version" ]]; then
+        pass "CLI version command works"
+    else
+        fail "CLI version command returned '$output'"
+    fi
+}
+
+test_cli_version_flag() {
+    info "Testing CLI --version flag..."
+
+    local expected_version
+    local output
+
+    expected_version="$(tr -d '\r' < "$PROJECT_DIR/VERSION")"
+    output="$(git-local-override --version)"
+
+    if [[ "$output" == "$expected_version" ]]; then
+        pass "CLI --version flag works"
+    else
+        fail "CLI --version flag returned '$output'"
+    fi
+}
+
 test_init_config() {
     info "Testing init-config command..."
 
@@ -1510,6 +1542,8 @@ main() {
 
     for test_fn in \
         test_cli_help \
+        test_cli_version \
+        test_cli_version_flag \
         test_init_config \
         test_list_no_config \
         test_add_override \

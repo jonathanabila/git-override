@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CLI version command**: Added `git-local-override version` and `git-local-override --version` backed by a checked-in `VERSION` file so repo and installed CLI copies report the same release number
+
+### Changed
+
+- **Default install command now includes `--cli`**: All documentation now recommends `bash -s -- --cli` so the CLI is installed alongside hooks by default
+- **Release metadata sync**: `scripts/install.sh --cli`, `scripts/uninstall.sh`, and `scripts/release.sh` now install, remove, and update the shared `VERSION` file alongside the CLI and resolver
+- **Versioning docs**: Updated contributor and agent instructions so tagged releases keep `VERSION`, changelog entries, and release tags aligned
+
 ## [0.4.0] - 2026-03-26
 
 ### Added

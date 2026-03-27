@@ -993,6 +993,7 @@ test_install_cli() {
     # Check CLI was installed
     local cli_path="$HOME/.local/bin/git-local-override"
     local resolver_path="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override/local-override-resolver.sh"
+    local version_path="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override/VERSION"
     if [[ -f "$cli_path" ]]; then
         pass "CLI tool installed"
     else
@@ -1015,11 +1016,25 @@ test_install_cli() {
         return 1
     fi
 
+    if [[ -f "$version_path" ]]; then
+        pass "CLI version file installed"
+    else
+        fail "CLI version file not installed"
+        return 1
+    fi
+
     # Check CLI works
     if "$cli_path" help | grep -q "git-local-override"; then
         pass "CLI tool functional"
     else
         fail "CLI tool not functional"
+        return 1
+    fi
+
+    if [[ "$("$cli_path" --version)" == "$(tr -d '\r' < "$PROJECT_DIR/VERSION")" ]]; then
+        pass "Installed CLI reports expected version"
+    else
+        fail "Installed CLI version output is wrong"
         return 1
     fi
 }

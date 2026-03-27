@@ -235,6 +235,12 @@ remove_cli_tool() {
         success "Removed: $resolver_file"
     fi
 
+    local version_file="$DATA_DIR/VERSION"
+    if [[ -f "$version_file" ]]; then
+        rm "$version_file"
+        success "Removed: $version_file"
+    fi
+
     if [[ -d "$DATA_DIR" ]] && [[ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]]; then
         rmdir "$DATA_DIR" 2>/dev/null || true
     fi
