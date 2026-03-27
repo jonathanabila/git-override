@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`sync-filters` now shows progress logging**: Added `info` messages before each major step (validating config, syncing filter driver, syncing attributes, checking legacy skip-worktree) so users can see what the command is doing
+
+### Fixed
+
+- **`sync-filters` performance**: Cached `discover_config_files` results to eliminate repeated `git ls-files` calls (previously called O(N) times per entry via `target_is_shadowed_by_child_config`), and cached `read_config` output to avoid parsing config twice
+
 ## [0.4.1] - 2026-03-27
 
 ### Fixed

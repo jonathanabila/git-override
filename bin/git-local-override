@@ -212,11 +212,17 @@ make_path_relative_to_dir() {
 
 clear_legacy_skip_worktree() {
     local repo_root="$1"
+    local config_entries="${2:-}"
     local repaired_count=0
     local seen_targets=""
     local entry=""
     local target=""
     local ls_output=""
+
+    # Resolve config entries if not provided
+    if [[ -z "$config_entries" ]]; then
+        config_entries="$(read_config "$repo_root")"
+    fi
 
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
@@ -241,7 +247,7 @@ $target"
 
         git -C "$repo_root" update-index --no-skip-worktree -- "$target"
         ((repaired_count++)) || true
-    done < <(read_config "$repo_root")
+    done <<< "$config_entries"
 
     printf '%s\n' "$repaired_count"
 }
@@ -459,6 +465,7 @@ cmd_list() {
 # Preserves non-local-override entries, regenerates local-override entries
 sync_attributes() {
     local repo_root="$1"
+    local config_entries="${2:-}"
     local attributes_file
     local temp_file
 
@@ -482,8 +489,13 @@ sync_attributes() {
         done < "$attributes_file"
     fi
 
+    # Resolve config entries if not provided
+    if [[ -z "$config_entries" ]] && has_any_config "$repo_root"; then
+        config_entries="$(read_config "$repo_root")"
+    fi
+
     # Add local-override entries from config
-    if has_any_config "$repo_root"; then
+    if [[ -n "$config_entries" ]]; then
         local seen_targets=""
         local entry
         local target
@@ -502,7 +514,7 @@ sync_attributes() {
             seen_targets="$seen_targets
 $target"
             has_targets=true
-        done < <(read_config "$repo_root")
+        done <<< "$config_entries"
 
         # Write header and entries
         if [[ "$has_targets" == true ]]; then
@@ -715,7 +727,11 @@ cmd_sync_filters() {
         die "No $CONFIG_FILE_NAME found"
     fi
 
-    # Validate config
+    # Cache config file discovery for the duration of sync-filters
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
+    info "Validating config..."
     if ! validate_config "$repo_root"; then
         exit 1
     fi
@@ -740,11 +756,18 @@ cmd_sync_filters() {
         info "Filter driver already configured"
     fi
 
-    # Sync .git/info/attributes from config
-    sync_attributes "$repo_root"
+    # Read config once for sync_attributes and clear_legacy_skip_worktree
+    info "Reading config..."
+    local config_entries
+    config_entries="$(read_config "$repo_root")"
 
+    # Sync .git/info/attributes from config
+    info "Syncing attributes..."
+    sync_attributes "$repo_root" "$config_entries"
+
+    info "Checking for legacy skip-worktree bits..."
     local repaired_count
-    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
+    repaired_count="$(clear_legacy_skip_worktree "$repo_root" "$config_entries")"
     if [[ "$repaired_count" -gt 0 ]]; then
         info "Cleared legacy skip-worktree on $repaired_count managed file(s)"
     fi
