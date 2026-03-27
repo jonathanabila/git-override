@@ -15,6 +15,18 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 main() {
     local file_path="${1:-}"
     local stdin_tmp=""
+    local override_file=""
+    local compare_matched="no"
+    local trace_on=false
+    local total_start_ms=0
+    local phase_start_ms=0
+    local resolve_override_ms=0
+    local git_show_ms=0
+
+    if local_override_trace_enabled; then
+        trace_on=true
+        total_start_ms="$(local_override_now_milliseconds)"
+    fi
 
     stdin_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-clean.XXXXXX")"
     cat > "$stdin_tmp"
@@ -38,20 +50,34 @@ main() {
         return 0
     fi
 
-    local override_file
     override_file="$(get_override_for_file "$repo_root" "$file_path")"
+    if [[ "$trace_on" == true ]]; then
+        resolve_override_ms="$(local_override_elapsed_milliseconds "$total_start_ms")"
+    fi
 
     if [[ -n "$override_file" && -f "$repo_root/$override_file" ]]; then
         # Only transform when incoming content is exactly the local override.
         # If caller already provided original/tracked content (e.g., pre-commit
         # restored file), passthrough avoids clobbering intended staged content.
         if cmp -s "$stdin_tmp" "$repo_root/$override_file"; then
+            compare_matched="yes"
             if git -C "$repo_root" show ":$file_path" >/dev/null 2>&1; then
+                if [[ "$trace_on" == true ]]; then
+                    phase_start_ms="$(local_override_now_milliseconds)"
+                fi
                 git -C "$repo_root" show ":$file_path" 2>/dev/null || cat "$stdin_tmp"
+                if [[ "$trace_on" == true ]]; then
+                    git_show_ms="$(local_override_elapsed_milliseconds "$phase_start_ms")"
+                    local_override_trace_log "clean" "file=$file_path override=$override_file matched=$compare_matched transformed=1 resolve_override=${resolve_override_ms}ms git_show=${git_show_ms}ms total=$(local_override_elapsed_milliseconds "$total_start_ms")ms"
+                fi
                 rm -f "$stdin_tmp"
                 return 0
             fi
         fi
+    fi
+
+    if [[ "$trace_on" == true ]]; then
+        local_override_trace_log "clean" "file=$file_path override=${override_file:-none} matched=$compare_matched transformed=0 resolve_override=${resolve_override_ms}ms total=$(local_override_elapsed_milliseconds "$total_start_ms")ms"
     fi
 
     cat "$stdin_tmp"

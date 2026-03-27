@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Optional trace mode**: `GIT_LOCAL_OVERRIDE_TRACE=1` now adds start/end stderr logs for smudge filter executions during checkout debugging
 - **`apply` progress logging**: `git-local-override apply` now reports validation, config resolution, active override counts, attribute sync, and total elapsed time so long recursive runs are no longer silent
 - **Path-rich apply output**: `git-local-override apply` now prints repo-relative target and override paths such as `./AGENTS.md <- ./CLAUDE.private.md` so repeated filenames are easier to distinguish
+- **Deep `apply` trace logging**: `GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override apply` now logs repo/config discovery timing, per-target `cp` vs `git add` timing, resolver summaries, `sync_attributes` breakdown, and clean-filter phase timings to help isolate long-running apply calls
 
 ### Changed
 

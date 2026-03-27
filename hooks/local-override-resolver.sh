@@ -10,6 +10,46 @@ CONFIG_FILE_NAME=".local-overrides.yaml"
 # Cache for discover_config_files results (temp file path, empty = no cache)
 _DISCOVER_CACHE_FILE=""
 
+local_override_trace_enabled() {
+    [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
+}
+
+local_override_trace_log() {
+    if local_override_trace_enabled; then
+        printf 'Trace: %s\n' "$*" >&2
+    fi
+}
+
+resolver_now_milliseconds() {
+    if command -v perl >/dev/null 2>&1; then
+        perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'
+        return 0
+    fi
+
+    printf '%s000\n' "$(date +%s)"
+}
+
+resolver_elapsed_milliseconds() {
+    local start_ms="$1"
+    local end_ms
+
+    end_ms="$(resolver_now_milliseconds)"
+    printf '%s\n' "$((end_ms - start_ms))"
+}
+
+count_list_entries() {
+    local input="${1:-}"
+    local line=""
+    local count=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -n "$line" ]] || continue
+        ((count++)) || true
+    done <<< "$input"
+
+    printf '%s\n' "$count"
+}
+
 cache_config_files() {
     local repo_root="$1"
     _DISCOVER_CACHE_FILE="$(mktemp)"
@@ -26,8 +66,10 @@ clear_config_files_cache() {
 get_cached_config_files() {
     local repo_root="$1"
     if [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" ]]; then
+        local_override_trace_log "discover_config_files cache=hit file=$_DISCOVER_CACHE_FILE"
         cat "$_DISCOVER_CACHE_FILE"
     else
+        local_override_trace_log "discover_config_files cache=miss"
         discover_config_files "$repo_root"
     fi
 }
@@ -131,6 +173,35 @@ discover_config_files() {
     local repo_root="$1"
     local seen=""
     local path=""
+    local trace_on=false
+    local discover_start_ms
+    local tracked_start_ms
+    local tracked_ms=0
+    local ignored_start_ms
+    local ignored_ms=0
+    local tracked_output=""
+    local ignored_output=""
+    local combined_output=""
+
+    if local_override_trace_enabled; then
+        trace_on=true
+        discover_start_ms="$(resolver_now_milliseconds)"
+        tracked_start_ms="$discover_start_ms"
+    fi
+
+    tracked_output="$(git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
+
+    if [[ "$trace_on" == true ]]; then
+        tracked_ms="$(resolver_elapsed_milliseconds "$tracked_start_ms")"
+        ignored_start_ms="$(resolver_now_milliseconds)"
+    fi
+
+    ignored_output="$(git -C "$repo_root" ls-files --others --ignored --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
+    combined_output="$({ printf '%s\n' "$tracked_output"; printf '%s\n' "$ignored_output"; } | LC_ALL=C sort)"
+
+    if [[ "$trace_on" == true ]]; then
+        ignored_ms="$(resolver_elapsed_milliseconds "$ignored_start_ms")"
+    fi
 
     while IFS= read -r path || [[ -n "$path" ]]; do
         [[ -n "$path" ]] || continue
@@ -144,12 +215,11 @@ discover_config_files() {
         seen="$seen
 $path"
         printf '%s\n' "$path"
-    done < <({
-        git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name \
-            -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null
-        git -C "$repo_root" ls-files --others --ignored --exclude-standard --full-name \
-            -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null
-    } | LC_ALL=C sort)
+    done <<< "$combined_output"
+
+    if [[ "$trace_on" == true ]]; then
+        local_override_trace_log "discover_config_files tracked_ms=${tracked_ms} ignored_ms=${ignored_ms} total_ms=$(resolver_elapsed_milliseconds "$discover_start_ms") count=$(count_list_entries "$seen")"
+    fi
 }
 
 has_any_config() {
@@ -351,6 +421,11 @@ validate_config() {
     local entry=""
     local target=""
     local override=""
+    local validate_start_ms
+    local config_start_ms
+    local config_entry_count=0
+
+    validate_start_ms="$(resolver_now_milliseconds)"
 
     if ! has_any_config "$repo_root"; then
         return 0
@@ -358,6 +433,8 @@ validate_config() {
 
     while IFS= read -r config_path || [[ -n "$config_path" ]]; do
         [[ -n "$config_path" ]] || continue
+        config_start_ms="$(resolver_now_milliseconds)"
+        config_entry_count=0
 
         pattern="$(get_effective_pattern_for_config "$repo_root" "$config_path")"
         if [[ -z "$pattern" ]]; then
@@ -371,6 +448,7 @@ validate_config() {
 
         while IFS= read -r entry || [[ -n "$entry" ]]; do
             [[ -n "$entry" ]] || continue
+            ((config_entry_count++)) || true
             target="${entry%%|*}"
             override="${entry#*|}"
 
@@ -408,7 +486,11 @@ validate_config() {
             seen_targets="$seen_targets
 $target"
         done < <(read_config_entries_for_file "$repo_root" "$config_path")
+
+        local_override_trace_log "validate_config config=$config_path pattern=$pattern entries=$config_entry_count ms=$(resolver_elapsed_milliseconds "$config_start_ms")"
     done < <(get_cached_config_files "$repo_root")
+
+    local_override_trace_log "validate_config total_ms=$(resolver_elapsed_milliseconds "$validate_start_ms") unique_targets=$(count_list_entries "$seen_targets")"
 
     return 0
 }
@@ -419,6 +501,12 @@ read_config() {
     local config_path=""
     local entry=""
     local target=""
+    local read_start_ms
+    local emitted_count=0
+    local duplicate_skip_count=0
+    local shadowed_skip_count=0
+
+    read_start_ms="$(resolver_now_milliseconds)"
 
     while IFS= read -r config_path || [[ -n "$config_path" ]]; do
         [[ -n "$config_path" ]] || continue
@@ -428,18 +516,23 @@ read_config() {
             target="${entry%%|*}"
 
             if target_is_shadowed_by_child_config "$repo_root" "$config_path" "$target"; then
+                ((shadowed_skip_count++)) || true
                 continue
             fi
 
             if echo "$seen_targets" | grep -qxF "$target"; then
+                ((duplicate_skip_count++)) || true
                 continue
             fi
 
             seen_targets="$seen_targets
 $target"
+            ((emitted_count++)) || true
             printf '%s\n' "$entry"
         done < <(read_config_entries_for_file "$repo_root" "$config_path")
     done < <(get_cached_config_files "$repo_root")
+
+    local_override_trace_log "read_config emitted=$emitted_count shadowed_skips=$shadowed_skip_count duplicate_skips=$duplicate_skip_count total_ms=$(resolver_elapsed_milliseconds "$read_start_ms")"
 }
 
 get_override_for_target() {

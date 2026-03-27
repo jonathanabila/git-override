@@ -59,6 +59,12 @@ trace_enabled() {
     [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
 }
 
+local_override_trace() {
+    if trace_enabled; then
+        echo -e "${BLUE}Trace:${NC} $*"
+    fi
+}
+
 now_milliseconds() {
     if command -v perl >/dev/null 2>&1; then
         perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'
@@ -83,6 +89,19 @@ log_step_duration() {
 
     elapsed_ms="$(elapsed_milliseconds "$start_ms")"
     info "$label in ${elapsed_ms}ms"
+}
+
+count_nonempty_lines() {
+    local input="${1:-}"
+    local line=""
+    local count=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -n "$line" ]] || continue
+        ((count++)) || true
+    done <<< "$input"
+
+    printf '%s\n' "$count"
 }
 
 display_relative_path() {
@@ -508,13 +527,26 @@ sync_attributes() {
     local config_entries="${2:-}"
     local attributes_file
     local temp_file
+    local sync_start_ms
+    local phase_start_ms
+    local resolve_ms=0
+    local preserve_ms=0
+    local build_ms=0
+    local write_ms=0
+    local preserved_line_count=0
+    local managed_target_count=0
 
+    sync_start_ms="$(now_milliseconds)"
+
+    phase_start_ms="$(now_milliseconds)"
     attributes_file="$(get_attributes_file_path "$repo_root")"
     temp_file="$(mktemp)"
+    resolve_ms="$(elapsed_milliseconds "$phase_start_ms")"
 
     mkdir -p "$(dirname "$attributes_file")"
 
     # Preserve existing non-local-override entries
+    phase_start_ms="$(now_milliseconds)"
     if [[ -f "$attributes_file" ]]; then
         local line
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -526,8 +558,10 @@ sync_attributes() {
                 continue
             fi
             echo "$line" >> "$temp_file"
+            ((preserved_line_count++)) || true
         done < "$attributes_file"
     fi
+    preserve_ms="$(elapsed_milliseconds "$phase_start_ms")"
 
     # Resolve config entries if not provided
     if [[ -z "$config_entries" ]] && has_any_config "$repo_root"; then
@@ -535,6 +569,7 @@ sync_attributes() {
     fi
 
     # Add local-override entries from config
+    phase_start_ms="$(now_milliseconds)"
     if [[ -n "$config_entries" ]]; then
         local seen_targets=""
         local entry
@@ -554,6 +589,7 @@ sync_attributes() {
             seen_targets="$seen_targets
 $target"
             has_targets=true
+            ((managed_target_count++)) || true
         done <<< "$config_entries"
 
         # Write header and entries
@@ -571,8 +607,16 @@ $target"
             done <<< "$seen_targets"
         fi
     fi
+    build_ms="$(elapsed_milliseconds "$phase_start_ms")"
 
+    phase_start_ms="$(now_milliseconds)"
     mv "$temp_file" "$attributes_file"
+
+    write_ms="$(elapsed_milliseconds "$phase_start_ms")"
+
+    if trace_enabled; then
+        local_override_trace "sync_attributes path=$attributes_file preserved_lines=$preserved_line_count managed_targets=$managed_target_count resolve=${resolve_ms}ms preserve=${preserve_ms}ms build=${build_ms}ms write=${write_ms}ms total=$(elapsed_milliseconds "$sync_start_ms")ms"
+    fi
 }
 
 cmd_status() {
@@ -680,20 +724,36 @@ cmd_apply() {
     local repo_root
     local apply_start_ms
     local step_start_ms
+    local trace_step_start_ms
     local config_entries=""
     local configured_count=0
     local active_count=0
-    repo_root="$(get_repo_root)"
     apply_start_ms="$(now_milliseconds)"
 
+    info "Applying overrides..."
+
+    trace_step_start_ms="$(now_milliseconds)"
+    repo_root="$(get_repo_root)"
+    if trace_enabled; then
+        local_override_trace "Resolved repo root in $(elapsed_milliseconds "$trace_step_start_ms")ms: $repo_root"
+    fi
+
+    trace_step_start_ms="$(now_milliseconds)"
     if ! has_any_config "$repo_root"; then
         die "No $CONFIG_FILE_NAME found"
     fi
+    if trace_enabled; then
+        local_override_trace "Checked for config files in $(elapsed_milliseconds "$trace_step_start_ms")ms"
+    fi
 
+    trace_step_start_ms="$(now_milliseconds)"
     cache_config_files "$repo_root"
     trap 'clear_config_files_cache' RETURN
-
-    info "Applying overrides..."
+    if trace_enabled; then
+        local config_file_count
+        config_file_count="$(count_nonempty_lines "$(get_cached_config_files "$repo_root")")"
+        local_override_trace "Cached $config_file_count config file(s) in $(elapsed_milliseconds "$trace_step_start_ms")ms"
+    fi
 
     step_start_ms="$(now_milliseconds)"
     info "Validating config..."
@@ -743,9 +803,20 @@ cmd_apply() {
         full_override="$repo_root/$override"
 
         if [[ -f "$full_override" && -f "$full_target" ]]; then
+            local apply_target_start_ms
+            local copy_start_ms
+            local git_add_start_ms
+            local copy_ms
+            local git_add_ms
+
+            apply_target_start_ms="$(now_milliseconds)"
+            copy_start_ms="$apply_target_start_ms"
             cp "$full_override" "$full_target"
+            copy_ms="$(elapsed_milliseconds "$copy_start_ms")"
             # Update index via clean filter so git status sees file as clean
+            git_add_start_ms="$(now_milliseconds)"
             git -C "$repo_root" add "$target" 2>/dev/null || true
+            git_add_ms="$(elapsed_milliseconds "$git_add_start_ms")"
             ((count++)) || true
 
             local display_target
@@ -755,6 +826,7 @@ cmd_apply() {
 
             if trace_enabled; then
                 info "Applied $count/$active_count: $display_target <- $display_override"
+                local_override_trace "Apply timing for $display_target <- $display_override: cp=${copy_ms}ms, git_add=${git_add_ms}ms, total=$(elapsed_milliseconds "$apply_target_start_ms")ms"
             else
                 echo "  Applied $count/$active_count: $display_target <- $display_override"
             fi
