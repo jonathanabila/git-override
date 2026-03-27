@@ -145,7 +145,8 @@ discover_config_files() {
 $path"
         printf '%s\n' "$path"
     done < <({
-        git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name 2>/dev/null
+        git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name \
+            -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null
         git -C "$repo_root" ls-files --others --ignored --exclude-standard --full-name \
             -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null
     } | LC_ALL=C sort)

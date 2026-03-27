@@ -644,6 +644,9 @@ cmd_apply() {
         die "No $CONFIG_FILE_NAME found"
     fi
 
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
     # Validate config
     if ! validate_config "$repo_root"; then
         exit 1
@@ -684,6 +687,9 @@ cmd_restore() {
     if ! has_any_config "$repo_root"; then
         die "No $CONFIG_FILE_NAME found"
     fi
+
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
 
     # Validate config
     if ! validate_config "$repo_root"; then

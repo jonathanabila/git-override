@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`sync-filters` performance**: Cached `discover_config_files` results to eliminate repeated `git ls-files` calls (previously called O(N) times per entry via `target_is_shadowed_by_child_config`), and cached `read_config` output to avoid parsing config twice
+- **All commands slow in large repos**: `discover_config_files` listed every file in the repo via unfiltered `git ls-files`, then filtered in bash. Now passes `-- .local-overrides.yaml */.local-overrides.yaml` path filter to git directly. Also added config file caching to `apply` and `restore` commands
 
 ## [0.4.1] - 2026-03-27
 
