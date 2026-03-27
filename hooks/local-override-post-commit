@@ -21,6 +21,8 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local repo_root
+    local state_file=""
+    local entries_to_reapply=""
     repo_root="$(get_repo_root)" || return 0
 
     # Do not re-apply overrides during rebase internal commits
@@ -28,23 +30,14 @@ main() {
         return 0
     fi
 
-    if ! has_any_config "$repo_root"; then
+    state_file="$(get_post_commit_state_file "$repo_root" 2>/dev/null || true)"
+    if [[ -z "$state_file" || ! -f "$state_file" ]]; then
         return 0
     fi
 
-    # Validate config
-    if ! validate_config "$repo_root"; then
-        return 1
-    fi
-
-    local repaired_count
-    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
-    if [[ "$repaired_count" -gt 0 ]]; then
-        printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
-    fi
-
-    # Re-apply each override (same logic as post-checkout)
     local entry target override
+    entries_to_reapply="$(< "$state_file")"
+
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
@@ -60,7 +53,9 @@ main() {
             # Apply override: copy override content to target file
             cp "$full_override" "$full_target"
         fi
-    done < <(read_config "$repo_root")
+    done <<< "$entries_to_reapply"
+
+    rm -f "$state_file"
 
     return 0
 }

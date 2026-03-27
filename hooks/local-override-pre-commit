@@ -24,34 +24,60 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local repo_root
+    local staged_files=""
+    local relevant_configs=""
+    local relevant_entries=""
+    local overrides_to_restore=""
+    local state_file=""
+    local state_entries=""
     repo_root="$(get_repo_root)" || return 0
 
-    if ! has_any_config "$repo_root"; then
-        return 0
-    fi
-
-    # Validate config
-    if ! validate_config "$repo_root"; then
-        return 1
-    fi
-
-    local repaired_count
-    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
-    if [[ "$repaired_count" -gt 0 ]]; then
-        printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
-    fi
+    clear_post_commit_state "$repo_root"
 
     # Get list of staged files
-    local staged_files
     staged_files=$(git -C "$repo_root" diff --cached --name-only 2>/dev/null) || return 0
 
     # Quick exit if nothing staged
     [[ -z "$staged_files" ]] && return 0
 
+    local staged_file=""
+    local config_path=""
+    local matched_config="false"
+    while IFS= read -r staged_file || [[ -n "$staged_file" ]]; do
+        [[ -n "$staged_file" ]] || continue
+        config_path="$(find_nearest_config_for_path "$repo_root" "$staged_file" 2>/dev/null || true)"
+        [[ -n "$config_path" ]] || continue
+
+        if ! echo "$relevant_configs" | grep -qxF "$config_path"; then
+            relevant_configs="$relevant_configs
+$config_path"
+        fi
+    done <<< "$staged_files"
+
+    [[ -n "$relevant_configs" ]] || return 0
+
+    local config_entry
+    while IFS= read -r config_path || [[ -n "$config_path" ]]; do
+        [[ -n "$config_path" ]] || continue
+
+        while IFS= read -r config_entry || [[ -n "$config_entry" ]]; do
+            [[ -n "$config_entry" ]] || continue
+            relevant_entries="$relevant_entries
+$config_entry"
+        done < <(read_config_entries_for_file "$repo_root" "$config_path")
+    done <<< "$relevant_configs"
+
+    [[ -n "$relevant_entries" ]] || return 0
+
+    local repaired_count
+    repaired_count="$(clear_legacy_skip_worktree "$repo_root" "$relevant_entries")"
+    if [[ "$repaired_count" -gt 0 ]]; then
+        printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
+    fi
+
     # First pass: find which override files have staged targets
     # We need to restore ALL targets for each such override file
-    local overrides_to_restore=""
-    local entry target override
+    local entry override
 
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
@@ -64,16 +90,19 @@ main() {
             # Check if override file exists
             if [[ -f "$repo_root/$override" ]]; then
                 # Add to list if not already present
-                if ! echo "$overrides_to_restore" | grep -qxF "$override"; then
+                if ! printf '%s\n' "$overrides_to_restore" | grep -qxF "$override"; then
                     overrides_to_restore="$overrides_to_restore
 $override"
                 fi
             fi
         fi
-    done < <(read_config "$repo_root")
+    done <<< "$relevant_entries"
 
     # Quick exit if no overrides need restoring
     [[ -z "$overrides_to_restore" ]] && return 0
+
+    state_file="$(get_post_commit_state_file "$repo_root")"
+    : > "$state_file"
 
     # Second pass: for each override file to restore, restore ALL its targets
     local override_file
@@ -91,11 +120,32 @@ $override"
                 git -C "$repo_root" show "HEAD:$target_file" > "$repo_root/$target_file"
 
                 # Re-stage the restored file
-                git -C "$repo_root" add "$target_file"
+                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" add "$target_file"
             fi
             # If file doesn't exist in HEAD, it's a new file - let it be committed as-is
-        done < <(get_targets_for_override "$repo_root" "$override_file")
+        done < <(while IFS= read -r entry || [[ -n "$entry" ]]; do
+            [[ -z "$entry" ]] && continue
+            target="${entry%%|*}"
+            override="${entry#*|}"
+            if [[ "$override" == "$override_file" ]]; then
+                printf '%s\n' "$target"
+            fi
+        done <<< "$relevant_entries")
+
+        while IFS= read -r entry || [[ -n "$entry" ]]; do
+            [[ -z "$entry" ]] && continue
+            target="${entry%%|*}"
+            override="${entry#*|}"
+            if [[ "$override" == "$override_file" ]]; then
+                if ! printf '%s\n' "$state_entries" | grep -qxF "$entry"; then
+                    state_entries="$state_entries
+$entry"
+                fi
+            fi
+        done <<< "$relevant_entries"
     done <<< "$overrides_to_restore"
+
+    printf '%s\n' "$state_entries" > "$state_file"
 
     # The post-commit hook will re-apply overrides after commit completes
 

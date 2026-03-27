@@ -484,6 +484,42 @@ EOF
     fi
 }
 
+test_reinstall_prunes_stale_managed_post_commit_chained_hook() {
+    info "Testing reinstall prunes stale managed post-commit.chained hook..."
+
+    local repo_dir="$TEST_DIR/repo-prune-stale-post-commit-chained"
+    create_test_repo "$repo_dir"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local hook_file
+    hook_file="$(get_hook_file_for_repo "$repo_dir" "post-commit")" || {
+        fail "Unable to resolve post-commit hook path"
+        return 1
+    }
+
+    cat > "$hook_file.chained" << 'EOF'
+#!/usr/bin/env bash
+#
+# local-override-post-commit
+#
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/local-override-lib.sh"
+echo "STALE_POST_COMMIT_CHAINED"
+EOF
+    chmod +x "$hook_file.chained"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    if [[ ! -f "$hook_file.chained" ]]; then
+        pass "Reinstall removed stale managed post-commit.chained"
+    else
+        fail "Stale managed post-commit.chained was not removed"
+        return 1
+    fi
+}
+
 test_install_warns_on_ambiguous_pre_commit_hook() {
     info "Testing plain install preserves ambiguous pre-commit hook state..."
 
@@ -1719,6 +1755,7 @@ main() {
         test_reinstall_upgrades_managed_pre_commit_hook \
         test_reinstall_upgrades_managed_pre_rebase_hook \
         test_reinstall_preserves_existing_chained_hook \
+        test_reinstall_prunes_stale_managed_post_commit_chained_hook \
         test_install_warns_on_ambiguous_pre_commit_hook \
         test_install_repairs_ambiguous_pre_commit_hook \
         test_repair_install_is_idempotent_after_pre_commit_repair \

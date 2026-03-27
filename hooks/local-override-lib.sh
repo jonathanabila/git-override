@@ -91,13 +91,50 @@ get_override_for_file() {
     get_override_for_target "$file_path" "$repo_root" || return 0
 }
 
+get_common_git_dir() {
+    local repo_root="$1"
+    local common_git_dir=""
+
+    common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    [[ -n "$common_git_dir" ]] || return 1
+
+    if [[ "$common_git_dir" != /* ]]; then
+        common_git_dir="$repo_root/$common_git_dir"
+    fi
+
+    printf '%s\n' "$common_git_dir"
+}
+
+get_post_commit_state_file() {
+    local repo_root="$1"
+    local common_git_dir=""
+
+    common_git_dir="$(get_common_git_dir "$repo_root")" || return 1
+    printf '%s\n' "$common_git_dir/local-override-post-commit-state"
+}
+
+clear_post_commit_state() {
+    local repo_root="$1"
+    local state_file=""
+
+    state_file="$(get_post_commit_state_file "$repo_root" 2>/dev/null || true)"
+    [[ -n "$state_file" ]] || return 0
+
+    rm -f "$state_file"
+}
+
 clear_legacy_skip_worktree() {
     local repo_root="$1"
+    local config_entries="${2:-}"
     local repaired_count=0
     local seen_targets=""
     local entry=""
     local target=""
     local ls_output=""
+
+    if [[ -z "$config_entries" ]]; then
+        config_entries="$(read_config "$repo_root")"
+    fi
 
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
@@ -122,7 +159,7 @@ $target"
 
         git -C "$repo_root" update-index --no-skip-worktree -- "$target"
         ((repaired_count++)) || true
-    done < <(read_config "$repo_root")
+    done <<< "$config_entries"
 
     printf '%s\n' "$repaired_count"
 }

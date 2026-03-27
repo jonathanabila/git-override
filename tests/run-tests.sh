@@ -513,6 +513,13 @@ test_post_commit_hook() {
     # Ensure local file has test content
     echo "# LOCAL CONTENT FOR POST COMMIT TEST" > CLAUDE.local.md
 
+    local common_git_dir
+    common_git_dir="$(git rev-parse --git-common-dir)"
+    if [[ "$common_git_dir" != /* ]]; then
+        common_git_dir="$TEST_REPO/$common_git_dir"
+    fi
+    printf 'CLAUDE.md|CLAUDE.local.md\n' > "$common_git_dir/local-override-post-commit-state"
+
     # Run post-commit to apply override
     .git/hooks/post-commit
 
@@ -521,6 +528,45 @@ test_post_commit_hook() {
         pass "Post-commit hook applied override"
     else
         fail "Post-commit hook did not apply override"
+    fi
+}
+
+test_post_commit_hook_exits_without_state() {
+    info "Testing post-commit exits early without state..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# LOCAL CONTENT SHOULD NOT APPLY" > CLAUDE.local.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
+
+    .git/hooks/post-commit
+
+    if grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        pass "Post-commit leaves files alone without pre-commit state"
+    else
+        fail "Post-commit unexpectedly applied override without state"
+    fi
+}
+
+test_pre_commit_trace_avoids_global_config_discovery() {
+    info "Testing pre-commit trace avoids global config discovery..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# TRACE CACHE TEST" > CLAUDE.local.md
+    .git/hooks/post-checkout "" "" "1"
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+
+    local output
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/pre-commit 2>&1)
+
+    if [[ "$output" != *"discover_config_files strategy="* ]] &&
+       [[ "$output" != *"discover_config_files cache="* ]]; then
+        pass "Pre-commit avoids global config discovery"
+    else
+        fail "Pre-commit still triggered global config discovery (output: $output)"
     fi
 }
 
@@ -1688,6 +1734,8 @@ main() {
         test_post_checkout_hook_logs_lifecycle \
         test_pre_commit_hook \
         test_post_commit_hook \
+        test_post_commit_hook_exits_without_state \
+        test_pre_commit_trace_avoids_global_config_discovery \
         test_status_command \
         test_no_override_when_no_local_file \
         test_file_not_in_config_error \

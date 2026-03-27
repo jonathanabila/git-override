@@ -117,6 +117,20 @@ is_managed_wrapper_hook() {
     grep -qxF "$marker" "$hook_file" 2>/dev/null
 }
 
+is_legacy_managed_hook() {
+    local hook_file="$1"
+    local hook_type="$2"
+
+    [[ -f "$hook_file" ]] || return 1
+
+    if is_managed_wrapper_hook "$hook_file" "$hook_type"; then
+        return 1
+    fi
+
+    grep -qF "# local-override-$hook_type" "$hook_file" 2>/dev/null || return 1
+    grep -qF 'source "$SCRIPT_DIR/local-override-lib.sh"' "$hook_file" 2>/dev/null || return 1
+}
+
 append_chain_logic() {
     local hook_file="$1"
 
@@ -257,6 +271,20 @@ prune_stale_managed_artifacts() {
         if [[ -f "$artifact_file" ]]; then
             rm "$artifact_file"
             info "Removed stale managed artifact: $artifact"
+        fi
+    done
+}
+
+prune_stale_managed_chained_hooks() {
+    local hooks_dir="$1"
+    local hook_type
+    local chained_file
+
+    for hook_type in post-checkout pre-commit post-commit pre-rebase; do
+        chained_file="$hooks_dir/$hook_type.chained"
+        if is_legacy_managed_hook "$chained_file" "$hook_type"; then
+            rm "$chained_file"
+            info "Removed stale managed chained hook: $hook_type.chained"
         fi
     done
 }
@@ -476,6 +504,7 @@ install_hooks_to_dir() {
     mkdir -p "$lib_dir"
 
     prune_stale_managed_artifacts "$hooks_dir"
+    prune_stale_managed_chained_hooks "$hooks_dir"
 
     # Install the shared library
     info "Installing shared library..."

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`apply` config reuse**: `git-local-override apply` now resolves effective config entries once and reuses them for the apply loop and attribute sync instead of reparsing recursive config multiple times
 - **Config discovery strategy**: Full config discovery now prefers `fd` for exact filename lookup when available, and `apply` caches config discovery before checking for config presence so startup avoids an extra whole-repo scan
 - **Large-monorepo performance docs**: README and contributor docs now recommend installing `fd` on `PATH` to speed config discovery and explain how to verify the active strategy with trace output
+- **Commit hook hot path**: `pre-commit` now resolves only staged-file-relevant configs without triggering full-repo config discovery, and restages restored originals with filters disabled; `post-commit` now reapplies only exact target/override pairs recorded by `pre-commit` instead of rescanning and validating the whole repo on every commit
 
 ### Fixed
 
