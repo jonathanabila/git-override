@@ -40,6 +40,13 @@ info() {
     ((TESTS_RUN++)) || true
 }
 
+count_trace_matches() {
+    local output="$1"
+    local needle="$2"
+
+    printf '%s\n' "$output" | grep -c "$needle" 2>/dev/null || true
+}
+
 #------------------------------------------------------------------------------
 # Setup
 #------------------------------------------------------------------------------
@@ -567,6 +574,46 @@ test_pre_commit_trace_avoids_global_config_discovery() {
         pass "Pre-commit avoids global config discovery"
     else
         fail "Pre-commit still triggered global config discovery (output: $output)"
+    fi
+}
+
+test_post_checkout_trace_reuses_config_discovery_cache() {
+    info "Testing post-checkout trace reuses config discovery cache..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# TRACE CACHE TEST" > CLAUDE.local.md
+
+    local output
+    local discover_count
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/post-checkout "" "" "1" 2>&1)
+    discover_count="$(count_trace_matches "$output" 'discover_config_files strategy=')"
+
+    if [[ "$discover_count" -eq 1 ]] && [[ "$output" == *"discover_config_files cache=hit"* ]]; then
+        pass "Post-checkout performs config discovery once per hook run"
+    else
+        fail "Expected one config discovery pass and later cache hits during post-checkout (output: $output)"
+    fi
+}
+
+test_pre_rebase_trace_reuses_config_discovery_cache() {
+    info "Testing pre-rebase trace reuses config discovery cache..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# TRACE CACHE TEST" > CLAUDE.local.md
+
+    local output
+    local discover_count
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/pre-rebase 2>&1)
+    discover_count="$(count_trace_matches "$output" 'discover_config_files strategy=')"
+
+    if [[ "$discover_count" -eq 1 ]] && [[ "$output" == *"discover_config_files cache=hit"* ]]; then
+        pass "Pre-rebase performs config discovery once per hook run"
+    else
+        fail "Expected one config discovery pass and later cache hits during pre-rebase (output: $output)"
     fi
 }
 
@@ -1736,6 +1783,8 @@ main() {
         test_post_commit_hook \
         test_post_commit_hook_exits_without_state \
         test_pre_commit_trace_avoids_global_config_discovery \
+        test_post_checkout_trace_reuses_config_discovery_cache \
+        test_pre_rebase_trace_reuses_config_discovery_cache \
         test_status_command \
         test_no_override_when_no_local_file \
         test_file_not_in_config_error \
