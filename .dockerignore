@@ -1,0 +1,6 @@
+.git
+tests/test-repo
+tests/test-config
+tests/integration/test-workspace
+tests/integration/test-gitops
+tests/integration/test-precommit

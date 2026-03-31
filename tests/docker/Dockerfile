@@ -35,6 +35,15 @@ COPY --chown=testuser:testuser . /home/testuser/project
 
 WORKDIR /home/testuser/project
 
+# Rebuild the copied source as a standalone git repo so Docker runs from
+# either a normal clone or a host worktree use a portable hook source.
+RUN rm -rf .git \
+    && git init -q \
+    && git config user.email "test@example.com" \
+    && git config user.name "Test User" \
+    && git add . \
+    && git commit -q -m "Test source snapshot"
+
 # Set up PATH for CLI tool testing
 ENV PATH="/home/testuser/.local/bin:${PATH}"
 
