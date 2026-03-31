@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Docker pre-commit worktree failures**: Docker test images now exclude host `.git` metadata and rebuild the copied project as a standalone git repo, so `repo: $PROJECT_DIR` pre-commit integration tests work from git worktrees as well as normal clones
-- **pre-commit migration duplicate hook runs**: Reinstall now removes `*.legacy` git-local-override hooks that pre-commit left behind in migration mode before chaining the active pre-commit wrapper, avoiding a second managed hook execution during stages like `post-checkout`
+- **pre-commit migration duplicate hook runs**: Reinstall now removes duplicate `*.legacy` git-local-override hooks that pre-commit left behind in migration mode both before and after the canonical hook has already been transitioned into a managed wrapper, avoiding a second managed hook execution during stages like `post-checkout`
 - **Checkout hook latency in large repos**: `post-checkout` and `pre-rebase` now cache recursive config discovery for the duration of a hook run, avoiding repeated full-repo `.local-overrides.yaml` scans during validation and config reads
 - **`sync-filters` performance**: Cached `discover_config_files` results to eliminate repeated `git ls-files` calls (previously called O(N) times per entry via `target_is_shadowed_by_child_config`), and cached `read_config` output to avoid parsing config twice
 - **All commands slow in large repos**: `discover_config_files` listed every file in the repo via unfiltered `git ls-files`, then filtered in bash. Now passes `-- .local-overrides.yaml */.local-overrides.yaml` path filter to git directly. Also added config file caching to `apply` and `restore` commands
