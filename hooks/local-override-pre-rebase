@@ -16,6 +16,9 @@ main() {
     local repo_root
     repo_root="$(get_repo_root)" || return 0
 
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
     if ! has_any_config "$repo_root"; then
         return 0
     fi

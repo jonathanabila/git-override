@@ -31,6 +31,9 @@ run_post_checkout() {
     local repo_root
     repo_root="$(get_repo_root)" || return 0
 
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
     # Do not re-apply overrides during rebase internal checkouts
     if is_rebase_in_progress "$repo_root"; then
         return 0

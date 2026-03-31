@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Checkout hook latency in large repos**: `post-checkout` and `pre-rebase` now cache recursive config discovery for the duration of a hook run, avoiding repeated full-repo `.local-overrides.yaml` scans during validation and config reads
 - **`sync-filters` performance**: Cached `discover_config_files` results to eliminate repeated `git ls-files` calls (previously called O(N) times per entry via `target_is_shadowed_by_child_config`), and cached `read_config` output to avoid parsing config twice
 - **All commands slow in large repos**: `discover_config_files` listed every file in the repo via unfiltered `git ls-files`, then filtered in bash. Now passes `-- .local-overrides.yaml */.local-overrides.yaml` path filter to git directly. Also added config file caching to `apply` and `restore` commands
 - **Monorepo filter latency**: Clean and smudge filters now resolve single-file overrides from the nearest ancestor config instead of triggering full recursive config discovery, avoiding repeated whole-repo scans during `git add`
