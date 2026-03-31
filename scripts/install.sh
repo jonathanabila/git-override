@@ -145,9 +145,14 @@ is_precommit_wrapper_hook() {
 prune_duplicate_precommit_legacy_hook() {
     local hook_file="$1"
     local hook_type="$2"
+    local chained_file="$hook_file.chained"
     local legacy_file="$hook_file.legacy"
 
-    if ! is_precommit_wrapper_hook "$hook_file" "$hook_type"; then
+    if is_precommit_wrapper_hook "$hook_file" "$hook_type"; then
+        :
+    elif is_managed_wrapper_hook "$hook_file" "$hook_type" && is_precommit_wrapper_hook "$chained_file" "$hook_type"; then
+        :
+    else
         return 0
     fi
 

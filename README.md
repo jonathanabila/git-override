@@ -192,7 +192,7 @@ brew install fd
 
 On Debian/Ubuntu, install `fd-find` and make sure the executable is available as `fd` on your `PATH`.
 
-Re-running install in an existing repository is the supported upgrade path. It now also clears legacy `skip-worktree` bits on configured managed files, removes duplicate `*.legacy` git-local-override hooks that pre-commit migration mode can leave behind, and prints repair notices only when it repairs old state.
+Re-running install in an existing repository is the supported upgrade path. It now also clears legacy `skip-worktree` bits on configured managed files, removes duplicate `*.legacy` git-local-override hooks that pre-commit migration mode can leave behind both before and after the canonical hook has been transitioned into a managed wrapper, and prints repair notices only when it repairs old state.
 
 If install warns about an ambiguous hook state such as an unmanaged `pre-commit` plus an existing `pre-commit.chained`, the default behavior stays conservative and preserves both files. To repair that state during reinstall, run:
 
@@ -697,7 +697,7 @@ Re-running `install.sh` is the supported upgrade path and is safe:
 - existing `*.chained` backups of your hooks are preserved
 - filter config and `.git/info/attributes` managed entries are re-synced
 - legacy managed `skip-worktree` bits are cleared automatically when found
-- duplicate git-local-override `*.legacy` hooks left behind by pre-commit migration mode are removed before they can run a second time
+- duplicate git-local-override `*.legacy` hooks left behind by pre-commit migration mode are removed before they can run a second time, including repos already transitioned to a managed hook plus `*.chained` pre-commit wrapper layout
 
 If you prefer the CLI upgrade path, `git-local-override sync-filters` performs the same legacy `skip-worktree` cleanup for configured managed files.
 
