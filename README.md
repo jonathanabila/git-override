@@ -121,11 +121,13 @@ git-local-override: post-checkout started
 git-local-override: post-checkout finished
 ```
 
-For deeper branch-switch debugging, set `GIT_LOCAL_OVERRIDE_TRACE=1` before checkout to also log smudge filter start/end events per file:
+For deeper branch-switch debugging, set `GIT_LOCAL_OVERRIDE_TRACE=1` before checkout to log hook timing and smudge filter start/end events per file:
 
 ```bash
 GIT_LOCAL_OVERRIDE_TRACE=1 git checkout dev
 ```
+
+When managed targets are already synced in `.git/info/attributes` and no `.local-overrides.yaml` changed across the checkout, the common `post-checkout` fast path now avoids full recursive config discovery entirely. Trace output in that case should show the lifecycle logs without any `discover_config_files strategy=` line.
 
 The CLI `apply` command now also prints step-by-step progress so long recursive config validation or attribute sync work is visible while it runs.
 
@@ -606,6 +608,8 @@ GIT_LOCAL_OVERRIDE_TRACE=1 git checkout dev
 ```
 
 For manual runs, `git-local-override apply` now reports validation, config resolution, active override counts, apply progress, attribute sync, and total elapsed time.
+
+If `post-checkout` still logs `discover_config_files strategy=...`, that means it had to fall back to the slower validation path because config files changed across the checkout or local generated state needed refreshing.
 
 </details>
 

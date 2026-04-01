@@ -24,32 +24,92 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=local-override-lib.sh
 source "$SCRIPT_DIR/local-override-lib.sh"
 
+checkout_config_change_state() {
+    local repo_root="$1"
+    local previous_head="$2"
+    local new_head="$3"
+    local diff_output=""
+
+    [[ -n "$previous_head" && -n "$new_head" ]] || {
+        printf 'unknown\n'
+        return 0
+    }
+
+    if ! git -C "$repo_root" rev-parse --verify "$previous_head^{commit}" >/dev/null 2>&1; then
+        printf 'unknown\n'
+        return 0
+    fi
+
+    if ! git -C "$repo_root" rev-parse --verify "$new_head^{commit}" >/dev/null 2>&1; then
+        printf 'unknown\n'
+        return 0
+    fi
+
+    diff_output="$(git -C "$repo_root" diff --name-only "$previous_head" "$new_head" -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
+    if [[ -n "$diff_output" ]]; then
+        printf 'changed\n'
+    else
+        printf 'unchanged\n'
+    fi
+}
+
+resolve_post_checkout_entries_fast() {
+    local repo_root="$1"
+    local previous_head="$2"
+    local new_head="$3"
+    local config_change_state=""
+    local config_entries=""
+
+    config_change_state="$(checkout_config_change_state "$repo_root" "$previous_head" "$new_head")"
+    [[ "$config_change_state" == "unchanged" ]] || return 1
+
+    config_entries="$(read_config_entries_from_attributes "$repo_root" 2>/dev/null)" || return 1
+
+    local_override_trace_log "post-checkout" "fast-path config=$config_change_state managed_targets=$(count_list_entries "$config_entries")"
+    printf '%s' "$config_entries"
+}
+
 run_post_checkout() {
     local _previous_head="${1:-}"
     local _new_head="${2:-}"
+    local config_entries=""
+    local using_fast_path=false
 
     local repo_root
     repo_root="$(get_repo_root)" || return 0
-
-    cache_config_files "$repo_root"
-    trap 'clear_config_files_cache' RETURN
 
     # Do not re-apply overrides during rebase internal checkouts
     if is_rebase_in_progress "$repo_root"; then
         return 0
     fi
 
-    if ! has_any_config "$repo_root"; then
+    if config_entries="$(resolve_post_checkout_entries_fast "$repo_root" "$_previous_head" "$_new_head")"; then
+        using_fast_path=true
+    else
+        cache_config_files "$repo_root"
+        trap 'clear_config_files_cache' RETURN
+
+        if ! has_any_config "$repo_root"; then
+            return 0
+        fi
+
+        if ! validate_config "$repo_root"; then
+            return 1
+        fi
+
+        config_entries="$(read_config "$repo_root")"
+
+        if ! sync_attributes_entries "$repo_root" "$config_entries"; then
+            return 1
+        fi
+    fi
+
+    if [[ "$using_fast_path" == true && -z "$config_entries" ]]; then
         return 0
     fi
 
-    # Validate config
-    if ! validate_config "$repo_root"; then
-        return 1
-    fi
-
     local repaired_count
-    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
+    repaired_count="$(clear_legacy_skip_worktree "$repo_root" "$config_entries")"
     if [[ "$repaired_count" -gt 0 ]]; then
         printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
     fi
@@ -71,7 +131,7 @@ run_post_checkout() {
             # Apply override: copy override content to target file
             cp "$full_override" "$full_target"
         fi
-    done < <(read_config "$repo_root")
+    done <<< "$config_entries"
 
     return 0
 }
