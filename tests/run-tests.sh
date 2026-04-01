@@ -577,8 +577,8 @@ test_pre_commit_trace_avoids_global_config_discovery() {
     fi
 }
 
-test_post_checkout_trace_reuses_config_discovery_cache() {
-    info "Testing post-checkout trace reuses config discovery cache..."
+test_post_checkout_trace_falls_back_when_attributes_missing() {
+    info "Testing post-checkout trace falls back when attributes are missing..."
 
     cd "$TEST_REPO"
     create_config
@@ -591,9 +591,106 @@ test_post_checkout_trace_reuses_config_discovery_cache() {
     discover_count="$(count_trace_matches "$output" 'discover_config_files strategy=')"
 
     if [[ "$discover_count" -eq 1 ]] && [[ "$output" == *"discover_config_files cache=hit"* ]]; then
-        pass "Post-checkout performs config discovery once per hook run"
+        pass "Post-checkout falls back to one discovery pass without attributes"
     else
-        fail "Expected one config discovery pass and later cache hits during post-checkout (output: $output)"
+        fail "Expected one config discovery pass and later cache hits when attributes are missing (output: $output)"
+    fi
+}
+
+test_post_checkout_trace_avoids_global_discovery_when_config_unchanged() {
+    info "Testing post-checkout avoids global discovery when config is unchanged..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+
+    git-local-override sync-filters >/dev/null 2>&1
+
+    echo "# FAST PATH TEST" > CLAUDE.local.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- CLAUDE.md
+
+    echo '{"key": "updated"}' > config.json
+    git add config.json
+    git commit -q -m "Change non-config file"
+
+    local previous_head
+    local new_head
+    local output
+    previous_head="$(git rev-parse HEAD~1)"
+    new_head="$(git rev-parse HEAD)"
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/post-checkout "$previous_head" "$new_head" "1" 2>&1)
+
+    if [[ "$output" != *"discover_config_files strategy="* ]] &&
+       [[ "$output" != *"discover_config_files cache="* ]] &&
+       grep -q "FAST PATH TEST" CLAUDE.md; then
+        pass "Post-checkout avoids global discovery when config is unchanged"
+    else
+        fail "Expected post-checkout to avoid global discovery when config is unchanged (output: $output)"
+    fi
+}
+
+test_post_checkout_falls_back_and_refreshes_attributes_when_config_changes() {
+    info "Testing post-checkout falls back and refreshes attributes when config changes..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+
+    git-local-override sync-filters >/dev/null 2>&1
+
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+    if [[ "$attributes_file" != /* ]]; then
+        attributes_file="$TEST_REPO/$attributes_file"
+    fi
+
+    if grep -q '^config.json filter=local-override$' "$attributes_file"; then
+        fail "Precondition failed: config.json already managed before config change"
+        return 1
+    fi
+
+    cat > .local-overrides.yaml << 'EOF'
+# Test configuration
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+  - override: backend/services/foo/AGENTS.local.md
+    replaces:
+      - backend/services/foo/AGENTS.md
+  - override: config.local.json
+    replaces:
+      - config.json
+EOF
+
+    git add .local-overrides.yaml
+    git commit -q -m "Change override config"
+
+    printf '{"key": "local override"}\n' > config.local.json
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout HEAD -- config.json
+
+    local previous_head
+    local new_head
+    local output
+    local discover_count
+    previous_head="$(git rev-parse HEAD~1)"
+    new_head="$(git rev-parse HEAD)"
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/post-checkout "$previous_head" "$new_head" "1" 2>&1)
+    discover_count="$(count_trace_matches "$output" 'discover_config_files strategy=')"
+
+    if [[ "$discover_count" -eq 1 ]] &&
+       [[ "$output" == *"discover_config_files cache=hit"* ]] &&
+       grep -q '^config.json filter=local-override$' "$attributes_file" &&
+       grep -q 'local override' config.json; then
+        pass "Post-checkout falls back and refreshes attributes when config changes"
+    else
+        fail "Expected fallback discovery, attribute refresh, and override apply when config changes (output: $output)"
     fi
 }
 
@@ -1783,7 +1880,9 @@ main() {
         test_post_commit_hook \
         test_post_commit_hook_exits_without_state \
         test_pre_commit_trace_avoids_global_config_discovery \
-        test_post_checkout_trace_reuses_config_discovery_cache \
+        test_post_checkout_trace_falls_back_when_attributes_missing \
+        test_post_checkout_trace_avoids_global_discovery_when_config_unchanged \
+        test_post_checkout_falls_back_and_refreshes_attributes_when_config_changes \
         test_pre_rebase_trace_reuses_config_discovery_cache \
         test_status_command \
         test_no_override_when_no_local_file \
