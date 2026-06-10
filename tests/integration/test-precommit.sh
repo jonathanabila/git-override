@@ -218,6 +218,18 @@ test_precommit_install() {
         fail "Hooks not managed by pre-commit"
         return 1
     fi
+
+    # Status must recognize framework-managed hooks (uses real shims +
+    # the seeded .pre-commit-config.yaml with local-override-* hook ids)
+    local status_output
+    status_output=$("$PROJECT_DIR/bin/git-local-override" status)
+    if [[ "$status_output" == *"installed (via pre-commit)"* ]]; then
+        pass "status reports hooks installed via pre-commit"
+    else
+        fail "status did not recognize pre-commit managed hooks"
+        printf '%s\n' "$status_output" | grep "Hooks:" || true
+        return 1
+    fi
 }
 
 test_precommit_run_pre_commit() {

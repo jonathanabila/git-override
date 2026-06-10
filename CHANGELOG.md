@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`status` hook detection in worktrees**: `git-local-override status` resolved hooks via a hardcoded `.git/hooks` path, so it always reported `Hooks: not installed` from linked worktrees; it now resolves the hooks directory with `git rev-parse --git-path hooks`, which also honors `core.hooksPath`
+- **`status` hook detection for pre-commit installs**: hooks installed via the pre-commit framework produce generic shims without the `local-override` marker, so `status` reported them as not installed; framework shims backed by `local-override-*` hook ids in `.pre-commit-config.yaml` are now reported as `installed (via pre-commit)`
+
 ## [0.5.0] - 2026-04-17
 
 ### Added
