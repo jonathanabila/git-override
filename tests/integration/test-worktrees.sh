@@ -261,6 +261,36 @@ test_bare_main_repo_degrades_gracefully() {
     fi
 }
 
+test_discovery_cache_is_root_aware() {
+    info "Testing discovery cache does not leak across roots..."
+
+    cd "$TEST_DIR"
+    git worktree add -q -b wt-cache "$CURRENT_TEST_ROOT/wt-cache" >/dev/null 2>&1
+
+    # Cache the (empty) worktree discovery, then ask about the main root:
+    # a root-blind cache would wrongly return the empty worktree result.
+    local result
+    result="$(bash -c '
+        set -euo pipefail
+        . "$1/shared/local-override-resolver.sh"
+        cache_config_files "$2"
+        main_result="$(get_cached_config_files "$3")"
+        clear_config_files_cache
+        if [[ -n "$main_result" ]]; then
+            echo "main-root-sees-config"
+        else
+            echo "main-root-sees-nothing"
+        fi
+    ' _ "$PROJECT_DIR" "$CURRENT_TEST_ROOT/wt-cache" "$TEST_DIR")"
+
+    if [[ "$result" == "main-root-sees-config" ]]; then
+        pass "Cache miss on differing root falls through to live discovery"
+    else
+        fail "Cache returned wrong root's results: $result"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -275,7 +305,8 @@ main() {
     for test_fn in \
         test_worktree_helper_functions \
         test_nested_worktree_config_excluded \
-        test_bare_main_repo_degrades_gracefully; do
+        test_bare_main_repo_degrades_gracefully \
+        test_discovery_cache_is_root_aware; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 

@@ -9,6 +9,7 @@ CONFIG_FILE_NAME=".local-overrides.yaml"
 
 # Cache for discover_config_files results (temp file path, empty = no cache)
 _DISCOVER_CACHE_FILE=""
+_DISCOVER_CACHE_ROOT=""
 
 local_override_trace_enabled() {
     [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
@@ -52,7 +53,9 @@ count_list_entries() {
 
 cache_config_files() {
     local repo_root="$1"
+    clear_config_files_cache
     _DISCOVER_CACHE_FILE="$(mktemp)"
+    _DISCOVER_CACHE_ROOT="$repo_root"
     discover_config_files "$repo_root" > "$_DISCOVER_CACHE_FILE"
 }
 
@@ -61,11 +64,13 @@ clear_config_files_cache() {
         rm -f "$_DISCOVER_CACHE_FILE"
     fi
     _DISCOVER_CACHE_FILE=""
+    _DISCOVER_CACHE_ROOT=""
 }
 
 get_cached_config_files() {
     local repo_root="$1"
-    if [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" ]]; then
+    if [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" \
+        && "$_DISCOVER_CACHE_ROOT" == "$repo_root" ]]; then
         local_override_trace_log "discover_config_files cache=hit file=$_DISCOVER_CACHE_FILE"
         cat "$_DISCOVER_CACHE_FILE"
     else
@@ -758,7 +763,7 @@ get_resolution_root() {
         return 0
     fi
 
-    if [[ -n "$(discover_config_files "$repo_root" | head -1)" ]]; then
+    if has_any_config "$repo_root"; then
         printf '%s\n' "$repo_root"
         return 0
     fi
