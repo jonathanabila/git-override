@@ -168,20 +168,58 @@ files:
       - AGENTS.md
 EOF
 
-    local discovered
-    discovered="$(bash -c '
+    # Leg 1 — fd strategy (only when fd is available on this machine).
+    if command -v fd >/dev/null 2>&1; then
+        local discovered
+        discovered="$(bash -c '
+            set -euo pipefail
+            . "$1/shared/local-override-resolver.sh"
+            discover_config_files "$2"
+        ' _ "$PROJECT_DIR" "$TEST_DIR")"
+
+        if ! echo "$discovered" | grep -qx ".local-overrides.yaml"; then
+            fail "fd strategy: main checkout config missing from discovery: $discovered"
+            return 1
+        fi
+
+        if echo "$discovered" | grep -q "nested/wt-a"; then
+            fail "fd strategy: nested worktree config leaked into main discovery: $discovered"
+            return 1
+        fi
+    else
+        echo "  (fd not installed; fd-strategy leg skipped)"
+    fi
+
+    # Leg 2 — git ls-files strategy (always runs, deterministic everywhere).
+    # Force the git ls-files strategy: PATH without any dir containing fd,
+    # plus a shim dir so git itself stays reachable.
+    local git_shim="$CURRENT_TEST_ROOT/git-shim"
+    mkdir -p "$git_shim"
+    ln -sf "$(command -v git)" "$git_shim/git"
+
+    local no_fd_path="" dir=""
+    local saved_ifs="$IFS"
+    IFS=":"
+    for dir in $PATH; do
+        [[ -x "$dir/fd" ]] && continue
+        no_fd_path="${no_fd_path:+$no_fd_path:}$dir"
+    done
+    IFS="$saved_ifs"
+
+    local discovered_git_strategy
+    discovered_git_strategy="$(PATH="$git_shim:$no_fd_path" bash -c '
         set -euo pipefail
         . "$1/shared/local-override-resolver.sh"
         discover_config_files "$2"
     ' _ "$PROJECT_DIR" "$TEST_DIR")"
 
-    if ! echo "$discovered" | grep -qx ".local-overrides.yaml"; then
-        fail "Main checkout config missing from discovery: $discovered"
+    if ! echo "$discovered_git_strategy" | grep -qx ".local-overrides.yaml"; then
+        fail "git ls-files strategy: main checkout config missing from discovery: $discovered_git_strategy"
         return 1
     fi
 
-    if echo "$discovered" | grep -q "nested/wt-a"; then
-        fail "Nested worktree config leaked into main discovery: $discovered"
+    if echo "$discovered_git_strategy" | grep -q "nested/wt-a"; then
+        fail "git ls-files strategy: nested worktree config leaked into main discovery: $discovered_git_strategy"
         return 1
     fi
 
