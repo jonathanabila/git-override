@@ -169,6 +169,34 @@ normalize_config_path() {
     printf '%s\n' "$normalized"
 }
 
+# Repo-relative directories of linked worktrees that live INSIDE repo_root.
+# Another checkout's config is not a subtree config of this checkout.
+get_nested_worktree_dirs() {
+    local repo_root="$1"
+    local canonical_root=""
+    local line=""
+    local wt_path=""
+
+    # `git worktree list` resolves symlinks in the paths it prints (e.g. macOS
+    # /var -> /private/var), so compare against repo_root's resolved form too
+    # or every entry silently fails the prefix match.
+    canonical_root="$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null || echo "$repo_root")"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            worktree\ *)
+                wt_path="${line#worktree }"
+                [[ "$wt_path" == "$canonical_root" ]] && continue
+                case "$wt_path" in
+                    "$canonical_root"/*)
+                        printf '%s\n' "${wt_path#"$canonical_root"/}"
+                        ;;
+                esac
+                ;;
+        esac
+    done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null)
+}
+
 discover_config_files() {
     local repo_root="$1"
     local seen=""
@@ -184,6 +212,11 @@ discover_config_files() {
     local tracked_output=""
     local ignored_output=""
     local combined_output=""
+    local nested_dirs=""
+    local nested_dir=""
+    local under_nested=false
+
+    nested_dirs="$(get_nested_worktree_dirs "$repo_root")"
 
     if local_override_trace_enabled; then
         trace_on=true
@@ -221,6 +254,23 @@ discover_config_files() {
         path="${path#./}"
         [[ "$path" == "$CONFIG_FILE_NAME" || "$path" == */$CONFIG_FILE_NAME ]] || continue
         [[ -f "$repo_root/$path" ]] || continue
+
+        if [[ -n "$nested_dirs" ]]; then
+            under_nested=false
+            while IFS= read -r nested_dir; do
+                [[ -n "$nested_dir" ]] || continue
+                case "$path" in
+                    "$nested_dir"/*)
+                        under_nested=true
+                        break
+                        ;;
+                esac
+            done <<< "$nested_dirs"
+            if [[ "$under_nested" == true ]]; then
+                local_override_trace_log "discover: skipping nested-worktree config $path"
+                continue
+            fi
+        fi
 
         if echo "$seen" | grep -qxF "$path"; then
             continue
@@ -667,21 +717,28 @@ is_linked_worktree() {
 }
 
 # First "worktree " entry of `git worktree list --porcelain` is the main
-# worktree (or the bare repo).
+# worktree — unless its block carries the `bare` attribute, in which case
+# there is no main checkout to resolve against and we return 1.
 get_main_worktree_root() {
     local repo_root="$1"
     local line=""
+    local first_root=""
 
     while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ -z "$first_root" ]]; then
+            case "$line" in
+                worktree\ *) first_root="${line#worktree }" ;;
+            esac
+            continue
+        fi
         case "$line" in
-            worktree\ *)
-                printf '%s\n' "${line#worktree }"
-                return 0
-                ;;
+            bare) return 1 ;;
+            "" | worktree\ *) break ;;
         esac
     done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null)
 
-    return 1
+    [[ -n "$first_root" ]] || return 1
+    printf '%s\n' "$first_root"
 }
 
 # The root that configs and override files are resolved against. Normally the

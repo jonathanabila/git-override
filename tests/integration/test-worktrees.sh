@@ -152,6 +152,77 @@ test_worktree_helper_functions() {
     fi
 }
 
+test_nested_worktree_config_excluded() {
+    info "Testing discovery ignores configs under nested linked worktrees..."
+
+    cd "$TEST_DIR"
+    # Worktree nested INSIDE the main checkout, like <repo>/.claude/worktrees/x
+    git worktree add -q -b wt-nested "$TEST_DIR/nested/wt-a" >/dev/null 2>&1
+
+    # Give the nested worktree its own config copy (simulates copy tooling)
+    cat > "$TEST_DIR/nested/wt-a/.local-overrides.yaml" << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    local discovered
+    discovered="$(bash -c '
+        set -euo pipefail
+        . "$1/shared/local-override-resolver.sh"
+        discover_config_files "$2"
+    ' _ "$PROJECT_DIR" "$TEST_DIR")"
+
+    if ! echo "$discovered" | grep -qx ".local-overrides.yaml"; then
+        fail "Main checkout config missing from discovery: $discovered"
+        return 1
+    fi
+
+    if echo "$discovered" | grep -q "nested/wt-a"; then
+        fail "Nested worktree config leaked into main discovery: $discovered"
+        return 1
+    fi
+
+    pass "Nested worktree configs are excluded from main-checkout discovery"
+}
+
+test_bare_main_repo_degrades_gracefully() {
+    info "Testing a worktree of a bare repo degrades to the checkout root..."
+
+    cd "$TEST_DIR"
+    local bare="$CURRENT_TEST_ROOT/bare-main.git"
+    git clone -q --bare "$TEST_DIR" "$bare"
+    git -C "$bare" worktree add -q "$CURRENT_TEST_ROOT/bare-wt" >/dev/null 2>&1
+
+    local result
+    result="$(bash -c '
+        set -euo pipefail
+        . "$1/shared/local-override-resolver.sh"
+        wt_root="$2"
+        if get_main_worktree_root "$wt_root" >/dev/null 2>&1; then
+            echo "main-root=found"
+        else
+            echo "main-root=none"
+        fi
+        resolved="$(get_resolution_root "$wt_root")"
+        if [[ "$resolved" == "$wt_root" ]]; then
+            echo "resolution=checkout-root"
+        else
+            echo "resolution=other:$resolved"
+        fi
+    ' _ "$PROJECT_DIR" "$CURRENT_TEST_ROOT/bare-wt")"
+
+    if echo "$result" | grep -qx "main-root=none" \
+        && echo "$result" | grep -qx "resolution=checkout-root"; then
+        pass "Bare-repo main: no fallback root, resolution degrades to the checkout"
+    else
+        fail "Unexpected bare-repo behavior: $result"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -164,7 +235,9 @@ main() {
 
     local test_fn
     for test_fn in \
-        test_worktree_helper_functions; do
+        test_worktree_helper_functions \
+        test_nested_worktree_config_excluded \
+        test_bare_main_repo_degrades_gracefully; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 
