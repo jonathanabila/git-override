@@ -649,3 +649,70 @@ get_targets_for_override() {
         fi
     done < <(read_config "$repo_root")
 }
+
+worktree_fallback_disabled() {
+    [[ "${GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK:-0}" == "1" ]]
+}
+
+is_linked_worktree() {
+    local repo_root="$1"
+    local git_dir=""
+    local common_dir=""
+
+    git_dir="$(git -C "$repo_root" rev-parse --git-dir 2>/dev/null || echo "")"
+    common_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    [[ -n "$git_dir" && -n "$common_dir" ]] || return 1
+
+    [[ "$git_dir" != "$common_dir" ]]
+}
+
+# First "worktree " entry of `git worktree list --porcelain` is the main
+# worktree (or the bare repo).
+get_main_worktree_root() {
+    local repo_root="$1"
+    local line=""
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            worktree\ *)
+                printf '%s\n' "${line#worktree }"
+                return 0
+                ;;
+        esac
+    done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null)
+
+    return 1
+}
+
+# The root that configs and override files are resolved against. Normally the
+# checkout root itself; for a linked worktree with no config of its own, the
+# main worktree root (a worktree-local config always wins, all-or-nothing).
+get_resolution_root() {
+    local repo_root="$1"
+    local main_root=""
+
+    if worktree_fallback_disabled; then
+        printf '%s\n' "$repo_root"
+        return 0
+    fi
+
+    if ! is_linked_worktree "$repo_root"; then
+        printf '%s\n' "$repo_root"
+        return 0
+    fi
+
+    if [[ -n "$(discover_config_files "$repo_root" | head -1)" ]]; then
+        printf '%s\n' "$repo_root"
+        return 0
+    fi
+
+    main_root="$(get_main_worktree_root "$repo_root" 2>/dev/null || echo "")"
+    if [[ -z "$main_root" || ! -d "$main_root" ]]; then
+        local_override_trace_log "get_resolution_root: no main worktree root; fallback skipped"
+        printf '%s\n' "$repo_root"
+        return 0
+    fi
+
+    local_override_trace_log "get_resolution_root: falling back to main worktree root $main_root"
+    printf '%s\n' "$main_root"
+}
