@@ -635,6 +635,41 @@ EOF
     pass "Failing worktree tallied and isolated; healthy checkouts refreshed"
 }
 
+test_rebase_in_fallback_worktree() {
+    info "Testing rebase completes cleanly in a fallback worktree with filters active..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-rebase"
+    git worktree add -q -b wt-rebase "$wt" >/dev/null 2>&1
+
+    # Advance the default branch in the main checkout
+    echo "# README updated on main" > README.md
+    git add README.md
+    git commit -q -m "Update README on main"
+
+    # Commit an unrelated change in the worktree, then rebase onto main
+    echo "extra" > "$wt/extra.txt"
+    git -C "$wt" add extra.txt
+    git -C "$wt" commit -q -m "Add extra file"
+
+    local default_branch
+    default_branch="$(git rev-parse --abbrev-ref HEAD)"
+    if ! git -C "$wt" rebase -q "$default_branch" >/dev/null 2>&1; then
+        fail "Rebase in worktree failed"
+        git -C "$wt" rebase --abort 2>/dev/null || true
+        return 1
+    fi
+
+    local committed
+    committed="$(git -C "$wt" show HEAD:AGENTS.md)"
+    if [[ "$committed" == "# Tracked AGENTS.md" ]]; then
+        pass "Rebase clean in fallback worktree; no override content in rebased commits"
+    else
+        fail "HEAD:AGENTS.md after rebase: $committed"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -663,7 +698,8 @@ main() {
         test_status_reports_fallback_in_worktree \
         test_legacy_cli_filters_match_hook_behavior \
         test_apply_all_worktrees \
-        test_apply_all_worktrees_isolates_failures; do
+        test_apply_all_worktrees_isolates_failures \
+        test_rebase_in_fallback_worktree; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 
