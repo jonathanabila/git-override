@@ -448,6 +448,35 @@ test_apply_works_inside_fallback_worktree() {
     fi
 }
 
+test_pre_rebase_repairs_skip_worktree_in_fallback_worktree() {
+    info "Testing pre-rebase clears legacy skip-worktree bits in a fallback worktree..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-skipwt"
+    git worktree add -q -b wt-skipwt "$wt" >/dev/null 2>&1
+
+    # Plant a legacy skip-worktree bit on the managed target in the worktree
+    git -C "$wt" update-index --skip-worktree AGENTS.md
+    local before
+    before="$(git -C "$wt" ls-files -v AGENTS.md | cut -c1)"
+    if [[ "$before" != "S" ]]; then
+        fail "Setup failed: expected skip-worktree bit, got: $before"
+        return 1
+    fi
+
+    # Invoke the pre-rebase hook the way git would (cwd = worktree)
+    ( cd "$wt" && bash "$TEST_DIR/.git/hooks/pre-rebase" ) >/dev/null 2>&1
+
+    local after
+    after="$(git -C "$wt" ls-files -v AGENTS.md | cut -c1)"
+    if [[ "$after" == "H" ]]; then
+        pass "pre-rebase repaired the skip-worktree bit via resolution-root entries"
+    else
+        fail "Expected H after hook, got: $after"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -470,7 +499,8 @@ main() {
         test_clean_roundtrip_in_fallback_worktree \
         test_commit_in_stale_fallback_worktree_stays_clean \
         test_post_checkout_refreshes_fallback_worktree \
-        test_apply_works_inside_fallback_worktree; do
+        test_apply_works_inside_fallback_worktree \
+        test_pre_rebase_repairs_skip_worktree_in_fallback_worktree; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 
