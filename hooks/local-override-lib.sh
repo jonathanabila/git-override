@@ -239,12 +239,16 @@ $target"
     mv "$temp_file" "$attributes_file"
 }
 
+# Keyed to the per-worktree git dir so different checkouts of the same repo
+# don't share transient commit state.
 get_post_commit_state_file() {
     local repo_root="$1"
-    local common_git_dir=""
+    local worktree_git_dir=""
 
-    common_git_dir="$(get_common_git_dir "$repo_root")" || return 1
-    printf '%s\n' "$common_git_dir/local-override-post-commit-state"
+    worktree_git_dir="$(git -C "$repo_root" rev-parse --absolute-git-dir 2>/dev/null || echo "")"
+    [[ -n "$worktree_git_dir" ]] || return 1
+
+    printf '%s\n' "$worktree_git_dir/local-override-post-commit-state"
 }
 
 clear_post_commit_state() {

@@ -14,16 +14,22 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local repo_root
+    local resolution_root
     repo_root="$(get_repo_root)" || return 0
 
-    cache_config_files "$repo_root"
+    # Configs resolve against the resolution root (the main checkout for
+    # fallback worktrees); index repairs and HEAD restores stay on the
+    # checkout root.
+    resolution_root="$(get_resolution_root "$repo_root")"
+
+    cache_config_files "$resolution_root"
     trap 'clear_config_files_cache' RETURN
 
-    if ! has_any_config "$repo_root"; then
+    if ! has_any_config "$resolution_root"; then
         return 0
     fi
 
-    if ! validate_config "$repo_root"; then
+    if ! validate_config "$resolution_root"; then
         return 1
     fi
 
@@ -43,7 +49,7 @@ main() {
         if git -C "$repo_root" cat-file -e "HEAD:$target" 2>/dev/null; then
             git -C "$repo_root" -c filter.local-override.smudge= checkout -q HEAD -- "$target" 2>/dev/null || true
         fi
-    done < <(read_config "$repo_root")
+    done < <(read_config "$resolution_root")
 
     return 0
 }

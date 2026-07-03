@@ -41,17 +41,16 @@ main() {
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
-        # Parse entry: "target|override"
+        # Parse entry: "target|override" (override may be absolute — anchored
+        # at the resolution root by pre-commit)
         target="${entry%%|*}"
         override="${entry#*|}"
-
-        local full_target="$repo_root/$target"
-        local full_override="$repo_root/$override"
+        [[ "$override" == /* ]] || override="$repo_root/$override"
 
         # Check if both target and override files exist
-        if [[ -f "$full_override" && -f "$full_target" ]]; then
+        if [[ -f "$override" && -f "$repo_root/$target" ]]; then
             # Apply override: copy override content to target file
-            cp "$full_override" "$full_target"
+            cp "$override" "$repo_root/$target"
         fi
     done <<< "$entries_to_reapply"
 

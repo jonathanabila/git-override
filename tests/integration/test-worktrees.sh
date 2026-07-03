@@ -95,9 +95,15 @@ EOF
     cp "$PROJECT_DIR/hooks/local-override-filter-smudge" .git/hooks/
     cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/
     cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
+    cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
+    cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit
+    cp "$PROJECT_DIR/hooks/local-override-pre-rebase" .git/hooks/pre-rebase
     chmod +x .git/hooks/local-override-filter-smudge \
         .git/hooks/local-override-filter-clean \
-        .git/hooks/post-checkout
+        .git/hooks/post-checkout \
+        .git/hooks/pre-commit \
+        .git/hooks/post-commit \
+        .git/hooks/pre-rebase
 
     git config filter.local-override.smudge "$TEST_DIR/.git/hooks/local-override-filter-smudge %f"
     git config filter.local-override.clean "$TEST_DIR/.git/hooks/local-override-filter-clean %f"
@@ -367,6 +373,49 @@ test_clean_roundtrip_in_fallback_worktree() {
     fi
 }
 
+test_commit_in_stale_fallback_worktree_stays_clean() {
+    info "Testing a stale fallback worktree cannot commit override content..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-stale"
+    git worktree add -q -b wt-stale "$wt" >/dev/null 2>&1
+
+    # Override changes at the main root AFTER the worktree materialized v1:
+    # the worktree file now differs from the override, so the clean filter's
+    # exact-match guard no longer protects the index.
+    echo "# Private override content v2" > "$TEST_DIR/CLAUDE.private.md"
+
+    ( cd "$wt" && git commit -aqm "routine commit" ) >/dev/null 2>&1 || true
+
+    local committed
+    committed="$(git -C "$wt" show HEAD:AGENTS.md 2>/dev/null || echo "no-commit")"
+    if [[ "$committed" == "# Tracked AGENTS.md" || "$committed" == "no-commit" ]]; then
+        pass "No override content reached the commit"
+    else
+        fail "HEAD:AGENTS.md leaked: $committed"
+        return 1
+    fi
+}
+
+test_post_checkout_refreshes_fallback_worktree() {
+    info "Testing post-checkout refreshes a fallback worktree after override edits..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-refresh"
+    git worktree add -q -b wt-refresh "$wt" >/dev/null 2>&1
+
+    echo "# Private override content v3" > "$TEST_DIR/CLAUDE.private.md"
+
+    ( cd "$wt" && git switch -qc wt-refresh-2 ) >/dev/null 2>&1
+
+    if grep -q "Private override content v3" "$wt/AGENTS.md"; then
+        pass "Branch switch re-applied the current override content"
+    else
+        fail "Worktree AGENTS.md after switch: $(cat "$wt/AGENTS.md")"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -386,7 +435,9 @@ main() {
         test_worktree_fallback_smudges_override \
         test_worktree_local_config_wins \
         test_fallback_escape_hatch \
-        test_clean_roundtrip_in_fallback_worktree; do
+        test_clean_roundtrip_in_fallback_worktree \
+        test_commit_in_stale_fallback_worktree_stays_clean \
+        test_post_checkout_refreshes_fallback_worktree; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 

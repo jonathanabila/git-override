@@ -24,6 +24,7 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local repo_root
+    local resolution_root
     local staged_files=""
     local relevant_configs=""
     local relevant_entries=""
@@ -31,6 +32,12 @@ main() {
     local state_file=""
     local state_entries=""
     repo_root="$(get_repo_root)" || return 0
+
+    # Configs and override files resolve against the resolution root (the main
+    # checkout for fallback worktrees); index and working-tree operations stay
+    # on the checkout root. No config-discovery cache here: everything below
+    # resolves configs by direct path walks, never a global scan.
+    resolution_root="$(get_resolution_root "$repo_root")"
 
     clear_post_commit_state "$repo_root"
 
@@ -45,7 +52,7 @@ main() {
     local matched_config="false"
     while IFS= read -r staged_file || [[ -n "$staged_file" ]]; do
         [[ -n "$staged_file" ]] || continue
-        config_path="$(find_nearest_config_for_path "$repo_root" "$staged_file" 2>/dev/null || true)"
+        config_path="$(find_nearest_config_for_path "$resolution_root" "$staged_file" 2>/dev/null || true)"
         [[ -n "$config_path" ]] || continue
 
         if ! echo "$relevant_configs" | grep -qxF "$config_path"; then
@@ -64,7 +71,7 @@ $config_path"
             [[ -n "$config_entry" ]] || continue
             relevant_entries="$relevant_entries
 $config_entry"
-        done < <(read_config_entries_for_file "$repo_root" "$config_path")
+        done < <(read_config_entries_for_file "$resolution_root" "$config_path")
     done <<< "$relevant_configs"
 
     [[ -n "$relevant_entries" ]] || return 0
@@ -88,7 +95,7 @@ $config_entry"
         # Check if this target is staged
         if echo "$staged_files" | grep -qxF "$target"; then
             # Check if override file exists
-            if [[ -f "$repo_root/$override" ]]; then
+            if [[ -f "$resolution_root/$override" ]]; then
                 # Add to list if not already present
                 if ! printf '%s\n' "$overrides_to_restore" | grep -qxF "$override"; then
                     overrides_to_restore="$overrides_to_restore
@@ -132,14 +139,18 @@ $override"
             fi
         done <<< "$relevant_entries")
 
+        # Overrides are recorded as absolute paths so post-commit re-applies
+        # from the resolution root, not the (possibly fallback) checkout.
+        local state_entry
         while IFS= read -r entry || [[ -n "$entry" ]]; do
             [[ -z "$entry" ]] && continue
             target="${entry%%|*}"
             override="${entry#*|}"
             if [[ "$override" == "$override_file" ]]; then
-                if ! printf '%s\n' "$state_entries" | grep -qxF "$entry"; then
+                state_entry="$target|$resolution_root/$override"
+                if ! printf '%s\n' "$state_entries" | grep -qxF "$state_entry"; then
                     state_entries="$state_entries
-$entry"
+$state_entry"
                 fi
             fi
         done <<< "$relevant_entries"

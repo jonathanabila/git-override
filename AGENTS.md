@@ -277,7 +277,7 @@ Shared library sourced by all hooks. Key functions:
 - `get_active_overrides()` - Get files with existing override files
 - `get_override_files()` - List unique override files from config
 - `get_targets_for_override()` - Get all target files for a specific override
-- `get_override_for_file()` - Find the override file for a given target file path
+- `get_override_for_file()` - Find the override file for a given target file path; returns an absolute path resolved against the checkout's resolution root
 - `validate_config()` - Validate config format and check for duplicate targets
 
 ### `hooks/local-override-post-checkout`
