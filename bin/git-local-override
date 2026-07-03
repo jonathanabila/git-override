@@ -352,6 +352,12 @@ cmd_add() {
         die "File does not exist: $path"
     fi
 
+    # All config reads below happen before any file writes, and add only ever
+    # writes override/target files (never a config file), so caching the whole
+    # command is safe.
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
     # Check if file is already in config
     local override_path
     local config_path=""
@@ -439,6 +445,11 @@ cmd_remove() {
     local repo_root
     repo_root="$(get_repo_root)"
     path="$(normalize_path "$path")"
+
+    # Intervening writes touch target/override files, never config files, so
+    # the discovery cache stays valid across the whole command.
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
 
     # Get override path from config
     local override_path
@@ -772,6 +783,8 @@ cmd_status() {
     fi
 
     echo ""
+    # Must stay the final statement: cmd_list's RETURN trap clears the shared
+    # config cache, so anything added after this call would run uncached.
     cmd_list
 }
 
@@ -1132,6 +1145,9 @@ cmd__get_active_targets() {
     local repo_root
     checkout_root="$(get_repo_root)"
     repo_root="$(get_resolution_root "$checkout_root")"
+
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
 
     has_any_config "$repo_root" || return 0
 

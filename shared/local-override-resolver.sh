@@ -53,6 +53,8 @@ count_list_entries() {
 
 cache_config_files() {
     local repo_root="$1"
+    # Already cached for this root; callers that mutate config files must
+    # clear_config_files_cache first.
     if [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" \
         && "$_DISCOVER_CACHE_ROOT" == "$repo_root" ]]; then
         return 0
