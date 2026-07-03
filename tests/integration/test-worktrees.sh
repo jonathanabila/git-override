@@ -291,6 +291,82 @@ test_discovery_cache_is_root_aware() {
     fi
 }
 
+test_worktree_fallback_smudges_override() {
+    info "Testing fresh worktree inherits the main checkout's override..."
+
+    cd "$TEST_DIR"
+    git worktree add -q -b wt-fallback "$CURRENT_TEST_ROOT/wt-fallback" >/dev/null 2>&1
+
+    if grep -q "Private override content v1" "$CURRENT_TEST_ROOT/wt-fallback/AGENTS.md"; then
+        pass "Worktree AGENTS.md contains override content via fallback"
+    else
+        fail "Worktree AGENTS.md content: $(cat "$CURRENT_TEST_ROOT/wt-fallback/AGENTS.md")"
+        return 1
+    fi
+}
+
+test_worktree_local_config_wins() {
+    info "Testing a worktree-local config takes precedence over fallback..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-local"
+    git worktree add -q -b wt-local "$wt" >/dev/null 2>&1
+
+    cat > "$wt/.local-overrides.yaml" << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - AGENTS.md
+EOF
+    echo "# Worktree-local override content" > "$wt/CLAUDE.private.md"
+
+    rm "$wt/AGENTS.md"
+    git -C "$wt" checkout -- AGENTS.md
+
+    if grep -q "Worktree-local override content" "$wt/AGENTS.md"; then
+        pass "Worktree-local config wins over the main root's"
+    else
+        fail "Worktree AGENTS.md content: $(cat "$wt/AGENTS.md")"
+        return 1
+    fi
+}
+
+test_fallback_escape_hatch() {
+    info "Testing GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-disabled"
+    GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1 \
+        git worktree add -q -b wt-disabled "$wt" >/dev/null 2>&1
+
+    if grep -q "# Tracked AGENTS.md" "$wt/AGENTS.md"; then
+        pass "Fallback disabled: worktree smudges tracked content"
+    else
+        fail "Worktree AGENTS.md content: $(cat "$wt/AGENTS.md")"
+        return 1
+    fi
+}
+
+test_clean_roundtrip_in_fallback_worktree() {
+    info "Testing clean filter restores tracked content in a fallback worktree..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-clean"
+    git worktree add -q -b wt-clean "$wt" >/dev/null 2>&1
+
+    git -C "$wt" add AGENTS.md
+    local index_content
+    index_content="$(git -C "$wt" show :AGENTS.md)"
+
+    if [[ "$index_content" == "# Tracked AGENTS.md" ]]; then
+        pass "Override content did not leak into the index"
+    else
+        fail "Index content for AGENTS.md: $index_content"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -306,7 +382,11 @@ main() {
         test_worktree_helper_functions \
         test_nested_worktree_config_excluded \
         test_bare_main_repo_degrades_gracefully \
-        test_discovery_cache_is_root_aware; do
+        test_discovery_cache_is_root_aware \
+        test_worktree_fallback_smudges_override \
+        test_worktree_local_config_wins \
+        test_fallback_escape_hatch \
+        test_clean_roundtrip_in_fallback_worktree; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 

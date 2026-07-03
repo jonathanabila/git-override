@@ -35,9 +35,9 @@ run_smudge_filter() {
     local override_file
     override_file="$(get_override_for_file "$repo_root" "$file_path")"
 
-    if [[ -n "$override_file" && -f "$repo_root/$override_file" ]]; then
+    if [[ -n "$override_file" && -f "$override_file" ]]; then
         cat > /dev/null
-        cat "$repo_root/$override_file"
+        cat "$override_file"
         return 0
     fi
 
