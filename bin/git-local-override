@@ -477,6 +477,9 @@ cmd_list() {
     checkout_root="$(get_repo_root)"
     repo_root="$(get_resolution_root "$checkout_root")"
 
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
     if ! has_any_config "$repo_root"; then
         echo "No $CONFIG_FILE_NAME found in repository"
         echo ""
@@ -641,13 +644,21 @@ $target"
 }
 
 cmd_status() {
+    local checkout_root
     local repo_root
-    repo_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)"
+    repo_root="$(get_resolution_root "$checkout_root")"
+
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
 
     echo "Local Override Status"
     echo "====================="
     echo ""
-    echo "Repository: $repo_root"
+    echo "Repository: $checkout_root"
+    if [[ "$repo_root" != "$checkout_root" ]]; then
+        echo "Overrides:  inherited from main worktree ($repo_root)"
+    fi
     echo ""
 
     if has_any_config "$repo_root"; then
@@ -656,7 +667,7 @@ cmd_status() {
         while IFS= read -r config_path || [[ -n "$config_path" ]]; do
             [[ -n "$config_path" ]] || continue
             ((config_count++)) || true
-        done < <(discover_config_files "$repo_root")
+        done < <(get_cached_config_files "$repo_root")
 
         echo -e "Configs:    ${GREEN}$config_count discovered${NC}"
     else
@@ -668,7 +679,7 @@ cmd_status() {
 
     # Check if hooks are installed (directly or via the pre-commit framework)
     local hooks_dir
-    hooks_dir="$(get_hooks_dir "$repo_root")"
+    hooks_dir="$(get_hooks_dir "$checkout_root")"
 
     local hooks_installed=true
     local hooks_via_precommit=false
@@ -689,7 +700,7 @@ cmd_status() {
         # Pre-commit framework install: generic shim plus a matching
         # local-override hook id in the repo's pre-commit config
         if grep -qF "$PRE_COMMIT_FRAMEWORK_MARKER" "$hook_file" 2>/dev/null \
-            && grep -q "local-override-$hook_type" "$repo_root/.pre-commit-config.yaml" 2>/dev/null; then
+            && grep -q "local-override-$hook_type" "$checkout_root/.pre-commit-config.yaml" 2>/dev/null; then
             hooks_via_precommit=true
             continue
         fi
@@ -713,15 +724,15 @@ cmd_status() {
     # Check filter driver status
     local filter_smudge
     local filter_clean
-    filter_smudge="$(git -C "$repo_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
-    filter_clean="$(git -C "$repo_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
+    filter_smudge="$(git -C "$checkout_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
+    filter_clean="$(git -C "$checkout_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
 
     if [[ -n "$filter_smudge" && -n "$filter_clean" ]]; then
         echo -e "Filter:     ${GREEN}installed${NC}"
 
         # Check if .git/info/attributes exists and has entries
         local attributes_file
-        attributes_file="$(get_attributes_file_path "$repo_root")"
+        attributes_file="$(get_attributes_file_path "$checkout_root")"
         if [[ -f "$attributes_file" ]]; then
             local filter_count
             filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null || echo "0")
@@ -1003,6 +1014,23 @@ cmd_sync_filters() {
     success "Synced $filter_count file(s) to filter driver"
 }
 
+# Returns the ABSOLUTE path of the override file for a managed target, or
+# nothing. Mirrors hooks/local-override-lib.sh's get_override_for_file:
+# resolves against the checkout's resolution root, so linked worktrees
+# without their own config inherit the main worktree's overrides.
+cli_get_override_for_file() {
+    local checkout_root="$1"
+    local file_path="$2"
+    local resolution_root=""
+    local override=""
+
+    resolution_root="$(get_resolution_root "$checkout_root")"
+    override="$(get_override_for_target "$file_path" "$resolution_root" 2>/dev/null || true)"
+    [[ -n "$override" ]] || return 0
+
+    printf '%s/%s\n' "$resolution_root" "$override"
+}
+
 cmd_filter_smudge() {
     local file_path="${1:-}"
 
@@ -1011,24 +1039,19 @@ cmd_filter_smudge() {
         return 0
     fi
 
-    local repo_root
-    if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-        cat
-        return 0
-    fi
-
-    if ! has_any_config "$repo_root"; then
+    local checkout_root
+    if ! checkout_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
         cat
         return 0
     fi
 
     local override_path
-    if override_path=$(get_override_for_target "$file_path" "$repo_root"); then
-        if [[ -n "$override_path" && -f "$repo_root/$override_path" ]]; then
-            cat > /dev/null
-            cat "$repo_root/$override_path"
-            return 0
-        fi
+    override_path="$(cli_get_override_for_file "$checkout_root" "$file_path")"
+
+    if [[ -n "$override_path" && -f "$override_path" ]]; then
+        cat > /dev/null
+        cat "$override_path"
+        return 0
     fi
 
     cat
@@ -1036,35 +1059,40 @@ cmd_filter_smudge() {
 
 cmd_filter_clean() {
     local file_path="${1:-}"
+    local stdin_tmp=""
 
     if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
         cat
         return 0
     fi
 
-    local repo_root
-    if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    local checkout_root
+    if ! checkout_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
         cat
         return 0
     fi
 
-    if ! has_any_config "$repo_root"; then
-        cat
-        return 0
-    fi
+    stdin_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-clean.XXXXXX")"
+    cat > "$stdin_tmp"
 
     local override_path
-    if override_path=$(get_override_for_target "$file_path" "$repo_root"); then
-        if [[ -n "$override_path" && -f "$repo_root/$override_path" ]]; then
-            if git -C "$repo_root" show "HEAD:$file_path" >/dev/null 2>&1; then
-                cat > /dev/null
-                git -C "$repo_root" show "HEAD:$file_path" 2>/dev/null || cat
+    override_path="$(cli_get_override_for_file "$checkout_root" "$file_path")"
+
+    if [[ -n "$override_path" && -f "$override_path" ]]; then
+        # Only transform when incoming content is exactly the local override.
+        # If caller already provided original/tracked content (e.g., pre-commit
+        # restored file), passthrough avoids clobbering intended staged content.
+        if cmp -s "$stdin_tmp" "$override_path"; then
+            if git -C "$checkout_root" show ":$file_path" >/dev/null 2>&1; then
+                git -C "$checkout_root" show ":$file_path" 2>/dev/null || cat "$stdin_tmp"
+                rm -f "$stdin_tmp"
                 return 0
             fi
         fi
     fi
 
-    cat
+    cat "$stdin_tmp"
+    rm -f "$stdin_tmp"
 }
 
 cmd_init_config() {

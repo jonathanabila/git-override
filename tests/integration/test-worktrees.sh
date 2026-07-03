@@ -477,6 +477,48 @@ test_pre_rebase_repairs_skip_worktree_in_fallback_worktree() {
     fi
 }
 
+test_status_caches_discovery() {
+    info "Testing status runs config discovery at most once and hits the cache..."
+
+    cd "$TEST_DIR"
+    local output
+    output="$(GIT_LOCAL_OVERRIDE_TRACE=1 "$PROJECT_DIR/bin/git-local-override" status 2>&1 || true)"
+
+    local misses hits
+    misses="$(printf '%s\n' "$output" | grep -c "cache=miss" || true)"
+    hits="$(printf '%s\n' "$output" | grep -c "cache=hit" || true)"
+
+    if [[ "$misses" -le 1 && "$hits" -ge 1 ]]; then
+        pass "status cached discovery (misses: $misses, hits: $hits)"
+    else
+        fail "status discovery caching off (misses: $misses, hits: $hits)"
+        return 1
+    fi
+}
+
+test_status_reports_fallback_in_worktree() {
+    info "Testing status in a fallback worktree reports inheritance, not init-config..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-status"
+    git worktree add -q -b wt-status "$wt" >/dev/null 2>&1
+
+    local output
+    output="$( (cd "$wt" && "$PROJECT_DIR/bin/git-local-override" status 2>&1) || true)"
+
+    if echo "$output" | grep -q "init-config"; then
+        fail "status still recommends init-config in a fallback worktree: $output"
+        return 1
+    fi
+
+    if echo "$output" | grep -qi "inherited from main worktree"; then
+        pass "status reports fallback inheritance"
+    else
+        fail "status missing fallback indicator: $output"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -500,7 +542,9 @@ main() {
         test_commit_in_stale_fallback_worktree_stays_clean \
         test_post_checkout_refreshes_fallback_worktree \
         test_apply_works_inside_fallback_worktree \
-        test_pre_rebase_repairs_skip_worktree_in_fallback_worktree; do
+        test_pre_rebase_repairs_skip_worktree_in_fallback_worktree \
+        test_status_caches_discovery \
+        test_status_reports_fallback_in_worktree; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 
