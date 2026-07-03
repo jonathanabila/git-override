@@ -645,7 +645,10 @@ $target"
     build_ms="$(elapsed_milliseconds "$phase_start_ms")"
 
     phase_start_ms="$(now_milliseconds)"
-    mv "$temp_file" "$attributes_file"
+    # Explicit guard: callers may run inside an `if (subshell)` where errexit
+    # is suppressed and a bare mv failure would leave attributes silently stale.
+    mv "$temp_file" "$attributes_file" \
+        || die "Failed to write attributes file: $attributes_file"
 
     write_ms="$(elapsed_milliseconds "$phase_start_ms")"
 
@@ -788,8 +791,8 @@ cmd_status() {
     cmd_list
 }
 
-cmd_apply() {
-    local checkout_root
+apply_to_checkout() {
+    local checkout_root="$1"
     local repo_root
     local apply_start_ms
     local step_start_ms
@@ -802,7 +805,6 @@ cmd_apply() {
     info "Applying overrides..."
 
     trace_step_start_ms="$(now_milliseconds)"
-    checkout_root="$(get_repo_root)"
     repo_root="$(get_resolution_root "$checkout_root")"
     if trace_enabled; then
         local_override_trace "Resolved repo root in $(elapsed_milliseconds "$trace_step_start_ms")ms: $repo_root"
@@ -881,7 +883,10 @@ cmd_apply() {
 
             apply_target_start_ms="$(now_milliseconds)"
             copy_start_ms="$apply_target_start_ms"
-            cp "$full_override" "$full_target"
+            # Explicit guard: inside `if (subshell)` errexit is suppressed, so
+            # a bare cp failure would be silently absorbed by the caller.
+            cp "$full_override" "$full_target" \
+                || die "Failed to apply $override -> $target"
             copy_ms="$(elapsed_milliseconds "$copy_start_ms")"
             # Update index via clean filter so git status sees file as clean
             git_add_start_ms="$(now_milliseconds)"
@@ -911,6 +916,62 @@ cmd_apply() {
     log_step_duration "Synced attributes" "$step_start_ms"
 
     success "Applied $count override(s) in $(elapsed_milliseconds "$apply_start_ms")ms"
+}
+
+cmd_apply() {
+    local all_worktrees=false
+    local arg=""
+
+    for arg in "$@"; do
+        case "$arg" in
+            --all-worktrees) all_worktrees=true ;;
+            *) die "Unknown option for apply: $arg" ;;
+        esac
+    done
+
+    if [[ "$all_worktrees" == false ]]; then
+        apply_to_checkout "$(get_repo_root)"
+        return $?
+    fi
+
+    local start_root
+    start_root="$(get_repo_root)"
+
+    local line=""
+    local wt_root=""
+    local applied_count=0
+    local failed_count=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            worktree\ *) ;;
+            *) continue ;;
+        esac
+        wt_root="${line#worktree }"
+
+        if [[ ! -d "$wt_root" ]]; then
+            info "Skipping missing worktree: $wt_root"
+            continue
+        fi
+        if ! git -C "$wt_root" rev-parse --show-toplevel >/dev/null 2>&1; then
+            info "Skipping non-checkout entry: $wt_root"
+            continue
+        fi
+
+        info "=== Applying in $wt_root ==="
+        # Subshell: apply_to_checkout may die/exit on per-checkout failure;
+        # the subshell absorbs it so remaining worktrees still run.
+        if (cd "$wt_root" && apply_to_checkout "$wt_root"); then
+            ((applied_count++)) || true
+        else
+            ((failed_count++)) || true
+        fi
+    done < <(git -C "$start_root" worktree list --porcelain)
+
+    if [[ "$failed_count" -gt 0 ]]; then
+        die "apply failed in $failed_count worktree(s) (succeeded in $applied_count)"
+    fi
+    success "Applied overrides in $applied_count checkout(s)"
 }
 
 cmd_restore() {
@@ -1251,7 +1312,8 @@ COMMANDS:
     remove [-d] <path>      Remove an override (-d to delete override file too)
     list                    List all configured overrides
     status                  Show detailed status (includes filter driver status)
-    apply                   Manually apply all overrides (syncs filters)
+    apply [--all-worktrees] Manually apply all overrides (syncs filters);
+                            --all-worktrees refreshes every linked worktree too
     restore                 Manually restore all originals from git
     sync-filters            Sync filter driver with config and clear legacy skip-worktree
     shell-init              Output shell function wrapping git checkout/switch
@@ -1276,6 +1338,9 @@ EXAMPLES:
 
     # Manually apply overrides (hooks do this automatically)
     git-local-override apply
+
+    # Refresh every linked worktree after editing an override
+    git-local-override apply --all-worktrees
 
     # Restore originals (hooks do this before commits)
     git-local-override restore

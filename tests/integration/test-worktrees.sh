@@ -555,6 +555,86 @@ test_legacy_cli_filters_match_hook_behavior() {
     pass "Legacy CLI filters match hook behavior (fallback, gate hit, gate miss)"
 }
 
+test_apply_all_worktrees() {
+    info "Testing apply --all-worktrees refreshes every checkout..."
+
+    cd "$TEST_DIR"
+    local wt_a="$CURRENT_TEST_ROOT/wt-all-a"
+    local wt_b="$CURRENT_TEST_ROOT/wt-all-b"
+    git worktree add -q -b wt-all-a "$wt_a" >/dev/null 2>&1
+    git worktree add -q -b wt-all-b "$wt_b" >/dev/null 2>&1
+
+    # Materialize v1 everywhere, then edit the override source
+    "$PROJECT_DIR/bin/git-local-override" apply >/dev/null 2>&1
+    echo "# Private override content v3" > "$TEST_DIR/CLAUDE.private.md"
+
+    if ! "$PROJECT_DIR/bin/git-local-override" apply --all-worktrees >/dev/null 2>&1; then
+        fail "apply --all-worktrees exited non-zero"
+        return 1
+    fi
+
+    local checkout
+    for checkout in "$TEST_DIR" "$wt_a" "$wt_b"; do
+        if ! grep -q "Private override content v3" "$checkout/AGENTS.md"; then
+            fail "Stale AGENTS.md in $checkout: $(cat "$checkout/AGENTS.md")"
+            return 1
+        fi
+    done
+
+    pass "All three checkouts serve the edited override content"
+}
+
+test_apply_all_worktrees_isolates_failures() {
+    info "Testing apply --all-worktrees isolates and reports per-worktree failures..."
+
+    cd "$TEST_DIR"
+
+    if "$PROJECT_DIR/bin/git-local-override" apply --bogus >/dev/null 2>&1; then
+        fail "apply --bogus exited zero instead of rejecting the option"
+        return 1
+    fi
+
+    local wt_bad="$CURRENT_TEST_ROOT/wt-iso-bad"
+    local wt_ok="$CURRENT_TEST_ROOT/wt-iso-ok"
+    git worktree add -q -b wt-iso-bad "$wt_bad" >/dev/null 2>&1
+    git worktree add -q -b wt-iso-ok "$wt_ok" >/dev/null 2>&1
+
+    # A worktree-local config wins over fallback; omitting the required
+    # pattern field makes validation (and thus apply) fail in this checkout.
+    cat > "$wt_bad/.local-overrides.yaml" << 'EOF'
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    echo "# Private override content v4" > "$TEST_DIR/CLAUDE.private.md"
+
+    local output=""
+    local status=0
+    output="$("$PROJECT_DIR/bin/git-local-override" apply --all-worktrees 2>&1)" || status=$?
+
+    if [[ "$status" -eq 0 ]]; then
+        fail "apply --all-worktrees exited zero despite a failing worktree"
+        return 1
+    fi
+
+    if ! echo "$output" | grep -q "failed in 1 worktree"; then
+        fail "Failure summary missing the failed count: $output"
+        return 1
+    fi
+
+    local checkout
+    for checkout in "$TEST_DIR" "$wt_ok"; do
+        if ! grep -q "Private override content v4" "$checkout/AGENTS.md"; then
+            fail "Healthy checkout not refreshed: $checkout ($(cat "$checkout/AGENTS.md"))"
+            return 1
+        fi
+    done
+
+    pass "Failing worktree tallied and isolated; healthy checkouts refreshed"
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -581,7 +661,9 @@ main() {
         test_pre_rebase_repairs_skip_worktree_in_fallback_worktree \
         test_status_caches_discovery \
         test_status_reports_fallback_in_worktree \
-        test_legacy_cli_filters_match_hook_behavior; do
+        test_legacy_cli_filters_match_hook_behavior \
+        test_apply_all_worktrees \
+        test_apply_all_worktrees_isolates_failures; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 
