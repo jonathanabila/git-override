@@ -416,6 +416,38 @@ test_post_checkout_refreshes_fallback_worktree() {
     fi
 }
 
+test_apply_works_inside_fallback_worktree() {
+    info "Testing 'apply' run inside a fallback worktree..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-apply"
+    git worktree add -q -b wt-apply "$wt" >/dev/null 2>&1
+
+    echo "# Private override content v2" > "$TEST_DIR/CLAUDE.private.md"
+
+    if ! (cd "$wt" && "$PROJECT_DIR/bin/git-local-override" apply >/dev/null 2>&1); then
+        fail "apply exited non-zero inside the worktree"
+        return 1
+    fi
+
+    if grep -q "Private override content v2" "$wt/AGENTS.md"; then
+        pass "apply inside worktree refreshed the target from the main root's override"
+    else
+        fail "Worktree AGENTS.md after apply: $(cat "$wt/AGENTS.md")"
+        return 1
+    fi
+
+    # The index must still hold tracked content (clean filter round-trip)
+    local index_content
+    index_content="$(git -C "$wt" show :AGENTS.md)"
+    if [[ "$index_content" == "# Tracked AGENTS.md" ]]; then
+        pass "apply did not leak override content into the index"
+    else
+        fail "Index content after apply: $index_content"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -437,7 +469,8 @@ main() {
         test_fallback_escape_hatch \
         test_clean_roundtrip_in_fallback_worktree \
         test_commit_in_stale_fallback_worktree_stays_clean \
-        test_post_checkout_refreshes_fallback_worktree; do
+        test_post_checkout_refreshes_fallback_worktree \
+        test_apply_works_inside_fallback_worktree; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 

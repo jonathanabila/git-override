@@ -472,8 +472,10 @@ cmd_remove() {
 }
 
 cmd_list() {
+    local checkout_root
     local repo_root
-    repo_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)"
+    repo_root="$(get_resolution_root "$checkout_root")"
 
     if ! has_any_config "$repo_root"; then
         echo "No $CONFIG_FILE_NAME found in repository"
@@ -763,6 +765,7 @@ cmd_status() {
 }
 
 cmd_apply() {
+    local checkout_root
     local repo_root
     local apply_start_ms
     local step_start_ms
@@ -775,7 +778,8 @@ cmd_apply() {
     info "Applying overrides..."
 
     trace_step_start_ms="$(now_milliseconds)"
-    repo_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)"
+    repo_root="$(get_resolution_root "$checkout_root")"
     if trace_enabled; then
         local_override_trace "Resolved repo root in $(elapsed_milliseconds "$trace_step_start_ms")ms: $repo_root"
     fi
@@ -818,7 +822,7 @@ cmd_apply() {
 
         target="${entry%%|*}"
         override="${entry#*|}"
-        full_target="$repo_root/$target"
+        full_target="$checkout_root/$target"
         full_override="$repo_root/$override"
 
         if [[ -f "$full_override" && -f "$full_target" ]]; then
@@ -841,7 +845,7 @@ cmd_apply() {
         target="${entry%%|*}"
         override="${entry#*|}"
 
-        full_target="$repo_root/$target"
+        full_target="$checkout_root/$target"
         full_override="$repo_root/$override"
 
         if [[ -f "$full_override" && -f "$full_target" ]]; then
@@ -857,7 +861,7 @@ cmd_apply() {
             copy_ms="$(elapsed_milliseconds "$copy_start_ms")"
             # Update index via clean filter so git status sees file as clean
             git_add_start_ms="$(now_milliseconds)"
-            git -C "$repo_root" add "$target" 2>/dev/null || true
+            git -C "$checkout_root" add "$target" 2>/dev/null || true
             git_add_ms="$(elapsed_milliseconds "$git_add_start_ms")"
             ((count++)) || true
 
@@ -879,15 +883,17 @@ cmd_apply() {
     # Sync .git/info/attributes to match config
     step_start_ms="$(now_milliseconds)"
     info "Syncing attributes..."
-    sync_attributes "$repo_root" "$config_entries"
+    sync_attributes "$checkout_root" "$config_entries"
     log_step_duration "Synced attributes" "$step_start_ms"
 
     success "Applied $count override(s) in $(elapsed_milliseconds "$apply_start_ms")ms"
 }
 
 cmd_restore() {
+    local checkout_root
     local repo_root
-    repo_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)"
+    repo_root="$(get_resolution_root "$checkout_root")"
 
     if ! has_any_config "$repo_root"; then
         die "No $CONFIG_FILE_NAME found"
@@ -913,8 +919,8 @@ cmd_restore() {
 
         # Only restore if there's an override file
         if [[ -f "$repo_root/$override" ]]; then
-            if git -C "$repo_root" ls-files --error-unmatch "$target" &>/dev/null; then
-                git -C "$repo_root" show "HEAD:$target" > "$repo_root/$target" 2>/dev/null || true
+            if git -C "$checkout_root" ls-files --error-unmatch "$target" &>/dev/null; then
+                git -C "$checkout_root" show "HEAD:$target" > "$checkout_root/$target" 2>/dev/null || true
                 echo "  Restored: $target"
                 ((count++)) || true
             fi
@@ -925,6 +931,7 @@ cmd_restore() {
 }
 
 cmd_sync_filters() {
+    local checkout_root
     local repo_root
     local common_git_dir
     local expected_smudge
@@ -932,7 +939,8 @@ cmd_sync_filters() {
     local filter_smudge
     local filter_clean
 
-    repo_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)"
+    repo_root="$(get_resolution_root "$checkout_root")"
 
     if ! has_any_config "$repo_root"; then
         die "No $CONFIG_FILE_NAME found"
@@ -950,18 +958,18 @@ cmd_sync_filters() {
     info "Syncing filter driver configuration..."
 
     # Configure git filter if missing or legacy relative path
-    common_git_dir="$(get_common_git_dir "$repo_root")"
+    common_git_dir="$(get_common_git_dir "$checkout_root")"
     expected_smudge="$common_git_dir/hooks/local-override-filter-smudge %f"
     expected_clean="$common_git_dir/hooks/local-override-filter-clean %f"
 
-    filter_smudge="$(git -C "$repo_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
-    filter_clean="$(git -C "$repo_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
+    filter_smudge="$(git -C "$checkout_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
+    filter_clean="$(git -C "$checkout_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
 
     if [[ "$filter_smudge" != "$expected_smudge" || "$filter_clean" != "$expected_clean" ]]; then
         info "Configuring filter driver..."
-        git -C "$repo_root" config --local filter.local-override.smudge "$expected_smudge"
-        git -C "$repo_root" config --local filter.local-override.clean "$expected_clean"
-        git -C "$repo_root" config --local filter.local-override.required false
+        git -C "$checkout_root" config --local filter.local-override.smudge "$expected_smudge"
+        git -C "$checkout_root" config --local filter.local-override.clean "$expected_clean"
+        git -C "$checkout_root" config --local filter.local-override.required false
         success "Filter driver configured"
     else
         info "Filter driver already configured"
@@ -974,11 +982,11 @@ cmd_sync_filters() {
 
     # Sync .git/info/attributes from config
     info "Syncing attributes..."
-    sync_attributes "$repo_root" "$config_entries"
+    sync_attributes "$checkout_root" "$config_entries"
 
     info "Checking for legacy skip-worktree bits..."
     local repaired_count
-    repaired_count="$(clear_legacy_skip_worktree "$repo_root" "$config_entries")"
+    repaired_count="$(clear_legacy_skip_worktree "$checkout_root" "$config_entries")"
     if [[ "$repaired_count" -gt 0 ]]; then
         info "Cleared legacy skip-worktree on $repaired_count managed file(s)"
     fi
@@ -987,7 +995,7 @@ cmd_sync_filters() {
     local attributes_file
     local filter_count=0
 
-    attributes_file="$(get_attributes_file_path "$repo_root")"
+    attributes_file="$(get_attributes_file_path "$checkout_root")"
     if [[ -f "$attributes_file" ]]; then
         filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null || echo "0")
     fi
@@ -1103,8 +1111,10 @@ EOF
 }
 
 cmd__get_active_targets() {
+    local checkout_root
     local repo_root
-    repo_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)"
+    repo_root="$(get_resolution_root "$checkout_root")"
 
     has_any_config "$repo_root" || return 0
 
@@ -1115,7 +1125,7 @@ cmd__get_active_targets() {
         target="${entry%%|*}"
         override="${entry#*|}"
 
-        if [[ -f "$repo_root/$override" && -f "$repo_root/$target" ]]; then
+        if [[ -f "$repo_root/$override" && -f "$checkout_root/$target" ]]; then
             echo "$target"
         fi
     done < <(read_config "$repo_root")

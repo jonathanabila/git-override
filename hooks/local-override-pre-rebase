@@ -33,8 +33,11 @@ main() {
         return 1
     fi
 
+    local config_entries
+    config_entries="$(read_config "$resolution_root")"
+
     local repaired_count
-    repaired_count="$(clear_legacy_skip_worktree "$repo_root")"
+    repaired_count="$(clear_legacy_skip_worktree "$repo_root" "$config_entries")"
     if [[ "$repaired_count" -gt 0 ]]; then
         printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
     fi
@@ -49,7 +52,7 @@ main() {
         if git -C "$repo_root" cat-file -e "HEAD:$target" 2>/dev/null; then
             git -C "$repo_root" -c filter.local-override.smudge= checkout -q HEAD -- "$target" 2>/dev/null || true
         fi
-    done < <(read_config "$resolution_root")
+    done <<< "$config_entries"
 
     return 0
 }
