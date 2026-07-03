@@ -484,14 +484,15 @@ test_status_caches_discovery() {
     local output
     output="$(GIT_LOCAL_OVERRIDE_TRACE=1 "$PROJECT_DIR/bin/git-local-override" status 2>&1 || true)"
 
-    local misses hits
+    local misses hits scans
     misses="$(printf '%s\n' "$output" | grep -c "cache=miss" || true)"
     hits="$(printf '%s\n' "$output" | grep -c "cache=hit" || true)"
+    scans="$(printf '%s\n' "$output" | grep -c "discover_config_files strategy=" || true)"
 
-    if [[ "$misses" -le 1 && "$hits" -ge 1 ]]; then
-        pass "status cached discovery (misses: $misses, hits: $hits)"
+    if [[ "$misses" -eq 0 && "$hits" -ge 1 && "$scans" -le 1 ]]; then
+        pass "status cached discovery (misses: $misses, hits: $hits, scans: $scans)"
     else
-        fail "status discovery caching off (misses: $misses, hits: $hits)"
+        fail "status discovery caching off (misses: $misses, hits: $hits, scans: $scans)"
         return 1
     fi
 }
@@ -519,6 +520,41 @@ test_status_reports_fallback_in_worktree() {
     fi
 }
 
+test_legacy_cli_filters_match_hook_behavior() {
+    info "Testing legacy CLI filter subcommands (fallback smudge, cmp-gated clean)..."
+
+    cd "$TEST_DIR"
+    # Point the filter driver at the CLI instead of the hook scripts
+    git config filter.local-override.smudge "$PROJECT_DIR/bin/git-local-override filter-smudge %f"
+    git config filter.local-override.clean "$PROJECT_DIR/bin/git-local-override filter-clean %f"
+
+    local wt="$CURRENT_TEST_ROOT/wt-cli-filters"
+    git worktree add -q -b wt-cli-filters "$wt" >/dev/null 2>&1
+
+    # Smudge fallback: worktree file carries the main root's override content
+    if ! grep -q "Private override content v1" "$wt/AGENTS.md"; then
+        fail "CLI smudge fallback: $(cat "$wt/AGENTS.md")"
+        return 1
+    fi
+
+    # Clean cmp-gate HIT: unmodified smudged content stages as tracked content
+    git -C "$wt" add AGENTS.md
+    if [[ "$(git -C "$wt" show :AGENTS.md)" != "# Tracked AGENTS.md" ]]; then
+        fail "CLI clean gate-hit leaked: $(git -C "$wt" show :AGENTS.md)"
+        return 1
+    fi
+
+    # Clean cmp-gate MISS: a hand-edited managed file stages the edit verbatim
+    echo "user edit" >> "$wt/AGENTS.md"
+    git -C "$wt" add AGENTS.md
+    if ! git -C "$wt" show :AGENTS.md | grep -q "user edit"; then
+        fail "CLI clean gate-miss clobbered a staged edit"
+        return 1
+    fi
+
+    pass "Legacy CLI filters match hook behavior (fallback, gate hit, gate miss)"
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -544,7 +580,8 @@ main() {
         test_apply_works_inside_fallback_worktree \
         test_pre_rebase_repairs_skip_worktree_in_fallback_worktree \
         test_status_caches_discovery \
-        test_status_reports_fallback_in_worktree; do
+        test_status_reports_fallback_in_worktree \
+        test_legacy_cli_filters_match_hook_behavior; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
 

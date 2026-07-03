@@ -656,7 +656,7 @@ cmd_status() {
     echo "====================="
     echo ""
     echo "Repository: $checkout_root"
-    if [[ "$repo_root" != "$checkout_root" ]]; then
+    if [[ "$repo_root" != "$checkout_root" ]] && has_any_config "$repo_root"; then
         echo "Overrides:  inherited from main worktree ($repo_root)"
     fi
     echo ""
@@ -1014,23 +1014,6 @@ cmd_sync_filters() {
     success "Synced $filter_count file(s) to filter driver"
 }
 
-# Returns the ABSOLUTE path of the override file for a managed target, or
-# nothing. Mirrors hooks/local-override-lib.sh's get_override_for_file:
-# resolves against the checkout's resolution root, so linked worktrees
-# without their own config inherit the main worktree's overrides.
-cli_get_override_for_file() {
-    local checkout_root="$1"
-    local file_path="$2"
-    local resolution_root=""
-    local override=""
-
-    resolution_root="$(get_resolution_root "$checkout_root")"
-    override="$(get_override_for_target "$file_path" "$resolution_root" 2>/dev/null || true)"
-    [[ -n "$override" ]] || return 0
-
-    printf '%s/%s\n' "$resolution_root" "$override"
-}
-
 cmd_filter_smudge() {
     local file_path="${1:-}"
 
@@ -1045,8 +1028,14 @@ cmd_filter_smudge() {
         return 0
     fi
 
+    # During rebase, always passthrough tracked blob content
+    if is_rebase_in_progress "$checkout_root"; then
+        cat
+        return 0
+    fi
+
     local override_path
-    override_path="$(cli_get_override_for_file "$checkout_root" "$file_path")"
+    override_path="$(get_override_for_file "$checkout_root" "$file_path")"
 
     if [[ -n "$override_path" && -f "$override_path" ]]; then
         cat > /dev/null
@@ -1076,7 +1065,7 @@ cmd_filter_clean() {
     cat > "$stdin_tmp"
 
     local override_path
-    override_path="$(cli_get_override_for_file "$checkout_root" "$file_path")"
+    override_path="$(get_override_for_file "$checkout_root" "$file_path")"
 
     if [[ -n "$override_path" && -f "$override_path" ]]; then
         # Only transform when incoming content is exactly the local override.
@@ -1251,7 +1240,7 @@ COMMANDS:
     sync-filters            Sync filter driver with config and clear legacy skip-worktree
     shell-init              Output shell function wrapping git checkout/switch
     filter-smudge <path>    Filter helper: output local override or passthrough
-    filter-clean <path>     Filter helper: output HEAD content or passthrough
+    filter-clean <path>     Filter helper: output index content when input matches the override, else passthrough
     init-config             Create a .local-overrides.yaml template
     version                 Show the CLI version
     help                    Show this help message

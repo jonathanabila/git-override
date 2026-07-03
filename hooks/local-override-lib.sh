@@ -84,22 +84,6 @@ run_with_trace_logging() {
     "$@"
 }
 
-# Returns the ABSOLUTE path of the override file for a managed target, or
-# nothing. Resolves against the checkout's resolution root, so linked
-# worktrees without their own config inherit the main worktree's overrides.
-get_override_for_file() {
-    local repo_root="$1"
-    local file_path="$2"
-    local resolution_root=""
-    local override=""
-
-    resolution_root="$(get_resolution_root "$repo_root")"
-    override="$(get_override_for_target "$file_path" "$resolution_root" 2>/dev/null || true)"
-    [[ -n "$override" ]] || return 0
-
-    printf '%s/%s\n' "$resolution_root" "$override"
-}
-
 get_common_git_dir() {
     local repo_root="$1"
     local common_git_dir=""
@@ -304,27 +288,4 @@ $target"
 
 get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null
-}
-
-is_rebase_in_progress() {
-    local repo_root="$1"
-    local rebase_merge_path=""
-    local rebase_apply_path=""
-
-    rebase_merge_path="$(git -C "$repo_root" rev-parse --git-path rebase-merge 2>/dev/null || true)"
-    rebase_apply_path="$(git -C "$repo_root" rev-parse --git-path rebase-apply 2>/dev/null || true)"
-
-    if [[ "${GIT_REFLOG_ACTION:-}" == rebase* ]]; then
-        return 0
-    fi
-
-    if [[ -n "$rebase_merge_path" && -d "$rebase_merge_path" ]]; then
-        return 0
-    fi
-
-    if [[ -n "$rebase_apply_path" && -d "$rebase_apply_path" ]]; then
-        return 0
-    fi
-
-    return 1
 }

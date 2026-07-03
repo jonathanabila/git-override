@@ -53,6 +53,10 @@ count_list_entries() {
 
 cache_config_files() {
     local repo_root="$1"
+    if [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" \
+        && "$_DISCOVER_CACHE_ROOT" == "$repo_root" ]]; then
+        return 0
+    fi
     clear_config_files_cache
     _DISCOVER_CACHE_FILE="$(mktemp)"
     _DISCOVER_CACHE_ROOT="$repo_root"
@@ -777,4 +781,43 @@ get_resolution_root() {
 
     local_override_trace_log "get_resolution_root: falling back to main worktree root $main_root"
     printf '%s\n' "$main_root"
+}
+
+# Returns the ABSOLUTE path of the override file for a managed target, or
+# nothing. Resolves against the checkout's resolution root, so linked
+# worktrees without their own config inherit the main worktree's overrides.
+get_override_for_file() {
+    local repo_root="$1"
+    local file_path="$2"
+    local resolution_root=""
+    local override=""
+
+    resolution_root="$(get_resolution_root "$repo_root")"
+    override="$(get_override_for_target "$file_path" "$resolution_root" 2>/dev/null || true)"
+    [[ -n "$override" ]] || return 0
+
+    printf '%s/%s\n' "$resolution_root" "$override"
+}
+
+is_rebase_in_progress() {
+    local repo_root="$1"
+    local rebase_merge_path=""
+    local rebase_apply_path=""
+
+    rebase_merge_path="$(git -C "$repo_root" rev-parse --git-path rebase-merge 2>/dev/null || true)"
+    rebase_apply_path="$(git -C "$repo_root" rev-parse --git-path rebase-apply 2>/dev/null || true)"
+
+    if [[ "${GIT_REFLOG_ACTION:-}" == rebase* ]]; then
+        return 0
+    fi
+
+    if [[ -n "$rebase_merge_path" && -d "$rebase_merge_path" ]]; then
+        return 0
+    fi
+
+    if [[ -n "$rebase_apply_path" && -d "$rebase_apply_path" ]]; then
+        return 0
+    fi
+
+    return 1
 }
