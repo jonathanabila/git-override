@@ -180,6 +180,13 @@ normalize_config_path() {
     printf '%s\n' "$normalized"
 }
 
+# Escape fd glob metacharacters so a literal path can be used as an -E
+# exclude pattern. An invalid glob makes fd exit non-zero, which discovery
+# swallows into an empty result — every config silently lost.
+escape_fd_glob() {
+    printf '%s\n' "$1" | sed 's/[][\*?{}]/\\&/g'
+}
+
 # Repo-relative directories of linked worktrees that live INSIDE repo_root.
 # Another checkout's config is not a subtree config of this checkout.
 get_nested_worktree_dirs() {
@@ -226,6 +233,8 @@ discover_config_files() {
     local nested_dirs=""
     local nested_dir=""
     local under_nested=false
+    local -a fd_exclude_args
+    local nested_exclude_count=0
 
     nested_dirs="$(get_nested_worktree_dirs "$repo_root")"
 
@@ -237,7 +246,19 @@ discover_config_files() {
 
     if command -v fd >/dev/null 2>&1; then
         strategy="fd"
-        discover_output="$(fd --hidden --no-ignore --glob "$CONFIG_FILE_NAME" "$repo_root" 2>/dev/null || true)"
+        # Prune nested checkouts during traversal: fd otherwise descends into
+        # every linked worktree checked out under this root, which dominates
+        # the walk in large monorepos. The post-hoc filter below still guards
+        # correctness if an exclude glob fails to match.
+        fd_exclude_args=()
+        if [[ -n "$nested_dirs" ]]; then
+            while IFS= read -r nested_dir; do
+                [[ -n "$nested_dir" ]] || continue
+                fd_exclude_args+=(-E "$(escape_fd_glob "$nested_dir")")
+                ((nested_exclude_count++)) || true
+            done <<< "$nested_dirs"
+        fi
+        discover_output="$(fd --hidden --no-ignore ${fd_exclude_args[@]+"${fd_exclude_args[@]}"} --glob "$CONFIG_FILE_NAME" "$repo_root" 2>/dev/null || true)"
         combined_output="$(printf '%s\n' "$discover_output" | LC_ALL=C sort)"
         tracked_output="$combined_output"
         if [[ "$trace_on" == true ]]; then
@@ -293,7 +314,7 @@ $path"
     done <<< "$combined_output"
 
     if [[ "$trace_on" == true ]]; then
-        local_override_trace_log "discover_config_files strategy=${strategy} tracked_ms=${tracked_ms} ignored_ms=${ignored_ms} total_ms=$(resolver_elapsed_milliseconds "$discover_start_ms") count=$(count_list_entries "$seen")"
+        local_override_trace_log "discover_config_files strategy=${strategy} excluded=${nested_exclude_count} tracked_ms=${tracked_ms} ignored_ms=${ignored_ms} total_ms=$(resolver_elapsed_milliseconds "$discover_start_ms") count=$(count_list_entries "$seen")"
     fi
 }
 

@@ -240,6 +240,111 @@ EOF
     pass "Nested worktree configs are excluded from main-checkout discovery"
 }
 
+test_discovery_prunes_nested_worktrees_during_walk() {
+    info "Testing fd walk pruning keeps root, sibling, and subtree configs..."
+
+    # This test is about the fd strategy's -E pruning; the git ls-files
+    # strategy is unchanged and covered by test_nested_worktree_config_excluded.
+    if ! command -v fd >/dev/null 2>&1; then
+        if [[ -n "${CI:-}" ]]; then
+            fail "fd required in CI but not found on PATH"
+            return 1
+        fi
+        echo "  (fd not installed; fd pruning test skipped)"
+        return 0
+    fi
+
+    cd "$TEST_DIR"
+    # Mirror the lumos layout: a checkout nested under .claude/worktrees/
+    git worktree add -q -b wt-prune "$TEST_DIR/.claude/worktrees/wt-prune" >/dev/null 2>&1
+    cp .local-overrides.yaml "$TEST_DIR/.claude/worktrees/wt-prune/.local-overrides.yaml"
+
+    # Prefix-similar sibling dir: an over-eager exclude glob would hide it
+    mkdir -p "$TEST_DIR/.claude/worktreesfoo"
+    cp .local-overrides.yaml "$TEST_DIR/.claude/worktreesfoo/.local-overrides.yaml"
+
+    # Subtree config outside any worktree must survive pruning
+    mkdir -p "$TEST_DIR/subtree"
+    cp .local-overrides.yaml "$TEST_DIR/subtree/.local-overrides.yaml"
+
+    local trace_file="$CURRENT_TEST_ROOT/prune-trace.txt"
+    local discovered
+    discovered="$(GIT_LOCAL_OVERRIDE_TRACE=1 bash -c '
+        set -euo pipefail
+        . "$1/shared/local-override-resolver.sh"
+        discover_config_files "$2"
+    ' _ "$PROJECT_DIR" "$TEST_DIR" 2>"$trace_file")"
+
+    if ! echo "$discovered" | grep -qxF ".local-overrides.yaml"; then
+        fail "root config missing from discovery: $discovered"
+        return 1
+    fi
+
+    if ! echo "$discovered" | grep -qxF ".claude/worktreesfoo/.local-overrides.yaml"; then
+        fail "prefix-similar sibling config over-excluded: $discovered"
+        return 1
+    fi
+
+    if ! echo "$discovered" | grep -qxF "subtree/.local-overrides.yaml"; then
+        fail "subtree config over-excluded: $discovered"
+        return 1
+    fi
+
+    if echo "$discovered" | grep -qF ".claude/worktrees/wt-prune"; then
+        fail "nested worktree config leaked into discovery: $discovered"
+        return 1
+    fi
+
+    # excluded=1 in the trace proves the walk was actually pruned (the result
+    # set alone cannot distinguish traversal pruning from post-hoc filtering).
+    if ! grep -q "excluded=1" "$trace_file"; then
+        fail "discovery trace missing excluded=1 (walk not pruned): $(cat "$trace_file")"
+        return 1
+    fi
+
+    pass "Walk pruned (excluded=1); root, sibling, and subtree configs intact"
+}
+
+test_discovery_prunes_metachar_worktree_paths() {
+    info "Testing glob metachars in nested worktree paths do not break discovery..."
+
+    if ! command -v fd >/dev/null 2>&1; then
+        if [[ -n "${CI:-}" ]]; then
+            fail "fd required in CI but not found on PATH"
+            return 1
+        fi
+        echo "  (fd not installed; fd metachar test skipped)"
+        return 0
+    fi
+
+    cd "$TEST_DIR"
+    # Unbalanced '[' makes an UNESCAPED exclude glob invalid: fd then exits
+    # non-zero and '|| true' collapses discovery to EMPTY — configs silently
+    # lost. Escaping must keep this a literal path match.
+    local wt_dir="$TEST_DIR/nested/wt-[open-bracket"
+    git worktree add -q -b wt-metachar "$wt_dir" >/dev/null 2>&1
+    cp .local-overrides.yaml "$wt_dir/.local-overrides.yaml"
+
+    local discovered
+    discovered="$(bash -c '
+        set -euo pipefail
+        . "$1/shared/local-override-resolver.sh"
+        discover_config_files "$2"
+    ' _ "$PROJECT_DIR" "$TEST_DIR")"
+
+    if ! echo "$discovered" | grep -qxF ".local-overrides.yaml"; then
+        fail "discovery came back empty/incomplete with metachar worktree dir: $discovered"
+        return 1
+    fi
+
+    if echo "$discovered" | grep -qF "wt-[open-bracket"; then
+        fail "metachar nested worktree config leaked into discovery: $discovered"
+        return 1
+    fi
+
+    pass "Metachar worktree path pruned without breaking discovery"
+}
+
 test_bare_main_repo_degrades_gracefully() {
     info "Testing a worktree of a bare repo degrades to the checkout root..."
 
@@ -692,6 +797,8 @@ main() {
     for test_fn in \
         test_worktree_helper_functions \
         test_nested_worktree_config_excluded \
+        test_discovery_prunes_nested_worktrees_during_walk \
+        test_discovery_prunes_metachar_worktree_paths \
         test_bare_main_repo_degrades_gracefully \
         test_discovery_cache_is_root_aware \
         test_worktree_fallback_smudges_override \
