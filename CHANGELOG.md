@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`status`/`list` performance**: config discovery is now cached per invocation (previously re-scanned per target; multi-minute hangs in large monorepos with many worktrees)
 - **Discovery cache correctness**: the cache is keyed by resolution root, so one invocation querying two roots (worktree + main) cannot return the wrong root's results
 - **Legacy CLI clean filter clobbering staged edits**: `git-local-override filter-clean` substituted HEAD content unconditionally; it now matches the hook filter (exact-match `cmp` gate, index blob), so legitimately staged edits to managed files survive
+- **Discovery walk descending into nested worktrees**: the fd discovery strategy now prunes linked-worktree directories during traversal instead of only discarding their results afterwards; `status` in a monorepo with 42 nested checkouts drops from ~2m24s to ~10s
+- **Rebase-internal checkouts triggering discovery**: `post-checkout` now bails on an in-progress rebase before resolving the resolution root, so per-commit rebase checkouts in fallback worktrees no longer run config discovery
 
 ### Changed
 
