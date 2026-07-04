@@ -59,8 +59,8 @@ jobs:
       - name: Run unit tests
         run: make test
 
-      - name: Install pre-commit
-        run: brew install pre-commit
+      - name: Install pre-commit and fd
+        run: brew install pre-commit fd
 
       - name: Run integration tests
         run: |
@@ -68,6 +68,7 @@ jobs:
           tests/integration/test-install.sh
           tests/integration/test-git-ops.sh
           tests/integration/test-precommit.sh
+          tests/integration/test-worktrees.sh
 
   # Shellcheck linting
   lint:

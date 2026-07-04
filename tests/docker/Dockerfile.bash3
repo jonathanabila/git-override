@@ -7,11 +7,14 @@
 #
 FROM alpine:3.19
 
-# Install runtime dependencies
+# Install runtime dependencies. Alpine's fd package installs the binary as `fd`
+# directly (no fdfind rename), so the resolver's fd discovery strategy is
+# exercised in the bash-compat image too.
 RUN apk add --no-cache \
     bash \
     git \
-    curl
+    curl \
+    fd
 
 # Configure git for testing
 RUN git config --global user.email "test@example.com" \
@@ -42,4 +45,4 @@ ENV PATH="/home/testuser/.local/bin:${PATH}"
 
 # Entry point - run without pre-commit tests (no pre-commit in alpine)
 ENTRYPOINT ["./tests/docker/entrypoint.sh"]
-CMD ["unit", "install", "gitops"]
+CMD ["unit", "install", "gitops", "worktree"]

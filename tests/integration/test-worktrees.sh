@@ -193,27 +193,35 @@ EOF
             return 1
         fi
     else
+        # CI guarantees fd (installed in the Docker images and via brew on
+        # macOS). If it is missing there, the image/runner regressed and this
+        # leg — the one with teeth against the nested-config leak — would
+        # silently vanish; fail loudly instead of skipping.
+        if [[ -n "${CI:-}" ]]; then
+            fail "fd required in CI but not found on PATH"
+            return 1
+        fi
         echo "  (fd not installed; fd-strategy leg skipped)"
     fi
 
     # Leg 2 — git ls-files strategy (always runs, deterministic everywhere).
-    # Force the git ls-files strategy: PATH without any dir containing fd,
-    # plus a shim dir so git itself stays reachable.
-    local git_shim="$CURRENT_TEST_ROOT/git-shim"
-    mkdir -p "$git_shim"
-    ln -sf "$(command -v git)" "$git_shim/git"
+    # Force it by running discovery under a PATH that omits fd. fd can't be
+    # hidden by dropping the directory that holds it: some distros (e.g. Alpine)
+    # install fd into /usr/bin next to core tools the git ls-files strategy
+    # itself shells out to (`sort`), so dropping that directory would also break
+    # discovery. Instead, point PATH at a shim dir holding only the tools this
+    # strategy needs — `command -v fd` then fails while git and sort stay live.
+    local no_fd_shim="$CURRENT_TEST_ROOT/no-fd-shim"
+    mkdir -p "$no_fd_shim"
+    ln -sf "$(command -v git)" "$no_fd_shim/git"
+    ln -sf "$(command -v sort)" "$no_fd_shim/sort"
 
-    local no_fd_path="" dir=""
-    local saved_ifs="$IFS"
-    IFS=":"
-    for dir in $PATH; do
-        [[ -x "$dir/fd" ]] && continue
-        no_fd_path="${no_fd_path:+$no_fd_path:}$dir"
-    done
-    IFS="$saved_ifs"
+    # Resolve bash absolutely so the restricted PATH cannot hide the interpreter.
+    local bash_bin
+    bash_bin="$(command -v bash)"
 
     local discovered_git_strategy
-    discovered_git_strategy="$(PATH="$git_shim:$no_fd_path" bash -c '
+    discovered_git_strategy="$(PATH="$no_fd_shim" "$bash_bin" -c '
         set -euo pipefail
         . "$1/shared/local-override-resolver.sh"
         discover_config_files "$2"

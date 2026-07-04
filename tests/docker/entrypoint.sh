@@ -7,6 +7,7 @@
 #   ./entrypoint.sh unit          # Run unit tests only
 #   ./entrypoint.sh install       # Run install/uninstall tests
 #   ./entrypoint.sh gitops        # Run git operations tests
+#   ./entrypoint.sh worktree      # Run linked worktree tests
 #   ./entrypoint.sh precommit     # Run pre-commit tests
 #
 set -euo pipefail
@@ -75,6 +76,14 @@ run_gitops_tests() {
     fi
 }
 
+run_worktree_tests() {
+    if [[ -f "$INTEGRATION_DIR/test-worktrees.sh" ]]; then
+        run_suite "Linked Worktree Tests" "$INTEGRATION_DIR/test-worktrees.sh"
+    else
+        info "Skipping linked worktree tests (not found)"
+    fi
+}
+
 run_precommit_tests() {
     if [[ -f "$INTEGRATION_DIR/test-precommit.sh" ]]; then
         # Check if pre-commit is available
@@ -131,6 +140,7 @@ main() {
     local run_unit=false
     local run_install=false
     local run_gitops=false
+    local run_worktree=false
     local run_precommit=false
 
     if [[ $# -eq 0 ]] || [[ "$1" == "all" ]]; then
@@ -141,11 +151,12 @@ main() {
                 unit) run_unit=true ;;
                 install) run_install=true ;;
                 gitops) run_gitops=true ;;
+                worktree) run_worktree=true ;;
                 precommit) run_precommit=true ;;
                 all) run_all=true ;;
                 *)
                     error "Unknown test suite: $arg"
-                    echo "Available: all, unit, install, gitops, precommit"
+                    echo "Available: all, unit, install, gitops, worktree, precommit"
                     exit 1
                     ;;
             esac
@@ -157,11 +168,13 @@ main() {
         run_unit_tests
         run_install_tests
         run_gitops_tests
+        run_worktree_tests
         run_precommit_tests
     else
         [[ "$run_unit" == true ]] && run_unit_tests
         [[ "$run_install" == true ]] && run_install_tests
         [[ "$run_gitops" == true ]] && run_gitops_tests
+        [[ "$run_worktree" == true ]] && run_worktree_tests
         [[ "$run_precommit" == true ]] && run_precommit_tests
     fi
 

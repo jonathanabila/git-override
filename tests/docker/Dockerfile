@@ -10,13 +10,17 @@ FROM ubuntu:22.04
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies
+# Install dependencies. fd-find installs the binary as `fdfind`; symlink it to
+# `fd` on PATH so the resolver's fd discovery strategy (and the fd-strategy leg
+# of the worktree tests) is exercised here.
 RUN apt-get update && apt-get install -y \
     bash \
     git \
     curl \
+    fd-find \
     python3 \
     python3-pip \
+    && ln -s "$(command -v fdfind)" /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --no-cache-dir pre-commit
 

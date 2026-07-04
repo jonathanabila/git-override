@@ -9,7 +9,8 @@
 
 .PHONY: install uninstall test clean help check-bash lint \
        test-docker test-docker-bash3 test-docker-unit test-docker-install \
-       test-docker-gitops test-docker-precommit docker-build docker-build-bash3
+       test-docker-gitops test-docker-worktree test-docker-precommit \
+       docker-build docker-build-bash3
 
 # Default target
 .DEFAULT_GOAL := help
@@ -89,6 +90,7 @@ test-docker: docker-build ## Run all tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) unit
 	@docker run --rm $(DOCKER_IMAGE) install
 	@docker run --rm $(DOCKER_IMAGE) gitops
+	@docker run --rm -e CI=true $(DOCKER_IMAGE) worktree
 	@docker run --rm $(DOCKER_IMAGE) precommit
 
 test-docker-bash3: docker-build-bash3 ## Run tests with bash 3.2 (macOS compatibility)
@@ -96,6 +98,7 @@ test-docker-bash3: docker-build-bash3 ## Run tests with bash 3.2 (macOS compatib
 	@docker run --rm $(DOCKER_IMAGE_BASH3) unit
 	@docker run --rm $(DOCKER_IMAGE_BASH3) install
 	@docker run --rm $(DOCKER_IMAGE_BASH3) gitops
+	@docker run --rm -e CI=true $(DOCKER_IMAGE_BASH3) worktree
 
 test-docker-unit: docker-build ## Run unit tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) unit
@@ -105,6 +108,9 @@ test-docker-install: docker-build ## Run install/uninstall tests in Docker
 
 test-docker-gitops: docker-build ## Run git operations tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) gitops
+
+test-docker-worktree: docker-build ## Run linked worktree tests in Docker
+	@docker run --rm -e CI=true $(DOCKER_IMAGE) worktree
 
 test-docker-precommit: docker-build ## Run pre-commit tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) precommit
