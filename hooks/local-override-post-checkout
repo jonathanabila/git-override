@@ -80,15 +80,17 @@ run_post_checkout() {
     local resolution_root
     repo_root="$(get_repo_root)" || return 0
 
+    # Do not re-apply overrides during rebase internal checkouts. Checked
+    # before resolving the resolution root: that resolution runs config
+    # discovery in fallback worktrees, and rebases fire this hook per commit.
+    if is_rebase_in_progress "$repo_root"; then
+        return 0
+    fi
+
     # Configs and override files resolve against the resolution root (the main
     # checkout for fallback worktrees); target writes and index repairs stay
     # on the checkout root.
     resolution_root="$(get_resolution_root "$repo_root")"
-
-    # Do not re-apply overrides during rebase internal checkouts
-    if is_rebase_in_progress "$repo_root"; then
-        return 0
-    fi
 
     if config_entries="$(resolve_post_checkout_entries_fast "$repo_root" "$resolution_root" "$_previous_head" "$_new_head")"; then
         using_fast_path=true

@@ -775,12 +775,26 @@ test_rebase_in_fallback_worktree() {
 
     local committed
     committed="$(git -C "$wt" show HEAD:AGENTS.md)"
-    if [[ "$committed" == "# Tracked AGENTS.md" ]]; then
-        pass "Rebase clean in fallback worktree; no override content in rebased commits"
-    else
+    if [[ "$committed" != "# Tracked AGENTS.md" ]]; then
         fail "HEAD:AGENTS.md after rebase: $committed"
         return 1
     fi
+
+    # Ordering guard: a rebase-internal checkout (git marks these with
+    # GIT_REFLOG_ACTION=rebase*) must bail before any config discovery runs.
+    # In a fallback worktree, resolving the resolution root triggers
+    # discovery — so a discovery trace line here means the bail came too late.
+    local head trace_output
+    head="$(git -C "$wt" rev-parse HEAD)"
+    trace_output="$( (cd "$wt" && GIT_REFLOG_ACTION=rebase GIT_LOCAL_OVERRIDE_TRACE=1 \
+        bash "$TEST_DIR/.git/hooks/post-checkout" "$head" "$head" 1) 2>&1 )"
+
+    if echo "$trace_output" | grep -q "discover_config_files"; then
+        fail "post-checkout ran discovery during a rebase-internal checkout: $trace_output"
+        return 1
+    fi
+
+    pass "Rebase clean in fallback worktree; rebase-internal checkout skipped discovery"
 }
 
 #------------------------------------------------------------------------------
