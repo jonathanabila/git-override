@@ -1359,6 +1359,14 @@ ENVIRONMENT VARIABLES:
         Example:
             GIT_LOCAL_OVERRIDE_DISABLE=1 git checkout main
 
+    GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1
+        Disables the linked-worktree fallback: a worktree without its own
+        .local-overrides.yaml no longer inherits the main worktree's overrides
+        (config and override files are resolved against the worktree itself)
+
+        Example:
+            GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1 git worktree add ../wt
+
 CONFIG FORMAT:
     The .local-overrides.yaml uses override/replaces format:
 

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Linked worktree support**: worktrees without their own `.local-overrides.yaml` now resolve configs and override files against the main worktree (worktree-local config wins; disable with `GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1`)
+- **`apply --all-worktrees`**: refresh materialized overrides in the main checkout and every linked worktree in one command
+
+### Fixed
+
+- **Nested-worktree config pollution**: config files inside linked worktrees checked out under the main worktree's directory are no longer treated as the main checkout's subtree configs
+- **`status`/`list` performance**: config discovery is now cached per invocation (previously re-scanned per target; multi-minute hangs in large monorepos with many worktrees)
+- **Discovery cache correctness**: the cache is keyed by resolution root, so one invocation querying two roots (worktree + main) cannot return the wrong root's results
+- **Legacy CLI clean filter clobbering staged edits**: `git-local-override filter-clean` substituted HEAD content unconditionally; it now matches the hook filter (exact-match `cmp` gate, index blob), so legitimately staged edits to managed files survive
+
+### Changed
+
+- **Legacy CLI filter subcommands** (`filter-smudge` / `filter-clean`) now match the hook filters exactly, including worktree fallback and rebase passthrough. Edge: a user who hand-edits a managed target beyond the applied override and stages it now commits those edits (previously silently reverted to HEAD)
+
 ## [0.6.0] - 2026-06-10
 
 ### Fixed

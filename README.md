@@ -339,9 +339,20 @@ Filter drivers make git consider overridden files "clean" through a roundtrip pr
 - **Result**: Git operations work seamlessly—checkout, switch, pull, merge, rebase, stash all succeed
 
 Filter drivers are configured automatically during installation in `.git/info/attributes` (local-only, not tracked in `.gitattributes`).
-The filter commands use worktree-safe absolute paths so linked worktrees (`git worktree add`) work correctly.
 
 Reinstalling with `install.sh --repo` and running `git-local-override sync-filters` both auto-heal legacy `skip-worktree` bits that may still exist from older installs. Runtime hooks also self-heal this old repo state; when they repair anything, they emit one terse notice to stderr and stay silent otherwise.
+
+### Linked worktrees
+
+The filter commands use worktree-safe absolute paths, so linked worktrees (`git worktree add`) work correctly. Beyond that, a worktree with no `.local-overrides.yaml` of its own inherits the main worktree's overrides automatically: config and override files are resolved against the main worktree. A worktree-local config always wins (all-or-nothing — no merging between the two roots). Set `GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1` to disable the fallback.
+
+After editing an override file, refresh every checkout in one go:
+
+```bash
+git-local-override apply --all-worktrees
+```
+
+Configs that live inside a *nested* linked worktree (one checked out under the main worktree's directory) belong to that worktree only — the main checkout's discovery ignores them.
 
 ### Shell Integration
 
