@@ -834,6 +834,39 @@ EOF
     fi
 }
 
+test_status_empty_attributes_no_arithmetic_error() {
+    info "Testing status with filter configured but no filtered entries yet..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    # Reproduce the pre-sync-filters state: filter driver configured, but the
+    # attributes file has no filter=local-override lines. grep -c then prints
+    # "0" AND exits non-zero; a naive `|| echo 0` would make the count a
+    # two-line value and break the numeric comparison in status.
+    git config --local filter.local-override.smudge "smudge %f"
+    git config --local filter.local-override.clean "clean %f"
+
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+    mkdir -p "$(dirname "$attributes_file")"
+    : > "$attributes_file"
+
+    local output
+    output=$(git-local-override status 2>&1)
+
+    # A corrupted filter_count makes bash print "... arithmetic syntax error
+    # in expression ...". Match that specific signature — not the loose word
+    # "arithmetic", which also appears in this test's own temp-dir path.
+    if [[ "$output" == *"syntax error"* ]]; then
+        fail "Status emitted an arithmetic error on empty attributes: $output"
+    elif [[ "$output" == *"Filtered:"* && "$output" == *"0 files"* ]]; then
+        pass "Status reports zero filtered files without arithmetic errors"
+    else
+        fail "Status did not report the expected empty-filter state: $output"
+    fi
+}
+
 test_no_override_when_no_local_file() {
     info "Testing no override when local file missing..."
 
@@ -1992,6 +2025,7 @@ main() {
         test_status_in_worktree \
         test_status_detects_precommit_framework_hooks \
         test_status_shim_without_local_override_ids \
+        test_status_empty_attributes_no_arithmetic_error \
         test_no_override_when_no_local_file \
         test_file_not_in_config_error \
         test_hooks_check_for_config \

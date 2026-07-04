@@ -749,7 +749,10 @@ cmd_status() {
         attributes_file="$(get_attributes_file_path "$checkout_root")"
         if [[ -f "$attributes_file" ]]; then
             local filter_count
-            filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null || echo "0")
+            # grep -c prints "0" and exits non-zero when there are no matches;
+            # piping that through `|| echo 0` would append a second line and
+            # make "$filter_count" a two-line value that breaks arithmetic.
+            filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null) || filter_count=0
             if [[ "$filter_count" -gt 0 ]]; then
                 echo -e "Filtered:   ${GREEN}$filter_count file(s)${NC}"
 
@@ -1082,7 +1085,10 @@ cmd_sync_filters() {
 
     attributes_file="$(get_attributes_file_path "$checkout_root")"
     if [[ -f "$attributes_file" ]]; then
-        filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null || echo "0")
+        # grep -c prints "0" and exits non-zero on no matches; capture the
+        # count but default to 0 on failure rather than `|| echo 0`, which
+        # would append a second line.
+        filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null) || filter_count=0
     fi
 
     success "Synced $filter_count file(s) to filter driver"
