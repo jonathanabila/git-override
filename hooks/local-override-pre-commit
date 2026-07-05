@@ -138,8 +138,26 @@ $override"
 
                 # Re-stage the restored file
                 GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" add "$target_file"
+            elif git -C "$repo_root" cat-file -e ":$target_file" 2>/dev/null; then
+                # New target: staged but with no HEAD canonical content. There
+                # is no tracked blob to restore from, so if what's staged is the
+                # local override, committing it would leak local content into
+                # history — refuse. (git add always creates a stage-0 index blob,
+                # so the leak is detected by comparing that blob to the override,
+                # not by the index being absent.)
+                local override_abs="$resolution_root/$override_file"
+                local staged_tmp=""
+                staged_tmp="$(mktemp)"
+                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" show ":$target_file" > "$staged_tmp" 2>/dev/null || true
+                if [[ -f "$override_abs" ]] && cmp -s "$staged_tmp" "$override_abs"; then
+                    rm -f "$staged_tmp"
+                    printf 'git-local-override: refusing to commit new managed target %s: it holds local override content and has no tracked canonical version. Provide canonical content (git add the intended tracked file) before committing, or remove it from .local-overrides.yaml.\n' "$target_file" >&2
+                    return 1
+                fi
+                rm -f "$staged_tmp"
             fi
-            # If file doesn't exist in HEAD, it's a new file - let it be committed as-is
+            # If a new target's staged content is genuine canonical content
+            # (not the override), it is committed as-is.
         done < <(while IFS= read -r entry || [[ -n "$entry" ]]; do
             [[ -z "$entry" ]] && continue
             target="${entry%%|*}"
