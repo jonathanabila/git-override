@@ -35,7 +35,10 @@ run_smudge_filter() {
     local override_file
     override_file="$(get_override_for_file "$repo_root" "$file_path")"
 
-    if [[ -n "$override_file" && -f "$override_file" ]]; then
+    # A symlinked override would leak outside-repo content into the tree; fall
+    # through to plain passthrough instead of emitting the link target.
+    if [[ -n "$override_file" && -f "$override_file" ]] \
+       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
         cat > /dev/null
         cat "$override_file"
         return 0

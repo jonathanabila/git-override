@@ -180,6 +180,39 @@ normalize_config_path() {
     printf '%s\n' "$normalized"
 }
 
+# Reject a managed path whose on-disk form is a symlink or resolves outside
+# the repo root. Lexical validation (normalize_config_path) is not enough:
+# cp/redirect follow symlinks, so a committed symlink target lets a hostile
+# repo write outside the checkout. $1 = repo root, $2 = repo-relative path.
+# Returns 0 when the path is safe to read/write, 1 when it must be refused.
+path_is_symlink_safe() {
+    local repo_root="$1"
+    local rel_path="$2"
+    local full_path="$repo_root/$rel_path"
+    local resolved=""
+    local resolved_root=""
+
+    # Any symlink component on the path is refused outright.
+    if [[ -L "$full_path" ]]; then
+        return 1
+    fi
+
+    # Resolve the parent dir (it may legitimately not exist yet for a new
+    # override file) and confirm the final real path stays under the repo root.
+    resolved_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" || return 1
+    local parent_dir=""
+    parent_dir="$(dirname "$full_path")"
+    if [[ -d "$parent_dir" ]]; then
+        resolved="$(cd "$parent_dir" 2>/dev/null && pwd -P)/$(basename "$full_path")" || return 1
+        case "$resolved" in
+            "$resolved_root"/*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+
+    return 0
+}
+
 # Escape fd glob metacharacters so a literal path can be used as an -E
 # exclude pattern. An invalid glob makes fd exit non-zero, which discovery
 # swallows into an empty result — every config silently lost.

@@ -49,6 +49,14 @@ main() {
 
         # Check if both target and override files exist
         if [[ -f "$override" && -f "$repo_root/$target" ]]; then
+            # $override is absolute (anchored at the resolution root by
+            # pre-commit); guard it via its own parent so the symlink gate
+            # still applies to the absolute path.
+            if ! path_is_symlink_safe "$repo_root" "$target" \
+               || ! path_is_symlink_safe "$(dirname "$override")" "$(basename "$override")"; then
+                printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
+                continue
+            fi
             # Apply override: copy override content to target file
             cp "$override" "$repo_root/$target"
         fi

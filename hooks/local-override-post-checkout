@@ -137,6 +137,11 @@ run_post_checkout() {
 
         # Check if both target and override files exist
         if [[ -f "$full_override" && -f "$full_target" ]]; then
+            if ! path_is_symlink_safe "$repo_root" "$target" \
+               || ! path_is_symlink_safe "$resolution_root" "$override"; then
+                printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
+                continue
+            fi
             # Apply override: copy override content to target file
             cp "$full_override" "$full_target"
         fi

@@ -49,7 +49,8 @@ main() {
         resolve_override_ms="$(local_override_elapsed_milliseconds "$total_start_ms")"
     fi
 
-    if [[ -n "$override_file" && -f "$override_file" ]]; then
+    if [[ -n "$override_file" && -f "$override_file" ]] \
+       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
         # Only transform when incoming content is exactly the local override.
         # If caller already provided original/tracked content (e.g., pre-commit
         # restored file), passthrough avoids clobbering intended staged content.
