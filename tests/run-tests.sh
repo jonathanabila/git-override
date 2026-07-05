@@ -1458,6 +1458,100 @@ EOF
     fi
 }
 
+test_symlink_target_refused_on_apply() {
+    info "Testing symlinked target is refused (write escape)..."
+
+    cd "$TEST_REPO"
+
+    # An outside-repo file the attacker wants to overwrite. It lives in the
+    # test's temp area but OUTSIDE the repo root, so a failed guard is an
+    # observable out-of-repo write (never point this at a real $HOME file).
+    local outside_file="$CURRENT_TEST_ROOT/outside-secret.txt"
+    echo "OUTSIDE SECRET" > "$outside_file"
+
+    # Config declares a target that, on disk, is a symlink pointing outside.
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: evil.local.md
+    replaces:
+      - evil-target.md
+EOF
+
+    echo "PWNED" > evil.local.md
+    ln -s "$outside_file" evil-target.md
+
+    local output
+    local exit_code=0
+    output=$(.git/hooks/post-checkout "" "" "1" 2>&1) || exit_code=$?
+
+    local after
+    after="$(cat "$outside_file")"
+
+    rm -f evil-target.md evil.local.md
+
+    if [[ "$after" == "OUTSIDE SECRET" && "$output" == *"refusing symlinked path"* ]]; then
+        pass "Symlinked target refused; outside file not overwritten"
+    else
+        fail "Symlink target write escape not prevented (outside now: '$after', output: '$output')"
+    fi
+}
+
+test_symlink_override_refused_on_smudge() {
+    info "Testing symlinked override is refused (read leak)..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+
+    if [[ ! -f "$smudge_script" ]]; then
+        fail "Smudge filter script not found"
+        return
+    fi
+
+    # An outside-repo secret the attacker wants to exfiltrate into a tracked file.
+    local outside_file="$CURRENT_TEST_ROOT/outside-key.txt"
+    echo "OUTSIDE SSH KEY" > "$outside_file"
+
+    # The override file is a symlink to the outside secret.
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    local original="# Original CLAUDE.md content"
+    local output
+    output=$(echo "$original" | "$smudge_script" CLAUDE.md)
+
+    rm -f CLAUDE.local.md
+
+    if [[ "$output" == "$original" && "$output" != *"OUTSIDE SSH KEY"* ]]; then
+        pass "Symlinked override refused; outside content not leaked"
+    else
+        fail "Symlinked override leaked outside content (output: '$output')"
+    fi
+}
+
+test_symlink_guard_allows_regular_files() {
+    info "Testing non-symlink target/override still applies..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# LOCAL OK CONTENT" > CLAUDE.local.md
+
+    local output
+    local exit_code=0
+    output=$(.git/hooks/post-checkout "" "" "1" 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 ]] \
+       && grep -q "LOCAL OK CONTENT" CLAUDE.md \
+       && [[ "$output" != *"refusing symlinked path"* ]]; then
+        pass "Regular (non-symlink) override applies normally"
+    else
+        fail "Regular override did not apply (exit: $exit_code, output: '$output')"
+    fi
+}
+
 test_recursive_three_level_nearest_config_wins() {
     info "Testing three-level nearest config ownership..."
 
@@ -2039,6 +2133,9 @@ main() {
         test_recursive_override_path_escape_errors \
         test_recursive_target_path_escape_errors \
         test_recursive_escape_is_rejected_by_hook_validation \
+        test_symlink_target_refused_on_apply \
+        test_symlink_override_refused_on_smudge \
+        test_symlink_guard_allows_regular_files \
         test_recursive_three_level_nearest_config_wins \
         test_recursive_three_level_add_uses_nearest_pattern \
         test_recursive_empty_child_blocks_parent_targets \
