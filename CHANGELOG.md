@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Symlinked target/override write escape**: refuse symlinked managed targets and override files (and paths resolving outside the repo root) during checkout/commit/apply/restore and in the smudge/clean filters, so a malicious repository cannot use a committed symlink target to write outside the checkout
+
 ### Added
 
 - **Linked worktree support**: worktrees without their own `.local-overrides.yaml` now resolve configs and override files against the main worktree (worktree-local config wins; disable with `GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1`)

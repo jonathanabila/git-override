@@ -65,16 +65,16 @@ We will not pursue legal action against researchers who follow these guidelines.
 - Config `override:` and `replaces:` paths are resolved relative to the config file they appear in.
 - Current behavior includes nested config files discovered from git's tracked and untracked file sets. Treat both committed and local `.local-overrides.yaml` files as authoritative inputs when evaluating repository behavior.
 
-### Current Path-Boundary Limitations
+### Path-Boundary Enforcement
 
 - Config validation rejects lexical path escapes such as absolute paths and `..` traversal outside the owning subtree.
-- Runtime file operations do not currently resolve symlinks before reading or writing managed targets and override files.
-- Do not treat `git-local-override` as a symlink boundary. If a managed target or override path is a symlink, repository-local path validation alone is not a guarantee that runtime reads or writes stay inside the repository.
+- **Symlinks are now refused at runtime as a security boundary.** Before any managed target or override file is read or written, `git-local-override` refuses paths whose on-disk form is a symlink (or whose parent resolves outside the repository root). This holds across checkout, commit, apply, restore, and the smudge/clean filters. Because `cp`/redirect follow symlinks, a hostile repository could otherwise commit a symlinked target (for example pointing at `~/.zshrc`) and have attacker-controlled content written outside the checkout on a plain clone — this class of arbitrary-write/RCE, and the mirror read-side leak of a symlinked override, is now blocked.
+- Hooks skip and warn on a refused path so a hostile repository cannot wedge every `git checkout`; the CLI fails loudly.
 
 ### Best Practices for Users
 
 1. **Review all `.local-overrides.yaml` files**, not just the root one, before using the tool in a repository.
-2. **Avoid using symlinked managed targets or symlinked override files** when repository-boundary guarantees matter.
+2. **Do not use symlinked managed targets or symlinked override files** — they are refused at runtime.
 3. **Inspect local override files** before creating them in untrusted repositories.
 4. **Keep git-local-override updated** to receive security fixes.
 5. **Use version pinning** when installing via curl to ensure reproducible installs:
