@@ -1347,6 +1347,153 @@ test_stash_with_overridden_file() {
     git checkout HEAD -- README.md 2>/dev/null || true
 }
 
+test_aborted_commit_recovers_override_on_checkout() {
+    info "Testing aborted commit recovery re-applies override on next checkout..."
+
+    cd "$TEST_DIR"
+
+    # Pre-condition: local override content is applied to the working tree.
+    if ! grep -q "MY LOCAL" CLAUDE.md; then
+        fail "Pre-condition: local content not applied"
+        return 1
+    fi
+
+    local state_file
+    state_file="$(git rev-parse --absolute-git-dir)/local-override-post-commit-state"
+    rm -f "$state_file"
+
+    # Stage an edit distinct from both the override and HEAD so it survives the
+    # clean filter (its cmp gate passes the content through) and pre-commit sees
+    # the overridden target as a staged change.
+    printf '# staged edit distinct from override\n' > CLAUDE.md
+    git add CLAUDE.md
+    # Model the real commit-time state: the override is applied in the working
+    # tree when pre-commit runs.
+    cp CLAUDE.local.md CLAUDE.md
+
+    # Run pre-commit directly: it restores originals into the working tree and
+    # index and writes the reapply state file. Then simulate an ABORTED commit
+    # by NOT running post-commit.
+    .git/hooks/pre-commit
+
+    if grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        pass "pre-commit restored original content into working tree"
+    else
+        fail "Expected original content in working tree after pre-commit"
+        cat CLAUDE.md
+        return 1
+    fi
+
+    if [[ -f "$state_file" ]]; then
+        pass "Reapply state file present after aborted commit"
+    else
+        fail "Expected reapply state file to exist after pre-commit"
+        return 1
+    fi
+
+    # The next branch checkout heals the working tree and clears stale state.
+    .git/hooks/post-checkout "" "" "1"
+
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "Override re-applied to working tree after checkout"
+    else
+        fail "Override not re-applied after checkout"
+        cat CLAUDE.md
+        return 1
+    fi
+
+    if [[ ! -f "$state_file" ]]; then
+        pass "Stale reapply state file cleared after checkout"
+    else
+        fail "Expected stale reapply state file to be removed"
+        return 1
+    fi
+}
+
+test_precommit_during_rebase_is_noop() {
+    info "Testing pre-commit makes no changes during an in-progress rebase..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    git branch -D midrebase-feature 2>/dev/null || true
+
+    # Feature branch changes README's first line.
+    git checkout -q -b midrebase-feature
+    printf '# Feature README\n' > README.md
+    git add README.md
+    git commit -q -m "Feature README change"
+
+    # Default branch changes the same line differently, creating a conflict.
+    git checkout -q "$default_branch"
+    printf '# Upstream README\n' > README.md
+    git add README.md
+    git commit -q --no-verify -m "Upstream README change"
+
+    git checkout -q midrebase-feature
+    git-local-override apply 2>/dev/null || true
+
+    # Start a rebase that stops on the README conflict.
+    local rebase_status
+    set +e
+    git rebase "$default_branch" >/dev/null 2>&1
+    rebase_status=$?
+    set -e
+
+    if [[ $rebase_status -eq 0 ]]; then
+        info "Rebase did not stop on a conflict; cannot exercise mid-rebase guard"
+        git checkout -q "$default_branch" 2>/dev/null || true
+        pass "Skipped (rebase produced no conflict stop)"
+        return 0
+    fi
+
+    local rebase_merge_dir rebase_apply_dir
+    rebase_merge_dir="$(git rev-parse --git-path rebase-merge 2>/dev/null || true)"
+    rebase_apply_dir="$(git rev-parse --git-path rebase-apply 2>/dev/null || true)"
+    if [[ ! -d "$rebase_merge_dir" && ! -d "$rebase_apply_dir" ]]; then
+        fail "Expected an in-progress rebase after conflict"
+        git rebase --abort 2>/dev/null || true
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    local state_file
+    state_file="$(git rev-parse --absolute-git-dir)/local-override-post-commit-state"
+    rm -f "$state_file"
+
+    # Ensure the overridden target holds local content, then stage it so a
+    # rebase-unaware pre-commit would restore it.
+    cp CLAUDE.local.md CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md 2>/dev/null || true
+
+    # Run pre-commit during the rebase; the rebase guard must short-circuit it.
+    .git/hooks/pre-commit
+
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "pre-commit left the override untouched during rebase"
+    else
+        fail "pre-commit modified the overridden target during rebase"
+        cat CLAUDE.md
+        git rebase --abort 2>/dev/null || true
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    if [[ ! -f "$state_file" ]]; then
+        pass "pre-commit wrote no reapply state file during rebase"
+    else
+        fail "pre-commit wrote a reapply state file during rebase"
+        git rebase --abort 2>/dev/null || true
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    git rebase --abort 2>/dev/null || true
+    git checkout -q "$default_branch" 2>/dev/null || true
+}
+
 test_commit_still_contains_original() {
     info "Testing commit contains original content with filters active..."
 
@@ -1551,6 +1698,8 @@ main() {
         test_merge_with_overridden_file \
         test_rebase_with_overridden_file \
         test_stash_with_overridden_file \
+        test_aborted_commit_recovers_override_on_checkout \
+        test_precommit_during_rebase_is_noop \
         test_commit_still_contains_original \
         test_filter_and_hooks_coexist \
         test_no_override_file_normal_checkout \
