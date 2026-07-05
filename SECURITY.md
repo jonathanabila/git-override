@@ -70,6 +70,7 @@ We will not pursue legal action against researchers who follow these guidelines.
 - Config validation rejects lexical path escapes such as absolute paths and `..` traversal outside the owning subtree.
 - **Symlinks are now refused at runtime as a security boundary.** Before any managed target or override file is read or written, `git-local-override` refuses paths whose on-disk form is a symlink (or whose parent resolves outside the repository root). This holds across checkout, commit, apply, restore, and the smudge/clean filters. Because `cp`/redirect follow symlinks, a hostile repository could otherwise commit a symlinked target (for example pointing at `~/.zshrc`) and have attacker-controlled content written outside the checkout on a plain clone — this class of arbitrary-write/RCE, and the mirror read-side leak of a symlinked override, is now blocked.
 - Hooks skip and warn on a refused path so a hostile repository cannot wedge every `git checkout`; the CLI fails loudly.
+- **Introducing a brand-new managed target is refused when it would leak.** A managed target that is not yet tracked in `HEAD` has no canonical content to restore at commit time, so if its staged content is the local override, `pre-commit` blocks the commit rather than silently committing local content into history; stage genuine canonical content (or drop it from `.local-overrides.yaml`) before the first commit.
 
 ### Best Practices for Users
 
