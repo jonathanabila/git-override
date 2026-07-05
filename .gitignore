@@ -28,3 +28,6 @@ docs/
 
 # Local tooling state
 .sisyphus/
+
+.worktrees/
+plans/
