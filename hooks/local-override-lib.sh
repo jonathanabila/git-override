@@ -245,6 +245,42 @@ clear_post_commit_state() {
     rm -f "$state_file"
 }
 
+# Re-apply overrides recorded by pre-commit, if a state file is present, then
+# clear it. Safe to call when no state file exists (no-op). Used by both
+# post-commit (on commit success) and post-checkout (to heal an aborted commit
+# that left originals in the working tree and the state file behind).
+reapply_post_commit_state() {
+    local repo_root="$1"
+    local state_file=""
+    local entry target override
+    state_file="$(get_post_commit_state_file "$repo_root" 2>/dev/null || true)"
+    [[ -n "$state_file" && -f "$state_file" ]] || return 0
+
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+
+        # Parse entry: "target|override" (override may be absolute — anchored
+        # at the resolution root by pre-commit)
+        target="${entry%%|*}"
+        override="${entry#*|}"
+        [[ "$override" == /* ]] || override="$repo_root/$override"
+
+        if [[ -f "$override" && -f "$repo_root/$target" ]]; then
+            # $override is absolute (anchored at the resolution root by
+            # pre-commit); guard it via its own parent so the symlink gate
+            # still applies to the absolute path.
+            if ! path_is_symlink_safe "$repo_root" "$target" \
+               || ! path_is_symlink_safe "$(dirname "$override")" "$(basename "$override")"; then
+                printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
+                continue
+            fi
+            cp "$override" "$repo_root/$target"
+        fi
+    done < "$state_file"
+
+    rm -f "$state_file"
+}
+
 clear_legacy_skip_worktree() {
     local repo_root="$1"
     local config_entries="${2:-}"

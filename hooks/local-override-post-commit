@@ -21,8 +21,6 @@ source "$SCRIPT_DIR/local-override-lib.sh"
 
 main() {
     local repo_root
-    local state_file=""
-    local entries_to_reapply=""
     repo_root="$(get_repo_root)" || return 0
 
     # Do not re-apply overrides during rebase internal commits
@@ -30,39 +28,8 @@ main() {
         return 0
     fi
 
-    state_file="$(get_post_commit_state_file "$repo_root" 2>/dev/null || true)"
-    if [[ -z "$state_file" || ! -f "$state_file" ]]; then
-        return 0
-    fi
-
-    local entry target override
-    entries_to_reapply="$(< "$state_file")"
-
-    while IFS= read -r entry || [[ -n "$entry" ]]; do
-        [[ -z "$entry" ]] && continue
-
-        # Parse entry: "target|override" (override may be absolute — anchored
-        # at the resolution root by pre-commit)
-        target="${entry%%|*}"
-        override="${entry#*|}"
-        [[ "$override" == /* ]] || override="$repo_root/$override"
-
-        # Check if both target and override files exist
-        if [[ -f "$override" && -f "$repo_root/$target" ]]; then
-            # $override is absolute (anchored at the resolution root by
-            # pre-commit); guard it via its own parent so the symlink gate
-            # still applies to the absolute path.
-            if ! path_is_symlink_safe "$repo_root" "$target" \
-               || ! path_is_symlink_safe "$(dirname "$override")" "$(basename "$override")"; then
-                printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
-                continue
-            fi
-            # Apply override: copy override content to target file
-            cp "$override" "$repo_root/$target"
-        fi
-    done <<< "$entries_to_reapply"
-
-    rm -f "$state_file"
+    # Re-apply any overrides recorded by pre-commit and clear the state file.
+    reapply_post_commit_state "$repo_root"
 
     return 0
 }

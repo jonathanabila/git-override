@@ -147,6 +147,11 @@ run_post_checkout() {
         fi
     done <<< "$config_entries"
 
+    # Heal an aborted commit: pre-commit restored originals and left a reapply
+    # state file, but post-commit never ran. Re-apply from that leftover state
+    # now (guarded above by the rebase bail) and clear it.
+    reapply_post_commit_state "$repo_root"
+
     return 0
 }
 

@@ -33,6 +33,12 @@ main() {
     local state_entries=""
     repo_root="$(get_repo_root)" || return 0
 
+    # Do not restore/re-apply during rebase-internal commits; the rebase
+    # bail in post-commit means a restore here would never be undone.
+    if is_rebase_in_progress "$repo_root"; then
+        return 0
+    fi
+
     # Configs and override files resolve against the resolution root (the main
     # checkout for fallback worktrees); index and working-tree operations stay
     # on the checkout root. No config-discovery cache here: everything below
