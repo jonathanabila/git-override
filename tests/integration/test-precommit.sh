@@ -419,6 +419,106 @@ files:
 EOF
 }
 
+test_precommit_new_target_leak_blocked() {
+    info "Testing new managed target holding override content is blocked..."
+
+    cd "$TEST_DIR"
+
+    pre-commit install \
+        --hook-type pre-commit \
+        --hook-type post-commit 2>/dev/null || true
+
+    # Add a config entry for a target that does NOT exist in HEAD.
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: NEWFILE.local.md
+    replaces:
+      - NEWFILE.md
+EOF
+    git add .local-overrides.yaml
+    git commit -q -m "Add new managed target to config"
+
+    # Create the override and apply it so the target holds override content.
+    echo "# SECRET LOCAL NEWFILE" > NEWFILE.local.md
+    echo "# SECRET LOCAL NEWFILE" > NEWFILE.md
+
+    git add NEWFILE.md
+
+    if git commit -m "Introduce new managed target"; then
+        fail "Commit of new managed target with override content was NOT blocked (leak)"
+        return 1
+    fi
+    pass "Commit of new managed target with override content was blocked"
+
+    # HEAD must not have gained the target at all.
+    if git cat-file -e "HEAD:NEWFILE.md" 2>/dev/null; then
+        fail "HEAD gained NEWFILE.md despite the block"
+        return 1
+    fi
+    pass "HEAD did not gain the new target"
+
+    # Working tree must still hold the override content.
+    if grep -q "SECRET LOCAL NEWFILE" NEWFILE.md; then
+        pass "Working tree still holds the override content"
+    else
+        fail "Working tree lost the override content"
+        cat NEWFILE.md
+        return 1
+    fi
+}
+
+test_precommit_new_target_canonical_commits() {
+    info "Testing new managed target with genuine canonical content commits..."
+
+    cd "$TEST_DIR"
+
+    pre-commit install \
+        --hook-type pre-commit \
+        --hook-type post-commit 2>/dev/null || true
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: NEWFILE.local.md
+    replaces:
+      - NEWFILE.md
+EOF
+    git add .local-overrides.yaml
+    git commit -q -m "Add new managed target to config"
+
+    # Override exists but the staged target holds real canonical content
+    # (NOT the override), so the block must not trigger.
+    echo "# SECRET LOCAL NEWFILE" > NEWFILE.local.md
+    echo "# REAL CANONICAL NEWFILE" > NEWFILE.md
+
+    git add NEWFILE.md
+
+    if git commit -m "Introduce new managed target with canonical content"; then
+        pass "Commit of new target with canonical content succeeded"
+    else
+        fail "Commit of new target with canonical content was wrongly blocked"
+        return 1
+    fi
+
+    # HEAD must hold the canonical content, not the override.
+    local committed
+    committed=$(git show "HEAD:NEWFILE.md")
+    if echo "$committed" | grep -q "REAL CANONICAL NEWFILE"; then
+        pass "Committed content is the genuine canonical content"
+    else
+        fail "Committed content was not the canonical content"
+        echo "Committed: $committed"
+        return 1
+    fi
+}
+
 test_precommit_from_remote_repo() {
     info "Testing pre-commit config pointing to our remote repo..."
 
@@ -525,6 +625,8 @@ main() {
         test_precommit_checkout_flow \
         test_precommit_with_other_hooks \
         test_precommit_skip_without_config \
+        test_precommit_new_target_leak_blocked \
+        test_precommit_new_target_canonical_commits \
         test_precommit_from_remote_repo; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
