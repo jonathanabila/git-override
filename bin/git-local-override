@@ -968,7 +968,9 @@ cmd_apply() {
     local applied_count=0
     local failed_count=0
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    # NUL-delimited worktree records (via the shared resolver helper) so
+    # worktree paths containing newlines parse correctly on git >= 2.36.
+    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
         case "$line" in
             worktree\ *) ;;
             *) continue ;;
@@ -992,7 +994,7 @@ cmd_apply() {
         else
             ((failed_count++)) || true
         fi
-    done < <(git -C "$start_root" worktree list --porcelain)
+    done < <(list_worktrees_porcelain_nul "$start_root")
 
     if [[ "$failed_count" -gt 0 ]]; then
         die "apply failed in $failed_count worktree(s) (succeeded in $applied_count)"

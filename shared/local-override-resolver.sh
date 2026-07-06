@@ -227,6 +227,20 @@ escape_fd_glob() {
     printf '%s\n' "$1" | sed 's/[][\*?{}]/\\&/g'
 }
 
+# Emit `git worktree list --porcelain` records NUL-terminated. `-z` (git >=
+# 2.36) is preferred: it is the only form that survives newlines in worktree
+# paths. Older gits fall back to converting the newline-terminated porcelain
+# output to NUL records — identical parsing, with the pre-existing
+# newline-in-path limitation confined to those gits.
+list_worktrees_porcelain_nul() {
+    local repo_root="$1"
+
+    if git -C "$repo_root" worktree list --porcelain -z 2>/dev/null; then
+        return 0
+    fi
+    git -C "$repo_root" worktree list --porcelain 2>/dev/null | tr '\n' '\0'
+}
+
 # Repo-relative directories of linked worktrees that live INSIDE repo_root.
 # Another checkout's config is not a subtree config of this checkout.
 get_nested_worktree_dirs() {
@@ -240,7 +254,7 @@ get_nested_worktree_dirs() {
     # or every entry silently fails the prefix match.
     canonical_root="$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null || echo "$repo_root")"
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
         case "$line" in
             worktree\ *)
                 wt_path="${line#worktree }"
@@ -252,7 +266,7 @@ get_nested_worktree_dirs() {
                 esac
                 ;;
         esac
-    done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null)
+    done < <(list_worktrees_porcelain_nul "$repo_root")
 }
 
 discover_config_files() {
@@ -823,7 +837,7 @@ get_main_worktree_root() {
     local line=""
     local first_root=""
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
         if [[ -z "$first_root" ]]; then
             case "$line" in
                 worktree\ *) first_root="${line#worktree }" ;;
@@ -834,7 +848,7 @@ get_main_worktree_root() {
             bare) return 1 ;;
             "" | worktree\ *) break ;;
         esac
-    done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null)
+    done < <(list_worktrees_porcelain_nul "$repo_root")
 
     [[ -n "$first_root" ]] || return 1
     printf '%s\n' "$first_root"
