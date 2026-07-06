@@ -2044,6 +2044,142 @@ test_filter_roundtrip() {
     fi
 }
 
+run_filter_roundtrip_file_case() {
+    # Drive the real substitution path through files, compared with cmp.
+    # Never capture filter output via $(...): command substitution strips
+    # trailing newlines and cannot carry NUL bytes, which is exactly the
+    # blind spot these cases close.
+    #
+    # $1 = label, $2 = committed target path, $3 = override file path,
+    # $4 = file holding the exact tracked blob bytes
+    local label="$1"
+    local target="$2"
+    local override="$3"
+    local original="$4"
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+    local smudged="$TEST_ARTIFACTS_DIR/roundtrip-smudged"
+    local cleaned="$TEST_ARTIFACTS_DIR/roundtrip-cleaned"
+
+    info "Testing file-based filter roundtrip: $label..."
+
+    # Setup sanity: the committed blob must hold the exact original bytes,
+    # otherwise the roundtrip comparison below would be meaningless.
+    if ! git show ":$target" | cmp -s - "$original"; then
+        fail "Setup: committed blob for $label does not match original bytes"
+        return
+    fi
+
+    "$smudge_script" "$target" < "$original" > "$smudged"
+    "$clean_script" "$target" < "$smudged" > "$cleaned"
+
+    # Confirm smudge substituted (not passthrough) so clean exercises its
+    # real cmp-gated substitution path rather than trivially passing through.
+    if ! cmp -s "$smudged" "$override"; then
+        fail "Smudge did not emit override bytes for $label ($(cmp "$smudged" "$override" 2>&1 || true))"
+        rm -f "$smudged" "$cleaned"
+        return
+    fi
+
+    if cmp -s "$cleaned" "$original"; then
+        pass "Roundtrip preserves $label byte-for-byte"
+    else
+        fail "Roundtrip corrupted $label ($(cmp "$cleaned" "$original" 2>&1 || true))"
+    fi
+
+    rm -f "$smudged" "$cleaned"
+}
+
+test_filter_roundtrip_content_variants() {
+    cd "$TEST_REPO"
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$smudge_script" || ! -f "$clean_script" ]]; then
+        info "Testing file-based filter roundtrip content variants..."
+        fail "Filter scripts not found"
+        return
+    fi
+
+    # Keep committed bytes exactly as written (CRLF case must not be
+    # normalized on add).
+    git config core.autocrlf false
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: rt-binary.local.bin
+    replaces:
+      - rt-binary.bin
+  - override: rt-crlf.local.txt
+    replaces:
+      - rt-crlf.txt
+  - override: rt-empty-blob.local.txt
+    replaces:
+      - rt-empty-blob.txt
+  - override: rt-empty-override.local.txt
+    replaces:
+      - rt-empty-override.txt
+  - override: rt-no-newline.local.txt
+    replaces:
+      - rt-no-newline.txt
+  - override: rt-multi-newline.local.txt
+    replaces:
+      - rt-multi-newline.txt
+EOF
+
+    # Exact tracked-blob bytes for each case, kept outside the repo so the
+    # roundtrip result can be cmp-compared against untouched reference files.
+    local originals_dir="$TEST_ARTIFACTS_DIR/roundtrip-originals"
+    mkdir -p "$originals_dir"
+
+    printf 'a\0b\0c' > "$originals_dir/binary"
+    printf 'line1\r\nline2\r\n' > "$originals_dir/crlf"
+    : > "$originals_dir/empty-blob"
+    printf 'tracked content\n' > "$originals_dir/empty-override"
+    printf 'no trailing newline' > "$originals_dir/no-newline"
+    printf 'x\n\n\n' > "$originals_dir/multi-newline"
+
+    cp "$originals_dir/binary" rt-binary.bin
+    cp "$originals_dir/crlf" rt-crlf.txt
+    cp "$originals_dir/empty-blob" rt-empty-blob.txt
+    cp "$originals_dir/empty-override" rt-empty-override.txt
+    cp "$originals_dir/no-newline" rt-no-newline.txt
+    cp "$originals_dir/multi-newline" rt-multi-newline.txt
+
+    # Commit the targets before creating any override files so the hooks
+    # see no active overrides and the canonical bytes land in the index.
+    git add .local-overrides.yaml \
+        rt-binary.bin rt-crlf.txt rt-empty-blob.txt \
+        rt-empty-override.txt rt-no-newline.txt rt-multi-newline.txt
+    git commit -q -m "Add roundtrip content variant targets"
+
+    # Overrides carry the hazardous byte patterns too: a binary/CRLF/empty/
+    # newline-less override is a distinct hazard from a tracked blob with
+    # the same shape, and both sides must survive the roundtrip.
+    printf 'x\0y\0local' > rt-binary.local.bin
+    printf 'local1\r\nlocal2\r\n' > rt-crlf.local.txt
+    printf 'local override content\n' > rt-empty-blob.local.txt
+    : > rt-empty-override.local.txt
+    printf 'local no trailing newline' > rt-no-newline.local.txt
+    printf 'y\n\n\n\n' > rt-multi-newline.local.txt
+
+    run_filter_roundtrip_file_case "binary content with NUL bytes" \
+        rt-binary.bin rt-binary.local.bin "$originals_dir/binary"
+    run_filter_roundtrip_file_case "CRLF line endings" \
+        rt-crlf.txt rt-crlf.local.txt "$originals_dir/crlf"
+    run_filter_roundtrip_file_case "empty tracked blob" \
+        rt-empty-blob.txt rt-empty-blob.local.txt "$originals_dir/empty-blob"
+    run_filter_roundtrip_file_case "empty override file" \
+        rt-empty-override.txt rt-empty-override.local.txt "$originals_dir/empty-override"
+    run_filter_roundtrip_file_case "content without trailing newline" \
+        rt-no-newline.txt rt-no-newline.local.txt "$originals_dir/no-newline"
+    run_filter_roundtrip_file_case "multiple trailing newlines" \
+        rt-multi-newline.txt rt-multi-newline.local.txt "$originals_dir/multi-newline"
+}
+
 test_filter_disable_env_var() {
     info "Testing filters passthrough when GIT_LOCAL_OVERRIDE_DISABLE=1..."
     cd "$TEST_REPO"
@@ -2379,6 +2515,7 @@ main() {
         test_filter_clean_returns_original \
         test_filter_clean_passthrough \
         test_filter_roundtrip \
+        test_filter_roundtrip_content_variants \
         test_filter_disable_env_var \
         test_filter_no_head_passthrough \
         test_filter_non_configured_file_passthrough \
