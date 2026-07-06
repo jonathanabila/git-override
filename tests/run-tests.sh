@@ -1458,6 +1458,68 @@ EOF
     fi
 }
 
+test_invalid_path_entry_fails_whole_config() {
+    info "Testing invalid path entry fails validation instead of truncating..."
+
+    cd "$TEST_REPO"
+
+    # The middle target escapes the repo root, which fails path normalization
+    # inside the parser. Previously the parser aborted mid-stream and the bad
+    # entry plus every entry after it were silently dropped, while the first
+    # entry was still accepted with no diagnostic at all.
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: FIRST.local.md
+    replaces:
+      - FIRST.md
+  - override: EVIL.local.md
+    replaces:
+      - ../outside-repo.md
+  - override: THIRD.local.md
+    replaces:
+      - THIRD.md
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override list 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *".local-overrides.yaml"* \
+        && "$output" != *"FIRST.md"* ]]; then
+        pass "Invalid path entry rejects the whole config with an error"
+    else
+        fail "Expected validation failure naming the config without accepting valid entries (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_valid_multi_entry_config_parses_fully() {
+    info "Testing valid multi-entry config lists every entry..."
+
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: FIRST.local.md
+    replaces:
+      - FIRST.md
+  - override: SECOND.local.md
+    replaces:
+      - SECOND.md
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override list 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 && "$output" == *"FIRST.md"* && "$output" == *"SECOND.md"* ]]; then
+        pass "Valid multi-entry config lists all entries"
+    else
+        fail "Expected both entries listed (exit: $exit_code, output: $output)"
+    fi
+}
+
 test_symlink_target_refused_on_apply() {
     info "Testing symlinked target is refused (write escape)..."
 
@@ -2245,6 +2307,8 @@ main() {
         test_recursive_override_path_escape_errors \
         test_recursive_target_path_escape_errors \
         test_recursive_escape_is_rejected_by_hook_validation \
+        test_invalid_path_entry_fails_whole_config \
+        test_valid_multi_entry_config_parses_fully \
         test_symlink_target_refused_on_apply \
         test_symlink_override_refused_on_smudge \
         test_symlink_guard_allows_regular_files \
