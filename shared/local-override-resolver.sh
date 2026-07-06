@@ -7,6 +7,13 @@
 
 CONFIG_FILE_NAME=".local-overrides.yaml"
 
+# Sentinel emitted (as the target field) by read_config_entries_for_file when
+# a config entry fails path normalization. Consumers read the parser through
+# process substitution, so its exit status is invisible to them — the sentinel
+# is how the failure stays visible. validate_config fails on it (the gate);
+# other consumers skip it. Must never collide with a real repo-relative path.
+LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL="__LOCAL_OVERRIDE_PARSE_ERROR__"
+
 # Cache for discover_config_files results (temp file path, empty = no cache)
 _DISCOVER_CACHE_FILE=""
 _DISCOVER_CACHE_ROOT=""
@@ -494,7 +501,11 @@ read_config_entries_for_file() {
 
         if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+override:[[:space:]]+(.+)$ ]]; then
             current_override="$(trim_config_value "${BASH_REMATCH[1]}")"
-            current_override="$(normalize_config_path "$config_dir" "$current_override")" || return 1
+            if ! current_override="$(normalize_config_path "$config_dir" "$current_override")"; then
+                echo "Error: Override path in '$config_path' is invalid or escapes its subtree" >&2
+                printf '%s|%s\n' "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" "$config_path"
+                return 1
+            fi
             in_replaces_section=false
             continue
         fi
@@ -506,7 +517,11 @@ read_config_entries_for_file() {
 
         if [[ "$in_replaces_section" == true && "$line" =~ ^[[:space:]]+-[[:space:]]+(.+)$ ]]; then
             target="$(trim_config_value "${BASH_REMATCH[1]}")"
-            target="$(normalize_config_path "$config_dir" "$target")" || return 1
+            if ! target="$(normalize_config_path "$config_dir" "$target")"; then
+                echo "Error: Target path in '$config_path' is invalid or escapes its subtree" >&2
+                printf '%s|%s\n' "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" "$config_path"
+                return 1
+            fi
             [[ -n "$target" ]] && printf '%s|%s\n' "$target" "$current_override"
             continue
         fi
@@ -581,6 +596,11 @@ validate_config() {
             target="${entry%%|*}"
             override="${entry#*|}"
 
+            if [[ "$target" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]]; then
+                echo "Error: '$override' contains an invalid path entry" >&2
+                return 1
+            fi
+
             if ! path_is_within_dir "$target" "$config_dir"; then
                 echo "Error: Target '$target' in '$config_path' escapes its subtree" >&2
                 return 1
@@ -644,6 +664,12 @@ read_config() {
             [[ -n "$entry" ]] || continue
             target="${entry%%|*}"
 
+            # Parse-error sentinel: the authoritative rejection happens in
+            # validate_config; this hot path just skips the marker.
+            if [[ "$target" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]]; then
+                continue
+            fi
+
             if target_is_shadowed_by_child_config "$repo_root" "$config_path" "$target"; then
                 ((shadowed_skip_count++)) || true
                 continue
@@ -678,6 +704,10 @@ get_override_for_target() {
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
         target="${entry%%|*}"
+        # Skip the parse-error sentinel; validate_config is the gate for it.
+        if [[ "$target" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]]; then
+            continue
+        fi
         override="${entry#*|}"
         if [[ "$target" == "$target_path" ]]; then
             printf '%s\n' "$override"
@@ -701,6 +731,10 @@ get_config_for_target() {
         while IFS= read -r entry || [[ -n "$entry" ]]; do
             [[ -n "$entry" ]] || continue
             target="${entry%%|*}"
+            # Skip the parse-error sentinel; validate_config is the gate for it.
+            if [[ "$target" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]]; then
+                continue
+            fi
             if [[ "$target" == "$target_path" ]]; then
                 printf '%s\n' "$config_path"
                 return 0
