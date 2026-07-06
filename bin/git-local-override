@@ -214,6 +214,12 @@ fi
 # shellcheck source=../shared/local-override-resolver.sh
 source "$SHARED_RESOLVER_PATH"
 
+# Backstop cleanup: the per-command RETURN traps clear the discovery cache
+# promptly within a run, but RETURN traps do not fire on process exit. Register
+# a single EXIT trap so the mktemp'd cache file is removed even on die()/exit 1
+# paths. clear_config_files_cache is idempotent and no-ops when no cache exists.
+trap 'clear_config_files_cache 2>/dev/null || true' EXIT
+
 cmd_version() {
     get_version
 }
@@ -257,7 +263,7 @@ normalize_path() {
 
     # If path is absolute, make it relative to repo root
     if [[ "$path" == /* ]]; then
-        path="${path#$repo_root/}"
+        path="${path#"$repo_root"/}"
     fi
 
     # Remove leading ./ if present
@@ -471,7 +477,7 @@ cmd_remove() {
     local full_override_path="$repo_root/$override_path"
 
     # Restore original content from git
-    if git -C "$repo_root" ls-files --error-unmatch "$path" &>/dev/null; then
+    if git -C "$repo_root" ls-files --error-unmatch -- "$path" &>/dev/null; then
         git -C "$repo_root" checkout HEAD -- "$path" 2>/dev/null || true
         info "Restored original content: $path"
     fi
@@ -910,7 +916,7 @@ apply_to_checkout() {
             copy_ms="$(elapsed_milliseconds "$copy_start_ms")"
             # Update index via clean filter so git status sees file as clean
             git_add_start_ms="$(now_milliseconds)"
-            git -C "$checkout_root" add "$target" 2>/dev/null || true
+            git -C "$checkout_root" add -- "$target" 2>/dev/null || true
             git_add_ms="$(elapsed_milliseconds "$git_add_start_ms")"
             ((count++)) || true
 
@@ -1024,7 +1030,7 @@ cmd_restore() {
 
         # Only restore if there's an override file
         if [[ -f "$repo_root/$override" ]]; then
-            if git -C "$checkout_root" ls-files --error-unmatch "$target" &>/dev/null; then
+            if git -C "$checkout_root" ls-files --error-unmatch -- "$target" &>/dev/null; then
                 if ! path_is_symlink_safe "$checkout_root" "$target"; then
                     die "refusing symlinked path: $target"
                 fi

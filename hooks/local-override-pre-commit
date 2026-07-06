@@ -137,7 +137,7 @@ $override"
                 git -C "$repo_root" show "HEAD:$target_file" > "$repo_root/$target_file"
 
                 # Re-stage the restored file
-                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" add "$target_file"
+                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" add -- "$target_file"
             elif git -C "$repo_root" cat-file -e ":$target_file" 2>/dev/null; then
                 # New target: staged but with no HEAD canonical content. There
                 # is no tracked blob to restore from, so if what's staged is the
