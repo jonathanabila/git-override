@@ -697,6 +697,34 @@ test_apply_all_worktrees() {
     pass "All three checkouts serve the edited override content"
 }
 
+test_apply_all_worktrees_with_space_path() {
+    info "Testing apply --all-worktrees with a space in the worktree path..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt space a"
+    git worktree add -q -b wt-space "$wt" >/dev/null 2>&1
+
+    # Materialize v1 everywhere, then edit the override source; the space-path
+    # worktree must survive the NUL-record worktree enumeration and refresh.
+    "$PROJECT_DIR/bin/git-local-override" apply >/dev/null 2>&1
+    echo "# Private override content v5" > "$TEST_DIR/CLAUDE.private.md"
+
+    if ! "$PROJECT_DIR/bin/git-local-override" apply --all-worktrees >/dev/null 2>&1; then
+        fail "apply --all-worktrees exited non-zero with a space worktree path"
+        return 1
+    fi
+
+    local checkout
+    for checkout in "$TEST_DIR" "$wt"; do
+        if ! grep -q "Private override content v5" "$checkout/AGENTS.md"; then
+            fail "Stale AGENTS.md in $checkout: $(cat "$checkout/AGENTS.md")"
+            return 1
+        fi
+    done
+
+    pass "Space-path worktree enumerated and refreshed"
+}
+
 test_apply_all_worktrees_isolates_failures() {
     info "Testing apply --all-worktrees isolates and reports per-worktree failures..."
 
@@ -827,6 +855,7 @@ main() {
         test_status_reports_fallback_in_worktree \
         test_legacy_cli_filters_match_hook_behavior \
         test_apply_all_worktrees \
+        test_apply_all_worktrees_with_space_path \
         test_apply_all_worktrees_isolates_failures \
         test_rebase_in_fallback_worktree; do
         CURRENT_TEST_NAME="$test_fn"

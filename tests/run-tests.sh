@@ -511,6 +511,45 @@ test_pre_commit_hook() {
     fi
 }
 
+test_pre_commit_hook_restores_special_char_target() {
+    info "Testing pre-commit restores a special-character target name..."
+
+    cd "$TEST_REPO"
+
+    # A space plus a non-ASCII byte: with core.quotePath=true (the default),
+    # `git diff --cached --name-only` C-quotes this name, so a plain-text
+    # match against the config target never fires and the override content
+    # would be committed silently.
+    local special_target="spécial target.md"
+    local special_override="spécial target.local.md"
+
+    echo "# Original special content" > "$special_target"
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add -- "$special_target"
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git commit -q -m "Add special-name target"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: spécial target.local.md
+    replaces:
+      - spécial target.md
+EOF
+
+    echo "# LOCAL special content" > "$special_override"
+    echo "# LOCAL special content" > "$special_target"
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add -- "$special_target"
+
+    .git/hooks/pre-commit
+
+    local staged_content
+    staged_content="$(GIT_LOCAL_OVERRIDE_DISABLE=1 git show ":$special_target")"
+    if [[ "$staged_content" == "# Original special content" ]]; then
+        pass "Pre-commit restored the special-character target before commit"
+    else
+        fail "Special-character target still stages override content: $staged_content"
+    fi
+}
+
 test_post_commit_hook() {
     info "Testing post-commit hook..."
 
@@ -2282,6 +2321,7 @@ main() {
         test_post_checkout_hook \
         test_post_checkout_hook_logs_lifecycle \
         test_pre_commit_hook \
+        test_pre_commit_hook_restores_special_char_target \
         test_post_commit_hook \
         test_post_commit_hook_exits_without_state \
         test_pre_commit_trace_avoids_global_config_discovery \
