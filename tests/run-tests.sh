@@ -636,8 +636,8 @@ test_post_checkout_trace_falls_back_when_attributes_missing() {
     fi
 }
 
-test_post_checkout_trace_avoids_global_discovery_when_config_unchanged() {
-    info "Testing post-checkout avoids global discovery when config is unchanged..."
+test_post_checkout_trace_single_discovery_when_config_unchanged() {
+    info "Testing post-checkout fast path runs one discovery pass and skips validation..."
 
     cd "$TEST_REPO"
     create_config
@@ -656,16 +656,26 @@ test_post_checkout_trace_avoids_global_discovery_when_config_unchanged() {
     local previous_head
     local new_head
     local output
+    local discover_count
     previous_head="$(git rev-parse HEAD~1)"
     new_head="$(git rev-parse HEAD)"
-    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/post-checkout "$previous_head" "$new_head" "1" 2>&1)
 
-    if [[ "$output" != *"discover_config_files strategy="* ]] &&
-       [[ "$output" != *"discover_config_files cache="* ]] &&
+    # Warm up: the first post-checkout run takes the slow path and records
+    # the config stamp; subsequent runs are eligible for the fast path.
+    .git/hooks/post-checkout "$previous_head" "$new_head" "1" >/dev/null 2>&1
+
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/post-checkout "$previous_head" "$new_head" "1" 2>&1)
+    discover_count="$(count_trace_matches "$output" 'discover_config_files strategy=')"
+
+    # The fast path pays exactly one discovery pass (the config drift stamp)
+    # but must skip full validation and config resolution.
+    if [[ "$discover_count" -eq 1 ]] &&
+       [[ "$output" == *"fast-path config=unchanged"* ]] &&
+       [[ "$output" != *"validate_config"* ]] &&
        grep -q "FAST PATH TEST" CLAUDE.md; then
-        pass "Post-checkout avoids global discovery when config is unchanged"
+        pass "Post-checkout fast path uses one discovery pass and skips validation"
     else
-        fail "Expected post-checkout to avoid global discovery when config is unchanged (output: $output)"
+        fail "Expected fast path with a single discovery pass when config is unchanged (output: $output)"
     fi
 }
 
@@ -2326,7 +2336,7 @@ main() {
         test_post_commit_hook_exits_without_state \
         test_pre_commit_trace_avoids_global_config_discovery \
         test_post_checkout_trace_falls_back_when_attributes_missing \
-        test_post_checkout_trace_avoids_global_discovery_when_config_unchanged \
+        test_post_checkout_trace_single_discovery_when_config_unchanged \
         test_post_checkout_falls_back_and_refreshes_attributes_when_config_changes \
         test_pre_rebase_trace_reuses_config_discovery_cache \
         test_status_command \

@@ -64,6 +64,14 @@ resolve_post_checkout_entries_fast() {
     config_change_state="$(checkout_config_change_state "$repo_root" "$previous_head" "$new_head")"
     [[ "$config_change_state" == "unchanged" ]] || return 1
 
+    # A tracked HEAD diff cannot see edits to gitignored/untracked configs;
+    # compare the on-disk config set against the stamp recorded by the last
+    # full resolution and fall back to full discovery on any drift.
+    if ! config_stamp_matches "$repo_root" "$resolution_root"; then
+        local_override_trace_log "post-checkout" "config-stamp drift; falling back to full discovery"
+        return 1
+    fi
+
     config_entries="$(read_config_entries_from_attributes "$resolution_root" 2>/dev/null)" || return 1
 
     local_override_trace_log "post-checkout" "fast-path config=$config_change_state managed_targets=$(count_list_entries "$config_entries")"
@@ -92,12 +100,14 @@ run_post_checkout() {
     # on the checkout root.
     resolution_root="$(get_resolution_root "$repo_root")"
 
+    # Both the fast path's config-stamp drift check and the slow path need
+    # config discovery; cache it once so they share a single walk.
+    cache_config_files "$resolution_root"
+    trap 'clear_config_files_cache' RETURN
+
     if config_entries="$(resolve_post_checkout_entries_fast "$repo_root" "$resolution_root" "$_previous_head" "$_new_head")"; then
         using_fast_path=true
     else
-        cache_config_files "$resolution_root"
-        trap 'clear_config_files_cache' RETURN
-
         if ! has_any_config "$resolution_root"; then
             return 0
         fi
@@ -111,6 +121,10 @@ run_post_checkout() {
         if ! sync_attributes_entries "$repo_root" "$config_entries"; then
             return 1
         fi
+
+        # The attributes now reflect this resolution; record what it was
+        # built from so future fast paths can detect drift.
+        write_config_stamp "$repo_root" "$resolution_root"
     fi
 
     if [[ "$using_fast_path" == true && -z "$config_entries" ]]; then
