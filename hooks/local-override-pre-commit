@@ -22,10 +22,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=local-override-lib.sh
 source "$SCRIPT_DIR/local-override-lib.sh"
 
+# Usage: staged_contains <needle> <staged-path>...
+# True when <needle> exactly matches one of the staged paths.
+staged_contains() {
+    local needle="$1"
+    shift
+    local staged_path=""
+    for staged_path in "$@"; do
+        [[ "$staged_path" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
 main() {
     local repo_root
     local resolution_root
-    local staged_files=""
     local relevant_configs=""
     local relevant_entries=""
     local overrides_to_restore=""
@@ -47,16 +58,24 @@ main() {
 
     clear_post_commit_state "$repo_root"
 
-    # Get list of staged files
-    staged_files=$(git -C "$repo_root" diff --cached --name-only 2>/dev/null) || return 0
+    # Get list of staged files. Read NUL-delimited with quotePath off so
+    # names holding tabs, quotes, backslashes, or non-ASCII bytes compare
+    # literally against config targets instead of arriving C-quoted and never
+    # matching (which would leak override content into the commit). Bash
+    # variables cannot hold NUL bytes, so the list lives in an array.
+    local -a staged_files
+    staged_files=()
+    local staged_file=""
+    while IFS= read -r -d '' staged_file || [[ -n "$staged_file" ]]; do
+        [[ -n "$staged_file" ]] || continue
+        staged_files+=("$staged_file")
+    done < <(git -C "$repo_root" -c core.quotePath=false diff --cached --name-only -z 2>/dev/null || true)
 
     # Quick exit if nothing staged
-    [[ -z "$staged_files" ]] && return 0
+    [[ "${#staged_files[@]}" -gt 0 ]] || return 0
 
-    local staged_file=""
     local config_path=""
-    while IFS= read -r staged_file || [[ -n "$staged_file" ]]; do
-        [[ -n "$staged_file" ]] || continue
+    for staged_file in "${staged_files[@]}"; do
         config_path="$(find_nearest_config_for_path "$resolution_root" "$staged_file" 2>/dev/null || true)"
         [[ -n "$config_path" ]] || continue
 
@@ -64,7 +83,7 @@ main() {
             relevant_configs="$relevant_configs
 $config_path"
         fi
-    done <<< "$staged_files"
+    done
 
     [[ -n "$relevant_configs" ]] || return 0
 
@@ -74,6 +93,9 @@ $config_path"
 
         while IFS= read -r config_entry || [[ -n "$config_entry" ]]; do
             [[ -n "$config_entry" ]] || continue
+            # Skip parse-error sentinel entries: they are diagnostics, not
+            # targets; validate_config is the gate that surfaces them.
+            [[ "${config_entry%%|*}" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]] && continue
             relevant_entries="$relevant_entries
 $config_entry"
         done < <(read_config_entries_for_file "$resolution_root" "$config_path")
@@ -98,7 +120,7 @@ $config_entry"
         override="${entry#*|}"
 
         # Check if this target is staged
-        if echo "$staged_files" | grep -qxF "$target"; then
+        if staged_contains "$target" "${staged_files[@]}"; then
             # Check if override file exists
             if [[ -f "$resolution_root/$override" ]]; then
                 # Add to list if not already present
