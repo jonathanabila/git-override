@@ -7,7 +7,8 @@
 #   make clean      - Clean test artifacts
 #   make help       - Show this help
 
-.PHONY: install uninstall test clean help check-bash lint \
+.PHONY: install uninstall test clean help check-bash lint fmt fmt-check \
+       check-resolver-sync ci \
        test-docker test-docker-bash3 test-docker-unit test-docker-install \
        test-docker-gitops test-docker-worktree test-docker-precommit \
        docker-build docker-build-bash3
@@ -25,6 +26,7 @@ TEMPLATE_HOOKS_DIR := $(CONFIG_DIR)/template/hooks
 SRC_BIN := bin
 SRC_HOOKS := hooks
 SRC_SCRIPTS := scripts
+SRC_SHARED := shared
 SRC_TESTS := tests
 
 # Source files
@@ -32,6 +34,14 @@ CLI_TOOL := $(SRC_BIN)/git-local-override
 HOOK_SCRIPTS := $(wildcard $(SRC_HOOKS)/local-override-*)
 INSTALL_SCRIPT := $(SRC_SCRIPTS)/install.sh
 UNINSTALL_SCRIPT := $(SRC_SCRIPTS)/uninstall.sh
+RESOLVER := $(SRC_SHARED)/local-override-resolver.sh
+TEST_SCRIPTS := $(wildcard $(SRC_TESTS)/*.sh) \
+	$(wildcard $(SRC_TESTS)/docker/*.sh) \
+	$(wildcard $(SRC_TESTS)/integration/*.sh)
+
+# All shell sources covered by the lint gate
+LINT_FILES := $(CLI_TOOL) $(HOOK_SCRIPTS) $(INSTALL_SCRIPT) $(UNINSTALL_SCRIPT) \
+	$(RESOLVER) $(TEST_SCRIPTS)
 
 #------------------------------------------------------------------------------
 # Installation
@@ -126,7 +136,7 @@ check-bash: ## Verify bash is available
 lint: ## Check scripts for common issues (requires shellcheck)
 	@command -v shellcheck >/dev/null 2>&1 || { echo "Warning: shellcheck not installed, skipping lint"; exit 0; }
 	@echo "Linting scripts..."
-	@shellcheck -s bash $(CLI_TOOL) $(HOOK_SCRIPTS) $(INSTALL_SCRIPT) $(UNINSTALL_SCRIPT) || true
+	@shellcheck -S warning -s bash $(LINT_FILES)
 	@echo "Lint complete."
 
 fmt: ## Format shell scripts (requires shfmt)
@@ -140,6 +150,16 @@ fmt-check: ## Check shell script formatting (requires shfmt)
 	@echo "Checking format..."
 	@shfmt -i 4 -d $(CLI_TOOL) $(HOOK_SCRIPTS) $(INSTALL_SCRIPT) $(UNINSTALL_SCRIPT)
 	@echo "Format check complete."
+
+check-resolver-sync: ## Verify shared/ and hooks/ resolver copies are identical
+	@diff -q $(RESOLVER) $(SRC_HOOKS)/local-override-resolver.sh \
+		&& echo "resolver copies in sync" \
+		|| { echo "ERROR: shared/ and hooks/ resolver copies differ"; exit 1; }
+
+# NOTE: fmt-check is not part of `ci` yet — the tree predates shfmt and is not
+# formatted under any shfmt flag combination (see plan 005); adding the gate
+# requires a maintainer decision (mass-reformat vs. dropping the gate).
+ci: lint check-resolver-sync test-docker test-docker-bash3 ## Run the full CI-equivalent suite (requires Docker)
 
 #------------------------------------------------------------------------------
 # Manual Installation (alternative to install script)
