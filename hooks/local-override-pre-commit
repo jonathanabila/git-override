@@ -55,7 +55,6 @@ main() {
 
     local staged_file=""
     local config_path=""
-    local matched_config="false"
     while IFS= read -r staged_file || [[ -n "$staged_file" ]]; do
         [[ -n "$staged_file" ]] || continue
         config_path="$(find_nearest_config_for_path "$resolution_root" "$staged_file" 2>/dev/null || true)"
