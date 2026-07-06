@@ -1622,6 +1622,113 @@ test_disable_env_var_allows_restore() {
 
 }
 
+test_gitignored_config_edit_applies_new_target_on_checkout() {
+    info "Testing gitignored config edit applies new target on next checkout..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    # Tracked targets in a subdirectory whose config is gitignored, so config
+    # edits produce no tracked HEAD diff between checkouts.
+    mkdir -p subdir
+    echo "# Original notes" > subdir/notes.md
+    echo "# Original extra" > subdir/extra.md
+    printf 'subdir/.local-overrides.yaml\n' >> .gitignore
+    git add .gitignore subdir/notes.md subdir/extra.md
+    git commit -q -m "Add subdir targets and gitignore its local config"
+
+    # Gitignored config manages only notes.md at first
+    cat > subdir/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    echo "# LOCAL notes" > subdir/notes.local.md
+    echo "# LOCAL extra" > subdir/extra.local.md
+
+    git-local-override sync-filters >/dev/null
+    git-local-override apply >/dev/null 2>&1 || true
+
+    if ! grep -q "LOCAL notes" subdir/notes.md; then
+        fail "Pre-condition: notes.md override not applied"
+        return 1
+    fi
+
+    # Round-trip once so post-checkout's slow path records the current config
+    # state and subsequent checkouts are eligible for the fast path.
+    git checkout -q -b stale-config-warmup
+    git checkout -q "$default_branch"
+
+    # Edit the GITIGNORED config: newly manage extra.md. This produces no
+    # tracked diff, so only an on-disk drift signal can catch it.
+    cat > subdir/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+  - override: extra.local.md
+    replaces:
+      - extra.md
+EOF
+
+    git checkout -q stale-config-warmup
+    git checkout -q "$default_branch"
+
+    if grep -q "LOCAL extra" subdir/extra.md; then
+        pass "Newly configured target applied after gitignored config edit"
+    else
+        fail "Stale fast path: newly configured target not applied after checkout"
+        return 1
+    fi
+
+    if grep -q "LOCAL notes" subdir/notes.md; then
+        pass "Previously configured target still applied"
+    else
+        fail "Previously configured target lost after checkout"
+        return 1
+    fi
+}
+
+test_checkout_fast_path_when_config_unchanged() {
+    info "Testing checkout still takes fast path when config is unchanged..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    # Warm up: the first checkout after install runs the slow path and
+    # records the config stamp.
+    git checkout -q -b fast-path-warmup
+    git checkout -q "$default_branch"
+
+    local checkout_output
+    checkout_output=$(GIT_LOCAL_OVERRIDE_TRACE=1 git checkout fast-path-warmup 2>&1)
+
+    if grep -q "fast-path config=unchanged" <<< "$checkout_output"; then
+        pass "post-checkout took the fast path with no config drift"
+    else
+        fail "post-checkout did not take the fast path: $checkout_output"
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "Override still applied on fast-path checkout"
+    else
+        fail "Override lost on fast-path checkout"
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    git checkout -q "$default_branch"
+}
+
 test_worktree_add_with_filters() {
     info "Testing git worktree add works with filters..."
 
@@ -1704,6 +1811,8 @@ main() {
         test_filter_and_hooks_coexist \
         test_no_override_file_normal_checkout \
         test_disable_env_var_allows_restore \
+        test_gitignored_config_edit_applies_new_target_on_checkout \
+        test_checkout_fast_path_when_config_unchanged \
         test_worktree_add_with_filters; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
