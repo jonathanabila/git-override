@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Config-derived paths interpreted as git options**: config-derived target paths are now passed to `git add`/`git ls-files` after a `--` separator, so a target whose name starts with `-` cannot be interpreted as a git option
+- **Glob-unsafe repo prefix strip**: `git-local-override add`/`remove` now strip the repo prefix with a quoted pattern, so absolute paths under a checkout whose directory name contains glob characters (`[`, `]`, `*`, `?`) normalize correctly
+- **Cache temp file leak on failed commands**: the config-discovery cache temp file is now removed on all exit paths (including `die`), fixing a slow temp-file leak on failed commands
 - **New managed target committing override content**: refuse to commit a brand-new managed target that holds local override content and has no tracked canonical version, instead of silently committing the local content into history. Introducing a new managed target now requires staging genuine canonical content (or removing it from `.local-overrides.yaml`) first
 - **Overrides vanishing on aborted / mid-rebase commits**: overrides no longer silently vanish from the working tree when a commit is aborted after the pre-commit restore, or when committing during a rebase. `pre-commit` now bails during a rebase, and a leftover reapply state file is re-applied on the next checkout
 - **Nested-worktree config pollution**: config files inside linked worktrees checked out under the main worktree's directory are no longer treated as the main checkout's subtree configs
