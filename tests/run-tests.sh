@@ -2065,6 +2065,118 @@ test_sync_filters_migrates_legacy_hook_paths() {
     fi
 }
 
+test_dash_prefixed_target_not_option() {
+    info "Testing dash-prefixed target is passed as a pathspec, not an option..."
+    cd "$TEST_REPO"
+
+    # Commit a target whose first path component begins with '-'
+    mkdir -p -- '-weird'
+    echo "# Original weird content" > './-weird/name.md'
+    git add -- '-weird/name.md'
+    git commit -q -m "Add dash-prefixed target"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: "-weird/name.local.md"
+    replaces:
+      - "-weird/name.md"
+EOF
+
+    echo "# LOCAL weird content" > './-weird/name.local.md'
+
+    git-local-override sync-filters >/dev/null
+
+    local output
+    local exit_code=0
+    output=$(git-local-override apply 2>&1) || exit_code=$?
+
+    # The clean filter runs via 'git add -- <target>'; without the '--' the
+    # add silently fails and git status keeps showing the target as modified.
+    local status
+    status=$(git status --porcelain -- '-weird/name.md')
+
+    if [[ $exit_code -eq 0 && -z "$status" ]] && grep -q "LOCAL" './-weird/name.md'; then
+        pass "Dash-prefixed target applied and re-staged as clean via git add --"
+    else
+        fail "Dash-prefixed target mishandled (exit: $exit_code, status: $status, output: $output)"
+    fi
+}
+
+test_glob_char_repo_path_normalizes() {
+    info "Testing absolute path normalization with glob chars in repo path..."
+
+    # Create a standalone repo whose directory name contains glob chars
+    local glob_repo="$TEST_ROOT/repo[1]"
+    mkdir -p -- "$glob_repo"
+    git -C "$glob_repo" init -q
+    git -C "$glob_repo" config user.email "test@test.com"
+    git -C "$glob_repo" config user.name "Test User"
+
+    echo "# Original glob repo content" > "$glob_repo/CLAUDE.md"
+    git -C "$glob_repo" add CLAUDE.md
+    git -C "$glob_repo" commit -q -m "Initial commit"
+
+    cat > "$glob_repo/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    # Pass an absolute path (derived from the physical repo root so it matches
+    # what get_repo_root returns); the repo-root prefix strip must treat the
+    # repo path literally even though it contains [ and ].
+    local glob_root
+    glob_root="$(git -C "$glob_repo" rev-parse --show-toplevel)"
+
+    local output
+    local exit_code=0
+    output=$(cd "$glob_repo" && git-local-override add "$glob_root/CLAUDE.md" 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 && -f "$glob_repo/CLAUDE.local.md" ]]; then
+        pass "Absolute path normalized under glob-char repo path"
+    else
+        fail "add failed under glob-char repo path (exit: $exit_code, output: $output)"
+    fi
+
+    cd "$TEST_REPO"
+}
+
+test_die_does_not_leak_cache_temp_file() {
+    info "Testing cache temp file is removed when a command dies..."
+    cd "$TEST_REPO"
+
+    # Invalid config: duplicate target makes validate_config fail after the
+    # discovery cache temp file has been created.
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: FIRST.local.md
+    replaces:
+      - CLAUDE.md
+  - override: SECOND.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    local leak_tmpdir="$TEST_ROOT/leak-tmp"
+    mkdir -p "$leak_tmpdir"
+
+    local exit_code=0
+    TMPDIR="$leak_tmpdir" git-local-override list >/dev/null 2>&1 || exit_code=$?
+
+    local leftover
+    leftover=$(ls -A "$leak_tmpdir" 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ $exit_code -ne 0 && "$leftover" == "0" ]]; then
+        pass "No cache temp file leaked after failed command"
+    else
+        fail "Expected failure without leak (exit: $exit_code, leftover: $(ls -A "$leak_tmpdir" 2>/dev/null | tr '\n' ' '))"
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -2156,7 +2268,10 @@ main() {
         test_filter_disable_env_var \
         test_filter_no_head_passthrough \
         test_filter_non_configured_file_passthrough \
-        test_sync_filters_migrates_legacy_hook_paths; do
+        test_sync_filters_migrates_legacy_hook_paths \
+        test_dash_prefixed_target_not_option \
+        test_glob_char_repo_path_normalizes \
+        test_die_does_not_leak_cache_temp_file; do
         CURRENT_TEST_NAME="$test_fn"
         setup_test_case
 
