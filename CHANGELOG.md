@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stale overrides after editing a gitignored/untracked config**: editing a gitignored/untracked `.local-overrides.yaml` between checkouts no longer leaves stale overrides applied: `post-checkout`'s fast path now falls back to full discovery when the on-disk config set drifts from what the recorded attributes were built from (a per-worktree content stamp of the discovered configs, recorded after each full resolution)
 - **Special-character managed target names leaking override content**: managed targets whose names contain tabs, quotes, backslashes, or non-ASCII bytes are now correctly matched and restored before commit (`pre-commit` reads staged files NUL-delimited with `core.quotePath=false`), and worktree enumeration is NUL-delimited (`worktree list --porcelain -z` on git >= 2.36, with a newline-terminated fallback on older gits) so worktree paths containing newlines parse correctly
 - **Malformed config entry silently truncating the effective override map**: a `.local-overrides.yaml` whose `override:`/`replaces:` path is invalid or escapes its subtree is now rejected by validation with a clear error, instead of silently dropping that entry and every entry after it in the same config file
 - **Config-derived paths interpreted as git options**: config-derived target paths are now passed to `git add`/`git ls-files` after a `--` separator, so a target whose name starts with `-` cannot be interpreted as a git option
