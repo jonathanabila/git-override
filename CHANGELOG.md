@@ -29,10 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Legacy CLI clean filter clobbering staged edits**: `git-local-override filter-clean` substituted HEAD content unconditionally; it now matches the hook filter (exact-match `cmp` gate, index blob), so legitimately staged edits to managed files survive
 - **Discovery walk descending into nested worktrees**: the fd discovery strategy now prunes linked-worktree directories during traversal instead of only discarding their results afterwards; `status` in a monorepo with 42 nested checkouts drops from ~2m24s to ~10s
 - **Rebase-internal checkouts triggering discovery**: `post-checkout` now bails on an in-progress rebase before resolving the resolution root, so per-commit rebase checkouts in fallback worktrees no longer run config discovery
+- **Dead variable in pre-commit hook**: removed an unused `matched_config` local (shellcheck SC2034) that would fail the now-gating lint
 
 ### Changed
 
 - **Legacy CLI filter subcommands** (`filter-smudge` / `filter-clean`) now match the hook filters exactly, including worktree fallback and rebase passthrough. Edge: a user who hand-edits a managed target beyond the applied override and stages it now commits those edits (previously silently reverted to HEAD)
+- **CI hardening**: CI pins the shellcheck action to a released version (2.0.0, by commit SHA), runs with a read-only `GITHUB_TOKEN`, lints `shared/` and `tests/`, and fails if the `shared/` and `hooks/` resolver copies drift. `make lint` now gates (severity `warning`, matching CI) instead of always succeeding
+- **New `make ci` target** runs the full CI-equivalent suite (lint, resolver sync, both Docker test suites) in one command; `CONTRIBUTING.md` now points at it as the single parity command
 
 ## [0.6.0] - 2026-06-10
 

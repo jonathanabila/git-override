@@ -139,6 +139,10 @@ GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override apply
 Look for `discover_config_files strategy=fd` versus `discover_config_files strategy=git`. Large-repo timings can differ substantially depending on whether `fd` is installed.
 
 ```bash
+# Run the full CI-equivalent suite: lint, resolver sync, and both Docker
+# test suites (recommended before committing; requires Docker)
+make ci
+
 # Run all tests in Docker (recommended and authoritative)
 make test-docker
 
@@ -325,8 +329,16 @@ Recommended verification commands:
 git status --short
 git checkout main
 git pull --ff-only origin main
-make test-docker
-make test-docker-bash3
+make ci
+```
+
+`make ci` is the single CI-parity command: it runs shellcheck (`lint`), the
+resolver-copy sync guard (`check-resolver-sync`), and both Docker test suites.
+Docker is required.
+
+If developing on macOS, also mirror the native macOS CI job:
+
+```bash
 make test
 tests/integration/test-install.sh
 tests/integration/test-git-ops.sh
