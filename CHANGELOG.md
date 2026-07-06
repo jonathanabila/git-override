@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Malformed config entry silently truncating the effective override map**: a `.local-overrides.yaml` whose `override:`/`replaces:` path is invalid or escapes its subtree is now rejected by validation with a clear error, instead of silently dropping that entry and every entry after it in the same config file
 - **Config-derived paths interpreted as git options**: config-derived target paths are now passed to `git add`/`git ls-files` after a `--` separator, so a target whose name starts with `-` cannot be interpreted as a git option
 - **Glob-unsafe repo prefix strip**: `git-local-override add`/`remove` now strip the repo prefix with a quoted pattern, so absolute paths under a checkout whose directory name contains glob characters (`[`, `]`, `*`, `?`) normalize correctly
 - **Cache temp file leak on failed commands**: the config-discovery cache temp file is now removed on all exit paths (including `die`), fixing a slow temp-file leak on failed commands
