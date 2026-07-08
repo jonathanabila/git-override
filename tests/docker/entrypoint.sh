@@ -9,6 +9,7 @@
 #   ./entrypoint.sh gitops        # Run git operations tests
 #   ./entrypoint.sh worktree      # Run linked worktree tests
 #   ./entrypoint.sh precommit     # Run pre-commit tests
+#   ./entrypoint.sh coverage      # Run unit suite under kcov (writes to /out)
 #
 set -euo pipefail
 
@@ -125,6 +126,13 @@ print_summary() {
 }
 
 main() {
+    # Coverage is a standalone diagnostic, not part of the pass/fail suite
+    # tracking, so it short-circuits before the normal dispatch.
+    if [[ "${1:-}" == "coverage" ]]; then
+        header "git-local-override Coverage (kcov)"
+        exec "$TESTS_DIR/coverage.sh"
+    fi
+
     header "git-local-override Docker Test Runner"
 
     info "Bash version: $(bash --version | head -1)"

@@ -12,12 +12,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies. fd-find installs the binary as `fdfind`; symlink it to
 # `fd` on PATH so the resolver's fd discovery strategy (and the fd-strategy leg
-# of the worktree tests) is exercised here.
+# of the worktree tests) is exercised here. kcov is installed for the opt-in
+# `make coverage` diagnostic only; it is not used by the default test suites, and
+# the layer caches so it does not slow repeat `docker-build` runs.
 RUN apt-get update && apt-get install -y \
     bash \
     git \
     curl \
     fd-find \
+    kcov \
     python3 \
     python3-pip \
     && ln -s "$(command -v fdfind)" /usr/local/bin/fd \

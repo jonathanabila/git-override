@@ -154,6 +154,10 @@ make test
 
 # Run tests with verbose output
 bash -x tests/run-tests.sh
+
+# Run the unit suite under kcov to surface untested branches
+# (opt-in diagnostic; writes coverage/index.html; NOT a CI gate)
+make coverage
 ```
 
 #### Writing Tests

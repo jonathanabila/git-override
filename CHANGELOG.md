@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`make coverage` diagnostic**: runs the unit suite (`tests/run-tests.sh`) under `kcov` inside the Docker test image and writes an HTML report to the gitignored `coverage/` directory to surface untested branches in `bin/`, `hooks/`, and `shared/` (opt-in; not a CI gate; kcov re-injects its tracer via `BASH_ENV` so hooks and filter drivers spawned as child processes are followed too)
 - **Linked worktree support**: worktrees without their own `.local-overrides.yaml` now resolve configs and override files against the main worktree (worktree-local config wins; disable with `GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1`)
 - **`apply --all-worktrees`**: refresh materialized overrides in the main checkout and every linked worktree in one command
 - **Filter roundtrip content coverage**: roundtrip tests now cover binary (NUL bytes), CRLF, empty, no-trailing-newline, and multiple-trailing-newline content on both the tracked blob and override sides, via file-based `cmp` comparison (command substitution strips trailing newlines and cannot carry NUL bytes, so the previous string-based test could not catch these corruptions)

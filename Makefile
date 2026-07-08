@@ -8,7 +8,7 @@
 #   make help       - Show this help
 
 .PHONY: install uninstall test clean help check-bash lint fmt fmt-check \
-       check-resolver-sync ci \
+       check-resolver-sync ci coverage \
        test-docker test-docker-bash3 test-docker-unit test-docker-install \
        test-docker-gitops test-docker-worktree test-docker-precommit \
        docker-build docker-build-bash3
@@ -124,6 +124,18 @@ test-docker-worktree: docker-build ## Run linked worktree tests in Docker
 
 test-docker-precommit: docker-build ## Run pre-commit tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) precommit
+
+#------------------------------------------------------------------------------
+# Coverage (opt-in diagnostic; NOT a CI gate)
+#------------------------------------------------------------------------------
+
+COVERAGE_DIR := coverage
+
+coverage: docker-build ## Run the unit suite under kcov and write coverage/index.html
+	@echo "Running unit suite under kcov..."
+	@mkdir -p $(COVERAGE_DIR)
+	@docker run --rm -v "$$PWD/$(COVERAGE_DIR):/out" $(DOCKER_IMAGE) coverage
+	@echo "Coverage report: $(COVERAGE_DIR)/index.html"
 
 #------------------------------------------------------------------------------
 # Quality

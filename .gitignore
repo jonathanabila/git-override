@@ -2,6 +2,9 @@
 tests/test-repo/
 tests/test-config/
 
+# Coverage report (opt-in `make coverage` diagnostic)
+coverage/
+
 # Local override files (practice what we preach!)
 *.local.*
 *.local
