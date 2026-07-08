@@ -1347,6 +1347,67 @@ test_stash_with_overridden_file() {
     git checkout HEAD -- README.md 2>/dev/null || true
 }
 
+test_cherry_pick_with_overridden_file() {
+    info "Testing git cherry-pick with overridden file..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    if git show-ref --verify --quiet "refs/heads/cherry-pick-source"; then
+        git branch -D cherry-pick-source 2>/dev/null || true
+    fi
+
+    # Build a source commit on a separate branch that touches an unrelated
+    # tracked file. The managed target keeps its original tracked content in
+    # this commit's tree, so a correct cherry-pick must not capture the
+    # working-tree override into the target's committed content.
+    git checkout -q -b cherry-pick-source
+    echo "# Cherry-pick payload" > cherry-file.txt
+    git add cherry-file.txt
+    git commit -q -m "Commit to cherry-pick"
+
+    local source_commit
+    source_commit=$(git rev-parse HEAD)
+
+    git checkout -q "$default_branch"
+
+    # Model the real state at cherry-pick time: the override is applied in the
+    # working tree.
+    cp CLAUDE.local.md CLAUDE.md
+
+    if ! git cherry-pick "$source_commit" 2>/dev/null; then
+        info "Cherry-pick had conflicts, aborting"
+        git cherry-pick --abort 2>/dev/null || true
+        fail "git cherry-pick failed"
+        return 1
+    fi
+
+    # (a) The cherry-picked commit must carry the tracked content for the
+    # managed target, not the override.
+    local committed_content
+    committed_content=$(git show HEAD:CLAUDE.md)
+    if echo "$committed_content" | grep -q "Original CLAUDE.md content"; then
+        pass "Cherry-picked commit contains original tracked content"
+    else
+        fail "Cherry-picked commit leaked override content"
+        echo "Committed content: $committed_content"
+        return 1
+    fi
+
+    # (b) The working tree still shows the override afterward.
+    if grep -q "MY LOCAL CLAUDE.md" CLAUDE.md; then
+        pass "Local override preserved after cherry-pick"
+    else
+        fail "Local override lost after cherry-pick"
+        cat CLAUDE.md
+        return 1
+    fi
+
+    git checkout -q "$default_branch" 2>/dev/null || true
+}
+
 test_aborted_commit_recovers_override_on_checkout() {
     info "Testing aborted commit recovery re-applies override on next checkout..."
 
@@ -1766,6 +1827,78 @@ test_worktree_add_with_filters() {
     git branch -D "$worktree_branch" 2>/dev/null || true
 }
 
+test_special_character_filename_roundtrip() {
+    info "Testing add/apply/commit/post-commit roundtrip for special-character filename..."
+
+    cd "$TEST_DIR"
+
+    # A managed target whose name holds a space and a non-ASCII (UTF-8) byte.
+    # Reading staged paths NUL-delimited with core.quotePath=false is what lets
+    # pre-commit match this against the config target instead of a C-quoted
+    # string that would never match (leaking override content into the commit).
+    local target="my spécial file.md"
+    local override="my spécial file.local.md"
+    local original="# Original spécial content"
+    local local_content="# MY LOCAL spécial content"
+
+    # Create and commit the tracked target before it is managed, so the hooks
+    # ignore it and the canonical bytes land in HEAD.
+    printf '%s\n' "$original" > "$target"
+    git add -- "$target"
+    git commit -q -m "Add special-character target"
+
+    # Register the target in the recursive config, then commit the config.
+    cat >> .local-overrides.yaml << 'EOF'
+  - override: "my spécial file.local.md"
+    replaces:
+      - "my spécial file.md"
+EOF
+    git add -- .local-overrides.yaml
+    git commit -q -m "Manage special-character target"
+
+    # add: create the local override file.
+    printf '%s\n' "$local_content" > "$override"
+
+    # apply: sync filters for the new target and write the override into the
+    # working tree.
+    git-local-override sync-filters >/dev/null 2>&1 || true
+    git-local-override apply >/dev/null 2>&1 || true
+
+    if grep -q "MY LOCAL spécial content" "$target"; then
+        pass "Override applied to special-character target's working tree"
+    else
+        fail "Override not applied to special-character target"
+        cat "$target"
+        return 1
+    fi
+
+    # commit: stage the override content directly (bypassing the clean filter),
+    # then commit so pre-commit must restore the tracked bytes for a target
+    # whose name carries a space and a non-ASCII byte.
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add -- "$target"
+    git commit -q -m "Touch special-character target"
+
+    # The committed content must be the tracked original, not the override.
+    local committed_content
+    committed_content=$(git show "HEAD:$target")
+    if echo "$committed_content" | grep -q "Original spécial content"; then
+        pass "Commit contains original content for special-character target"
+    else
+        fail "Commit leaked override content for special-character target"
+        echo "Committed content: $committed_content"
+        return 1
+    fi
+
+    # post-commit must re-apply the override to the working tree.
+    if grep -q "MY LOCAL spécial content" "$target"; then
+        pass "Override restored after commit for special-character target"
+    else
+        fail "Override not restored after commit for special-character target"
+        cat "$target"
+        return 1
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
@@ -1805,6 +1938,8 @@ main() {
         test_merge_with_overridden_file \
         test_rebase_with_overridden_file \
         test_stash_with_overridden_file \
+        test_cherry_pick_with_overridden_file \
+        test_special_character_filename_roundtrip \
         test_aborted_commit_recovers_override_on_checkout \
         test_precommit_during_rebase_is_noop \
         test_commit_still_contains_original \

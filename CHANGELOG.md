@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linked worktree support**: worktrees without their own `.local-overrides.yaml` now resolve configs and override files against the main worktree (worktree-local config wins; disable with `GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1`)
 - **`apply --all-worktrees`**: refresh materialized overrides in the main checkout and every linked worktree in one command
 - **Filter roundtrip content coverage**: roundtrip tests now cover binary (NUL bytes), CRLF, empty, no-trailing-newline, and multiple-trailing-newline content on both the tracked blob and override sides, via file-based `cmp` comparison (command substitution strips trailing newlines and cannot carry NUL bytes, so the previous string-based test could not catch these corruptions)
+- **Cherry-pick and special-character filename test coverage**: added integration tests for `git cherry-pick` with an overridden file (asserting the cherry-picked commit carries the tracked content while the working tree keeps the override) and for the full add/apply/commit/post-commit roundtrip of a managed target whose name contains a space and a non-ASCII byte
 
 ### Fixed
 
