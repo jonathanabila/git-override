@@ -340,7 +340,7 @@ Filter drivers make git consider overridden files "clean" through a roundtrip pr
 
 Filter drivers are configured automatically during installation in `.git/info/attributes` (local-only, not tracked in `.gitattributes`).
 
-Reinstalling with `install.sh --repo` and running `git-local-override sync-filters` both auto-heal legacy `skip-worktree` bits that may still exist from older installs. Runtime hooks also self-heal this old repo state; when they repair anything, they emit one terse notice to stderr and stay silent otherwise.
+Reinstalling with `install.sh --repo` and running `git-local-override sync-filters` both auto-heal legacy `skip-worktree` bits that may still exist from older installs. The runtime `post-checkout` and `pre-commit` hooks also self-heal this old repo state, but only once per worktree: after the first checkout/commit repairs (or `sync-filters` runs), a per-worktree marker suppresses the repeated check so the hot path stays fast. If a stray `skip-worktree` bit appears afterward, run `git-local-override sync-filters` (or a `git rebase`, whose `pre-rebase` hook is not gated) to clear it. When a hook repairs anything it emits one terse notice to stderr and stays silent otherwise.
 
 ### Linked worktrees
 
@@ -716,7 +716,7 @@ Re-running `install.sh` is the supported upgrade path and is safe:
 
 If you prefer the CLI upgrade path, `git-local-override sync-filters` performs the same legacy `skip-worktree` cleanup for configured managed files.
 
-Runtime hooks also repair this older repo state automatically. When a repair happens during `git checkout`, `git commit`, or `git rebase`, the hook prints a terse `git-local-override: cleared legacy skip-worktree ...` notice to stderr; if nothing needed repair, nothing is printed.
+Runtime hooks also repair this older repo state automatically. The `post-checkout` and `pre-commit` hooks do so only the first time per worktree: once a repair has run (or `sync-filters` has been invoked), a per-worktree marker suppresses the repeated check so the checkout/commit hot path stays fast. The `pre-rebase` hook is not gated (rebase is rare and must clear the bits to proceed), so it always repairs. When a repair happens during `git checkout`, `git commit`, or `git rebase`, the hook prints a terse `git-local-override: cleared legacy skip-worktree ...` notice to stderr; if nothing needed repair, nothing is printed. A stray `skip-worktree` bit that appears after the first checkout/commit repair is cleared by running `git-local-override sync-filters` or `git rebase`.
 
 If reinstall reports a warning like `Ambiguous state for pre-commit: unmanaged hook with existing pre-commit.chained; preserving both`, it means the installer found a user-managed hook at the canonical path and also found an older chained backup. This warning is intentionally conservative.
 
