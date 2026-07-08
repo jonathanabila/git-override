@@ -154,6 +154,16 @@ get_index_flag() {
     printf '%s\n' "${ls_output:0:1}"
 }
 
+# Path of the per-worktree one-shot repair marker for the current checkout
+# (mirrors skip_worktree_repair_marker in the lib/CLI).
+skip_worktree_marker_path() {
+    local git_dir=""
+
+    git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null || echo "")"
+    [[ -n "$git_dir" ]] || return 1
+    printf '%s\n' "$git_dir/local-override-skipworktree-repaired"
+}
+
 setup_legacy_skip_worktree_state() {
     local target="${1:-CLAUDE.md}"
     local override_file="${2:-CLAUDE.local.md}"
@@ -498,9 +508,14 @@ test_sync_filters_self_heals_legacy_skip_worktree() {
 }
 
 test_post_checkout_self_heals_legacy_skip_worktree() {
-    info "Testing post-checkout self-heals legacy skip-worktree state..."
+    info "Testing post-checkout self-heals legacy skip-worktree on first run..."
 
     cd "$TEST_DIR"
+
+    # Model a genuine hooks-only legacy upgrade: no repair marker yet, so the
+    # first hot-path checkout must still self-heal. setup's sync-filters writes the
+    # marker, so remove it to simulate a repo that never ran the new sync-filters.
+    rm -f "$(skip_worktree_marker_path)"
 
     if ! setup_legacy_skip_worktree_state "CLAUDE.md"; then
         return 1
@@ -538,6 +553,92 @@ test_post_checkout_self_heals_legacy_skip_worktree() {
         pass "post-checkout preserved local override content"
     else
         fail "post-checkout did not preserve local override content"
+        return 1
+    fi
+
+    # The first heal writes the marker so later hot-path runs short-circuit.
+    if [[ -f "$(skip_worktree_marker_path)" ]]; then
+        pass "post-checkout wrote the repair marker after healing"
+    else
+        fail "post-checkout did not write the repair marker after healing"
+        return 1
+    fi
+
+    assert_reset_hard_succeeds
+}
+
+test_hot_path_skips_repeated_skip_worktree_repair() {
+    info "Testing hot path skips repeated skip-worktree repair once marked..."
+
+    cd "$TEST_DIR"
+
+    # setup_repo's sync-filters already wrote the repair marker, modeling a repo
+    # that has already been migrated.
+    local marker
+    marker="$(skip_worktree_marker_path)"
+    if [[ -f "$marker" ]]; then
+        pass "Repair marker present after setup sync-filters"
+    else
+        fail "Expected repair marker after setup sync-filters"
+        return 1
+    fi
+
+    if ! setup_legacy_skip_worktree_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    if ! assert_legacy_hidden_mismatch_state "CLAUDE.md"; then
+        return 1
+    fi
+
+    # Hot path (branch checkout) must NOT clear the bit: the gate short-circuits.
+    local checkout_output
+    local checkout_status
+    set +e
+    checkout_output="$(git checkout -q -b gate-shortcircuit-branch 2>&1)"
+    checkout_status=$?
+    set -e
+
+    if [[ $checkout_status -ne 0 ]]; then
+        fail "git checkout failed during gate short-circuit test: $checkout_output"
+        return 1
+    fi
+
+    if [[ "$(get_index_flag "CLAUDE.md")" == "S" ]]; then
+        pass "Hot path left skip-worktree bit untouched (gate short-circuited)"
+    else
+        fail "Hot path cleared skip-worktree bit despite repair marker"
+        return 1
+    fi
+
+    if grep -q "git-local-override: cleared legacy skip-worktree" <<< "$checkout_output"; then
+        fail "Hot path emitted repair notice despite repair marker"
+        printf '%s\n' "$checkout_output"
+        return 1
+    else
+        pass "Hot path emitted no repair notice (gate short-circuited)"
+    fi
+
+    # Escape hatch: sync-filters runs the ungated repair even with the marker set.
+    local sync_output
+    set +e
+    sync_output="$(git-local-override sync-filters 2>&1)"
+    local sync_status=$?
+    set -e
+    if [[ $sync_status -ne 0 ]]; then
+        fail "sync-filters failed during escape-hatch test: $sync_output"
+        return 1
+    fi
+
+    if ! assert_skip_worktree_cleared "CLAUDE.md"; then
+        return 1
+    fi
+
+    if grep -q "Cleared legacy skip-worktree on 1 managed file(s)" <<< "$sync_output"; then
+        pass "sync-filters cleared the bit via the escape hatch"
+    else
+        fail "sync-filters did not report clearing the bit"
+        printf '%s\n' "$sync_output"
         return 1
     fi
 
@@ -1923,6 +2024,7 @@ main() {
         test_install_self_heals_legacy_skip_worktree \
         test_sync_filters_self_heals_legacy_skip_worktree \
         test_post_checkout_self_heals_legacy_skip_worktree \
+        test_hot_path_skips_repeated_skip_worktree_repair \
         test_rebase_succeeds_when_override_file_removed_before_rebase \
         test_rebase_succeeds_with_override_file_present \
         test_rebase_with_divergent_overridden_file \
