@@ -104,7 +104,7 @@ $config_entry"
     [[ -n "$relevant_entries" ]] || return 0
 
     local repaired_count
-    repaired_count="$(clear_legacy_skip_worktree "$repo_root" "$relevant_entries")"
+    repaired_count="$(clear_legacy_skip_worktree_once "$repo_root" "$relevant_entries")"
     if [[ "$repaired_count" -gt 0 ]]; then
         printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
     fi

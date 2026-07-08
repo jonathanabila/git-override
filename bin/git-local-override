@@ -336,6 +336,21 @@ $target"
     printf '%s\n' "$repaired_count"
 }
 
+# Per-worktree marker recording that the one-time legacy skip-worktree repair has
+# run. Mirrors hooks/local-override-lib.sh:skip_worktree_repair_marker so the hot
+# path (which gates on this marker) treats a sync-filters run as an authoritative
+# repair. skip-worktree is per-worktree index state, so key on the per-worktree
+# absolute git dir, not the shared common dir.
+skip_worktree_repair_marker() {
+    local repo_root="$1"
+    local worktree_git_dir=""
+
+    worktree_git_dir="$(git -C "$repo_root" rev-parse --absolute-git-dir 2>/dev/null || echo "")"
+    [[ -n "$worktree_git_dir" ]] || return 1
+
+    printf '%s\n' "$worktree_git_dir/local-override-skipworktree-repaired"
+}
+
 #------------------------------------------------------------------------------
 # Commands
 #------------------------------------------------------------------------------
@@ -1106,6 +1121,13 @@ cmd_sync_filters() {
     if [[ "$repaired_count" -gt 0 ]]; then
         info "Cleared legacy skip-worktree on $repaired_count managed file(s)"
     fi
+
+    # Record that the one-time repair has run so the hot-path hooks skip it. This
+    # is the escape hatch: sync-filters always runs the ungated repair above, then
+    # (re)writes the marker.
+    local repair_marker
+    repair_marker="$(skip_worktree_repair_marker "$checkout_root" 2>/dev/null || true)"
+    [[ -n "$repair_marker" ]] && : > "$repair_marker"
 
     # Count filtered files
     local attributes_file

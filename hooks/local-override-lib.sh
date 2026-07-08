@@ -384,6 +384,44 @@ $target"
     printf '%s\n' "$repaired_count"
 }
 
+# Per-worktree marker recording that the one-time legacy skip-worktree repair has
+# already run. skip-worktree is per-worktree index state, so the marker is keyed
+# to the per-worktree absolute git dir (like get_post_commit_state_file), not the
+# shared common dir — each worktree migrates its own index once.
+skip_worktree_repair_marker() {
+    local repo_root="$1"
+    local worktree_git_dir=""
+
+    worktree_git_dir="$(git -C "$repo_root" rev-parse --absolute-git-dir 2>/dev/null || echo "")"
+    [[ -n "$worktree_git_dir" ]] || return 1
+
+    printf '%s\n' "$worktree_git_dir/local-override-skipworktree-repaired"
+}
+
+# One-shot gated form of clear_legacy_skip_worktree for the hot paths
+# (post-checkout, pre-commit, pre-rebase). Once the per-worktree marker exists the
+# repair is skipped, so the two git subprocesses per managed target are only paid
+# once per worktree instead of on every checkout/commit. install/sync-filters call
+# the ungated clear_legacy_skip_worktree directly and remain the escape hatch for
+# stray legacy bits. Prints the repaired count (0 when short-circuited) to match
+# the count contract callers expect.
+clear_legacy_skip_worktree_once() {
+    local repo_root="$1"
+    local config_entries="${2:-}"
+    local marker=""
+    local repaired=""
+
+    marker="$(skip_worktree_repair_marker "$repo_root" 2>/dev/null || true)"
+    if [[ -n "$marker" && -f "$marker" ]]; then
+        printf '0\n'
+        return 0
+    fi
+
+    repaired="$(clear_legacy_skip_worktree "$repo_root" "$config_entries")"
+    [[ -n "$marker" ]] && : > "$marker"
+    printf '%s\n' "$repaired"
+}
+
 get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null
 }

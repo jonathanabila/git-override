@@ -36,6 +36,10 @@ main() {
     local config_entries
     config_entries="$(read_config "$resolution_root")"
 
+    # Rebase is a rare path, so it keeps the ungated repair: it always self-heals
+    # legacy skip-worktree bits (and clearing them is required to let the rebase's
+    # internal checkouts/detach succeed). The one-shot marker gate is applied only
+    # to the truly-hot post-checkout and pre-commit paths.
     local repaired_count
     repaired_count="$(clear_legacy_skip_worktree "$repo_root" "$config_entries")"
     if [[ "$repaired_count" -gt 0 ]]; then
