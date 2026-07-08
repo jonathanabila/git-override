@@ -12,76 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=local-override-lib.sh
 source "$SCRIPT_DIR/local-override-lib.sh"
 
+# Thin wrapper: the clean logic (including trace instrumentation) lives in
+# run_local_override_clean (shared with the CLI `git-local-override
+# filter-clean` subcommand), defined in the resolver sourced via
+# local-override-lib.sh.
 main() {
-    local file_path="${1:-}"
-    local stdin_tmp=""
-    local override_file=""
-    local compare_matched="no"
-    local trace_on=false
-    local total_start_ms=0
-    local phase_start_ms=0
-    local resolve_override_ms=0
-    local git_show_ms=0
-
-    if local_override_trace_enabled; then
-        trace_on=true
-        total_start_ms="$(local_override_now_milliseconds)"
-    fi
-
-    stdin_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-clean.XXXXXX")"
-    cat > "$stdin_tmp"
-
-    if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
-        cat "$stdin_tmp"
-        rm -f "$stdin_tmp"
-        return 0
-    fi
-
-    local repo_root
-    repo_root="$(get_repo_root)" || {
-        cat "$stdin_tmp"
-        rm -f "$stdin_tmp"
-        return 0
-    }
-
-    override_file="$(get_override_for_file "$repo_root" "$file_path")"
-    if [[ "$trace_on" == true ]]; then
-        resolve_override_ms="$(local_override_elapsed_milliseconds "$total_start_ms")"
-    fi
-
-    if [[ -n "$override_file" && -f "$override_file" ]] \
-       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
-        # Only transform when incoming content is exactly the local override.
-        # If caller already provided original/tracked content (e.g., pre-commit
-        # restored file), passthrough avoids clobbering intended staged content.
-        if cmp -s "$stdin_tmp" "$override_file"; then
-            compare_matched="yes"
-            if [[ "$trace_on" == true ]]; then
-                phase_start_ms="$(local_override_now_milliseconds)"
-            fi
-            # Single `git show` captured to a temp file (not `$(...)`, which
-            # strips trailing newlines and would break byte-exact roundtrip).
-            local index_tmp
-            index_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-index.XXXXXX")"
-            if git -C "$repo_root" show ":$file_path" > "$index_tmp" 2>/dev/null; then
-                cat "$index_tmp"
-                if [[ "$trace_on" == true ]]; then
-                    git_show_ms="$(local_override_elapsed_milliseconds "$phase_start_ms")"
-                    local_override_trace_log "clean" "file=$file_path override=$override_file matched=$compare_matched transformed=1 resolve_override=${resolve_override_ms}ms git_show=${git_show_ms}ms total=$(local_override_elapsed_milliseconds "$total_start_ms")ms"
-                fi
-                rm -f "$index_tmp" "$stdin_tmp"
-                return 0
-            fi
-            rm -f "$index_tmp"
-        fi
-    fi
-
-    if [[ "$trace_on" == true ]]; then
-        local_override_trace_log "clean" "file=$file_path override=${override_file:-none} matched=$compare_matched transformed=0 resolve_override=${resolve_override_ms}ms total=$(local_override_elapsed_milliseconds "$total_start_ms")ms"
-    fi
-
-    cat "$stdin_tmp"
-    rm -f "$stdin_tmp"
+    run_local_override_clean "$@"
 }
 
 main "$@"

@@ -12,41 +12,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=local-override-lib.sh
 source "$SCRIPT_DIR/local-override-lib.sh"
 
-run_smudge_filter() {
-    local file_path="${1:-}"
-
-    if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
-        cat
-        return 0
-    fi
-
-    local repo_root
-    repo_root="$(get_repo_root)" || {
-        cat
-        return 0
-    }
-
-    # During rebase, always passthrough tracked blob content
-    if is_rebase_in_progress "$repo_root"; then
-        cat
-        return 0
-    fi
-
-    local override_file
-    override_file="$(get_override_for_file "$repo_root" "$file_path")"
-
-    # A symlinked override would leak outside-repo content into the tree; fall
-    # through to plain passthrough instead of emitting the link target.
-    if [[ -n "$override_file" && -f "$override_file" ]] \
-       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
-        cat > /dev/null
-        cat "$override_file"
-        return 0
-    fi
-
-    cat
-}
-
+# Thin wrapper: the smudge logic lives in run_local_override_smudge (shared
+# with the CLI `git-local-override filter-smudge` subcommand), defined in the
+# resolver sourced via local-override-lib.sh. This wrapper only adds the
+# lifecycle trace logging git-invoked hooks emit.
 main() {
     local file_path="${1:-}"
     local operation_name="filter-smudge"
@@ -55,7 +24,7 @@ main() {
         operation_name="$operation_name $file_path"
     fi
 
-    run_with_trace_logging "$operation_name" run_smudge_filter "$@"
+    run_with_trace_logging "$operation_name" run_local_override_smudge "$@"
 }
 
 main "$@"

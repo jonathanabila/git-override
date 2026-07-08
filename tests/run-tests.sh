@@ -2180,6 +2180,84 @@ EOF
         rt-multi-newline.txt rt-multi-newline.local.txt "$originals_dir/multi-newline"
 }
 
+test_filter_cli_matches_hook() {
+    # Anti-drift guard: the CLI subcommands (git-local-override filter-smudge/
+    # filter-clean) and the git-invoked hook scripts share one implementation
+    # in the resolver, so they MUST produce byte-identical stdout for the same
+    # input. Compare with file-based cmp (never $(...), which strips trailing
+    # newlines / NUL and would hide a real byte-level divergence).
+    info "Testing CLI filter subcommands match hook scripts byte-for-byte..."
+    cd "$TEST_REPO"
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    if [[ ! -f "$smudge_script" || ! -f "$clean_script" ]]; then
+        fail "Filter scripts not found"
+        return
+    fi
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: cli-hook.local.md
+    replaces:
+      - cli-hook.md
+EOF
+
+    printf '# tracked cli-hook content\nsecond line\n' > cli-hook.md
+    git add .local-overrides.yaml cli-hook.md
+    git commit -q -m "Add cli-hook parity target"
+
+    printf '# LOCAL cli-hook override\nno trailing newline' > cli-hook.local.md
+
+    local input_override="$TEST_ARTIFACTS_DIR/cli-hook-input-override"
+    local input_other="$TEST_ARTIFACTS_DIR/cli-hook-input-other"
+    cp cli-hook.local.md "$input_override"
+    printf 'unrelated working-tree bytes\0with NUL' > "$input_other"
+
+    local cli_out="$TEST_ARTIFACTS_DIR/cli-hook-cli.out"
+    local hook_out="$TEST_ARTIFACTS_DIR/cli-hook-hook.out"
+    local mismatch=0
+
+    # Smudge: override active (substitutes) and no-override case (passthrough).
+    git-local-override filter-smudge cli-hook.md < cli-hook.md > "$cli_out"
+    "$smudge_script" cli-hook.md < cli-hook.md > "$hook_out"
+    if ! cmp -s "$cli_out" "$hook_out"; then
+        fail "smudge (override active) diverged ($(cmp "$cli_out" "$hook_out" 2>&1 || true))"
+        mismatch=1
+    fi
+
+    git-local-override filter-smudge unmanaged.md < cli-hook.md > "$cli_out"
+    "$smudge_script" unmanaged.md < cli-hook.md > "$hook_out"
+    if ! cmp -s "$cli_out" "$hook_out"; then
+        fail "smudge (passthrough) diverged ($(cmp "$cli_out" "$hook_out" 2>&1 || true))"
+        mismatch=1
+    fi
+
+    # Clean: input equals override (substitutes index) and non-matching input
+    # (passthrough).
+    git-local-override filter-clean cli-hook.md < "$input_override" > "$cli_out"
+    "$clean_script" cli-hook.md < "$input_override" > "$hook_out"
+    if ! cmp -s "$cli_out" "$hook_out"; then
+        fail "clean (substitute) diverged ($(cmp "$cli_out" "$hook_out" 2>&1 || true))"
+        mismatch=1
+    fi
+
+    git-local-override filter-clean cli-hook.md < "$input_other" > "$cli_out"
+    "$clean_script" cli-hook.md < "$input_other" > "$hook_out"
+    if ! cmp -s "$cli_out" "$hook_out"; then
+        fail "clean (passthrough) diverged ($(cmp "$cli_out" "$hook_out" 2>&1 || true))"
+        mismatch=1
+    fi
+
+    if [[ "$mismatch" -eq 0 ]]; then
+        pass "CLI filter subcommands match hook scripts byte-for-byte"
+    fi
+
+    rm -f "$input_override" "$input_other" "$cli_out" "$hook_out" cli-hook.local.md
+}
+
 test_filter_disable_env_var() {
     info "Testing filters passthrough when GIT_LOCAL_OVERRIDE_DISABLE=1..."
     cd "$TEST_REPO"
@@ -2516,6 +2594,7 @@ main() {
         test_filter_clean_passthrough \
         test_filter_roundtrip \
         test_filter_roundtrip_content_variants \
+        test_filter_cli_matches_hook \
         test_filter_disable_env_var \
         test_filter_no_head_passthrough \
         test_filter_non_configured_file_passthrough \

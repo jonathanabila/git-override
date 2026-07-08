@@ -925,3 +925,154 @@ is_rebase_in_progress() {
 
     return 1
 }
+
+# ---------------------------------------------------------------------------
+# Smudge/clean filter cores.
+#
+# These are the single, canonical implementation of the git smudge/clean
+# filters. They are shared by BOTH entry points:
+#   - the git-invoked hook scripts hooks/local-override-filter-{smudge,clean}
+#   - the CLI subcommands `git-local-override filter-{smudge,clean}`
+# Git actually runs the hooks, so the hook behavior is authoritative; routing
+# the CLI subcommands through the same core keeps them byte-identical on stdout
+# and prevents the two from silently drifting.
+#
+# INTENTIONAL ASYMMETRY (do not "fix"): the smudge core carries an
+# is_rebase_in_progress passthrough guard; the clean core deliberately has NO
+# rebase guard. During a rebase git checks out tracked blobs as part of its
+# internal machinery, and emitting the override there interferes with the
+# rebase (commit 75d4df6, "fix(rebase): prevent override interference during
+# rebase internals"). The clean path has no such hazard, so it keeps
+# transforming even mid-rebase. Keep this difference.
+#
+# BYTE-EXACTNESS: never capture filter output via $(...) — command
+# substitution strips trailing newlines and cannot carry NUL bytes, which
+# would break the clean(smudge(original)) == original roundtrip invariant. The
+# clean core captures stdin and `git show` output into temp files instead.
+# ---------------------------------------------------------------------------
+
+# Reads original blob content on stdin, writes smudged content to stdout.
+# $1 = file path (%f). Emits the local override content when a safe override
+# exists, otherwise passes the incoming blob through unchanged.
+run_local_override_smudge() {
+    local file_path="${1:-}"
+
+    if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
+        cat
+        return 0
+    fi
+
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+        cat
+        return 0
+    }
+    if [[ -z "$repo_root" ]]; then
+        cat
+        return 0
+    fi
+
+    # During rebase, always passthrough tracked blob content (see 75d4df6).
+    if is_rebase_in_progress "$repo_root"; then
+        cat
+        return 0
+    fi
+
+    local override_file
+    override_file="$(get_override_for_file "$repo_root" "$file_path")"
+
+    # A symlinked override would leak outside-repo content into the tree; fall
+    # through to plain passthrough instead of emitting the link target.
+    if [[ -n "$override_file" && -f "$override_file" ]] \
+       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
+        cat > /dev/null
+        cat "$override_file"
+        return 0
+    fi
+
+    cat
+}
+
+# Reads working-tree content on stdin, writes cleaned content to stdout.
+# $1 = file path (%f). When the incoming content is exactly the local override,
+# substitutes the original tracked content from the git index so git sees the
+# file as unmodified; otherwise passes the input through unchanged.
+#
+# NOTE: no is_rebase_in_progress guard here — this is deliberate; see the
+# "INTENTIONAL ASYMMETRY" note above (commit 75d4df6).
+run_local_override_clean() {
+    local file_path="${1:-}"
+    local stdin_tmp=""
+    local override_file=""
+    local compare_matched="no"
+    local trace_on=false
+    local total_start_ms=0
+    local phase_start_ms=0
+    local resolve_override_ms=0
+    local git_show_ms=0
+
+    if local_override_trace_enabled; then
+        trace_on=true
+        total_start_ms="$(resolver_now_milliseconds)"
+    fi
+
+    stdin_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-clean.XXXXXX")"
+    cat > "$stdin_tmp"
+
+    if [[ "${GIT_LOCAL_OVERRIDE_DISABLE:-0}" == "1" ]]; then
+        cat "$stdin_tmp"
+        rm -f "$stdin_tmp"
+        return 0
+    fi
+
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+        cat "$stdin_tmp"
+        rm -f "$stdin_tmp"
+        return 0
+    }
+    if [[ -z "$repo_root" ]]; then
+        cat "$stdin_tmp"
+        rm -f "$stdin_tmp"
+        return 0
+    fi
+
+    override_file="$(get_override_for_file "$repo_root" "$file_path")"
+    if [[ "$trace_on" == true ]]; then
+        resolve_override_ms="$(resolver_elapsed_milliseconds "$total_start_ms")"
+    fi
+
+    if [[ -n "$override_file" && -f "$override_file" ]] \
+       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
+        # Only transform when incoming content is exactly the local override.
+        # If caller already provided original/tracked content (e.g., pre-commit
+        # restored file), passthrough avoids clobbering intended staged content.
+        if cmp -s "$stdin_tmp" "$override_file"; then
+            compare_matched="yes"
+            if [[ "$trace_on" == true ]]; then
+                phase_start_ms="$(resolver_now_milliseconds)"
+            fi
+            # Single `git show` captured to a temp file (not `$(...)`, which
+            # strips trailing newlines and would break byte-exact roundtrip).
+            local index_tmp
+            index_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-index.XXXXXX")"
+            if git -C "$repo_root" show ":$file_path" > "$index_tmp" 2>/dev/null; then
+                cat "$index_tmp"
+                if [[ "$trace_on" == true ]]; then
+                    git_show_ms="$(resolver_elapsed_milliseconds "$phase_start_ms")"
+                    local_override_trace_log "clean" "file=$file_path override=$override_file matched=$compare_matched transformed=1 resolve_override=${resolve_override_ms}ms git_show=${git_show_ms}ms total=$(resolver_elapsed_milliseconds "$total_start_ms")ms"
+                fi
+                rm -f "$index_tmp" "$stdin_tmp"
+                return 0
+            fi
+            rm -f "$index_tmp"
+        fi
+    fi
+
+    if [[ "$trace_on" == true ]]; then
+        local_override_trace_log "clean" "file=$file_path override=${override_file:-none} matched=$compare_matched transformed=0 resolve_override=${resolve_override_ms}ms total=$(resolver_elapsed_milliseconds "$total_start_ms")ms"
+    fi
+
+    cat "$stdin_tmp"
+    rm -f "$stdin_tmp"
+}
