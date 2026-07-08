@@ -358,7 +358,7 @@ discover_config_files() {
             fi
         fi
 
-        if echo "$seen" | grep -qxF "$path"; then
+        if [[ $'\n'"$seen"$'\n' == *$'\n'"$path"$'\n'* ]]; then
             continue
         fi
 
@@ -640,7 +640,7 @@ validate_config() {
                 return 1
             fi
 
-            if echo "$seen_targets" | grep -qxF "$target"; then
+            if [[ $'\n'"$seen_targets"$'\n' == *$'\n'"$target"$'\n'* ]]; then
                 echo "Error: Duplicate target file '$target' across recursive configs" >&2
                 echo "  Each file can only appear in one effective 'replaces:' list" >&2
                 return 1
@@ -689,7 +689,7 @@ read_config() {
                 continue
             fi
 
-            if echo "$seen_targets" | grep -qxF "$target"; then
+            if [[ $'\n'"$seen_targets"$'\n' == *$'\n'"$target"$'\n'* ]]; then
                 ((duplicate_skip_count++)) || true
                 continue
             fi
@@ -787,7 +787,7 @@ get_override_files() {
         override="${entry#*|}"
         [[ -z "$override" ]] && continue
 
-        if ! echo "$seen" | grep -qxF "$override"; then
+        if ! [[ $'\n'"$seen"$'\n' == *$'\n'"$override"$'\n'* ]]; then
             printf '%s\n' "$override"
             seen="$seen
 $override"

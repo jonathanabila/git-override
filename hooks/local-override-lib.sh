@@ -130,7 +130,7 @@ read_managed_targets_from_attributes() {
         target="${line%% filter=local-override*}"
         [[ -n "$target" ]] || return 1
 
-        if printf '%s\n' "$seen_targets" | grep -qxF "$target"; then
+        if [[ $'\n'"$seen_targets"$'\n' == *$'\n'"$target"$'\n'* ]]; then
             continue
         fi
 
@@ -154,7 +154,7 @@ read_config_entries_from_attributes() {
         [[ -n "$override" ]] || return 1
 
         entry="$target|$override"
-        if printf '%s\n' "$seen_entries" | grep -qxF "$entry"; then
+        if [[ $'\n'"$seen_entries"$'\n' == *$'\n'"$entry"$'\n'* ]]; then
             continue
         fi
 
@@ -198,7 +198,7 @@ sync_attributes_entries() {
         target="${entry%%|*}"
         [[ -n "$target" ]] || continue
 
-        if printf '%s\n' "$seen_targets" | grep -qxF "$target"; then
+        if [[ $'\n'"$seen_targets"$'\n' == *$'\n'"$target"$'\n'* ]]; then
             continue
         fi
 
@@ -362,7 +362,7 @@ clear_legacy_skip_worktree() {
         target="${entry%%|*}"
         [[ -n "$target" ]] || continue
 
-        if echo "$seen_targets" | grep -qxF "$target"; then
+        if [[ $'\n'"$seen_targets"$'\n' == *$'\n'"$target"$'\n'* ]]; then
             continue
         fi
         seen_targets="$seen_targets

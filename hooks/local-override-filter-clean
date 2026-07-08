@@ -56,18 +56,23 @@ main() {
         # restored file), passthrough avoids clobbering intended staged content.
         if cmp -s "$stdin_tmp" "$override_file"; then
             compare_matched="yes"
-            if git -C "$repo_root" show ":$file_path" >/dev/null 2>&1; then
-                if [[ "$trace_on" == true ]]; then
-                    phase_start_ms="$(local_override_now_milliseconds)"
-                fi
-                git -C "$repo_root" show ":$file_path" 2>/dev/null || cat "$stdin_tmp"
+            if [[ "$trace_on" == true ]]; then
+                phase_start_ms="$(local_override_now_milliseconds)"
+            fi
+            # Single `git show` captured to a temp file (not `$(...)`, which
+            # strips trailing newlines and would break byte-exact roundtrip).
+            local index_tmp
+            index_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-index.XXXXXX")"
+            if git -C "$repo_root" show ":$file_path" > "$index_tmp" 2>/dev/null; then
+                cat "$index_tmp"
                 if [[ "$trace_on" == true ]]; then
                     git_show_ms="$(local_override_elapsed_milliseconds "$phase_start_ms")"
                     local_override_trace_log "clean" "file=$file_path override=$override_file matched=$compare_matched transformed=1 resolve_override=${resolve_override_ms}ms git_show=${git_show_ms}ms total=$(local_override_elapsed_milliseconds "$total_start_ms")ms"
                 fi
-                rm -f "$stdin_tmp"
+                rm -f "$index_tmp" "$stdin_tmp"
                 return 0
             fi
+            rm -f "$index_tmp"
         fi
     fi
 

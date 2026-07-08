@@ -314,7 +314,7 @@ clear_legacy_skip_worktree() {
         target="${entry%%|*}"
         [[ -n "$target" ]] || continue
 
-        if echo "$seen_targets" | grep -qxF "$target"; then
+        if [[ $'\n'"$seen_targets"$'\n' == *$'\n'"$target"$'\n'* ]]; then
             continue
         fi
         seen_targets="$seen_targets
@@ -634,7 +634,7 @@ sync_attributes() {
             [[ -z "$target" ]] && continue
 
             # Skip duplicates
-            if echo "$seen_targets" | grep -qxF "$target"; then
+            if [[ $'\n'"$seen_targets"$'\n' == *$'\n'"$target"$'\n'* ]]; then
                 continue
             fi
             seen_targets="$seen_targets
@@ -1184,11 +1184,16 @@ cmd_filter_clean() {
         # If caller already provided original/tracked content (e.g., pre-commit
         # restored file), passthrough avoids clobbering intended staged content.
         if cmp -s "$stdin_tmp" "$override_path"; then
-            if git -C "$checkout_root" show ":$file_path" >/dev/null 2>&1; then
-                git -C "$checkout_root" show ":$file_path" 2>/dev/null || cat "$stdin_tmp"
-                rm -f "$stdin_tmp"
+            # Single `git show` captured to a temp file (not `$(...)`, which
+            # strips trailing newlines and would break byte-exact roundtrip).
+            local index_tmp
+            index_tmp="$(mktemp "${TMPDIR:-/tmp}/local-override-index.XXXXXX")"
+            if git -C "$checkout_root" show ":$file_path" > "$index_tmp" 2>/dev/null; then
+                cat "$index_tmp"
+                rm -f "$index_tmp" "$stdin_tmp"
                 return 0
             fi
+            rm -f "$index_tmp"
         fi
     fi
 
