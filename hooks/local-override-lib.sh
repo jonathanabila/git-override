@@ -26,27 +26,6 @@ local_override_log() {
     printf 'git-local-override: %s\n' "$*" >&2
 }
 
-local_override_trace_enabled() {
-    [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
-}
-
-local_override_now_milliseconds() {
-    if command -v perl >/dev/null 2>&1; then
-        perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'
-        return 0
-    fi
-
-    printf '%s000\n' "$(date +%s)"
-}
-
-local_override_elapsed_milliseconds() {
-    local start_ms="$1"
-    local end_ms
-
-    end_ms="$(local_override_now_milliseconds)"
-    printf '%s\n' "$((end_ms - start_ms))"
-}
-
 local_override_trace_log() {
     if local_override_trace_enabled; then
         printf 'Trace[%s]: %s\n' "${1:-hook}" "${2:-}" >&2
