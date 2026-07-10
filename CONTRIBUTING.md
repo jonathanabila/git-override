@@ -184,6 +184,18 @@ test_your_feature() {
 
 Don't forget to add your test to the `main()` function.
 
+The assertion harness — `info`/`pass`/`fail`, the terminal colors, the
+`TESTS_RUN`/`TESTS_PASSED`/`TESTS_FAILED` counters, and the `finish_suite`
+summary/exit helper — lives once in `tests/test-lib.sh`. Any suite that sources
+`test-lib.sh` gets it for free; don't redefine these per file. Each suite's
+`main()` ends with `finish_suite`, which prints the summary and exits non-zero if
+any test failed. `info` starts a test, `fail` marks a failure, and every suite is
+green iff no test failed. In `tests/run-tests.sh`, `pass` is called exactly once
+per test, so it sets `STRICT_PASS_COUNT=1` to additionally require
+`TESTS_PASSED == TESTS_RUN` (a test that starts but never reaches a `pass()` fails
+the build); the integration suites call `pass` once per assertion and leave that
+flag off.
+
 ### Documentation
 
 - Update README.md for user-facing changes
