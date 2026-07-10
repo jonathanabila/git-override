@@ -63,34 +63,6 @@ run_with_trace_logging() {
     "$@"
 }
 
-get_common_git_dir() {
-    local repo_root="$1"
-    local common_git_dir=""
-
-    common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
-    [[ -n "$common_git_dir" ]] || return 1
-
-    if [[ "$common_git_dir" != /* ]]; then
-        common_git_dir="$repo_root/$common_git_dir"
-    fi
-
-    printf '%s\n' "$common_git_dir"
-}
-
-get_attributes_file_path() {
-    local repo_root="$1"
-    local attributes_path=""
-
-    attributes_path="$(git -C "$repo_root" rev-parse --git-path info/attributes 2>/dev/null || echo "")"
-    [[ -n "$attributes_path" ]] || return 1
-
-    if [[ "$attributes_path" != /* ]]; then
-        attributes_path="$repo_root/$attributes_path"
-    fi
-
-    printf '%s\n' "$attributes_path"
-}
-
 read_managed_targets_from_attributes() {
     local repo_root="$1"
     local attributes_file=""
@@ -399,8 +371,4 @@ clear_legacy_skip_worktree_once() {
     repaired="$(clear_legacy_skip_worktree "$repo_root" "$config_entries")"
     [[ -n "$marker" ]] && : > "$marker"
     printf '%s\n' "$repaired"
-}
-
-get_repo_root() {
-    git rev-parse --show-toplevel 2>/dev/null
 }

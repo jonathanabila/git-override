@@ -80,40 +80,6 @@ display_relative_path() {
     fi
 }
 
-# Get the root directory of the current git repository
-get_repo_root() {
-    git rev-parse --show-toplevel 2>/dev/null || die "Not in a git repository"
-}
-
-# Get git common directory as an absolute path
-get_common_git_dir() {
-    local repo_root="$1"
-    local common_git_dir
-
-    common_git_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
-    [[ -n "$common_git_dir" ]] || die "Unable to resolve git common directory"
-
-    if [[ "$common_git_dir" != /* ]]; then
-        common_git_dir="$repo_root/$common_git_dir"
-    fi
-
-    echo "$common_git_dir"
-}
-
-get_attributes_file_path() {
-    local repo_root="$1"
-    local attributes_path
-
-    attributes_path="$(git -C "$repo_root" rev-parse --git-path info/attributes 2>/dev/null || echo "")"
-    [[ -n "$attributes_path" ]] || die "Unable to resolve git attributes path"
-
-    if [[ "$attributes_path" != /* ]]; then
-        attributes_path="$repo_root/$attributes_path"
-    fi
-
-    echo "$attributes_path"
-}
-
 # Get the git hooks directory as an absolute path.
 # Uses `git rev-parse --git-path hooks` so linked worktrees resolve to the
 # shared hooks directory and core.hooksPath is honored, matching git's own
@@ -225,7 +191,7 @@ get_local_path() {
 normalize_path() {
     local path="$1"
     local repo_root
-    repo_root="$(get_repo_root)"
+    repo_root="$(get_repo_root)" || die "Not in a git repository"
 
     # If path is absolute, make it relative to repo root
     if [[ "$path" == /* ]]; then
@@ -329,7 +295,7 @@ cmd_add() {
     fi
 
     local repo_root
-    repo_root="$(get_repo_root)"
+    repo_root="$(get_repo_root)" || die "Not in a git repository"
     path="$(normalize_path "$path")"
 
     local full_path="$repo_root/$path"
@@ -440,7 +406,7 @@ cmd_remove() {
     fi
 
     local repo_root
-    repo_root="$(get_repo_root)"
+    repo_root="$(get_repo_root)" || die "Not in a git repository"
     path="$(normalize_path "$path")"
 
     # Intervening writes touch target/override files, never config files, so
@@ -482,7 +448,7 @@ cmd_remove() {
 cmd_list() {
     local checkout_root
     local repo_root
-    checkout_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
     cache_config_files "$repo_root"
@@ -571,7 +537,7 @@ sync_attributes() {
     sync_start_ms="$(resolver_now_milliseconds)"
 
     phase_start_ms="$(resolver_now_milliseconds)"
-    attributes_file="$(get_attributes_file_path "$repo_root")"
+    attributes_file="$(get_attributes_file_path "$repo_root")" || die "Unable to resolve git attributes path"
     temp_file="$(mktemp)"
     resolve_ms="$(resolver_elapsed_milliseconds "$phase_start_ms")"
 
@@ -657,7 +623,7 @@ $target"
 cmd_status() {
     local checkout_root
     local repo_root
-    checkout_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
     cache_config_files "$repo_root"
@@ -743,7 +709,7 @@ cmd_status() {
 
         # Check if .git/info/attributes exists and has entries
         local attributes_file
-        attributes_file="$(get_attributes_file_path "$checkout_root")"
+        attributes_file="$(get_attributes_file_path "$checkout_root")" || die "Unable to resolve git attributes path"
         if [[ -f "$attributes_file" ]]; then
             local filter_count
             # grep -c prints "0" and exits non-zero when there are no matches;
@@ -937,12 +903,14 @@ cmd_apply() {
     done
 
     if [[ "$all_worktrees" == false ]]; then
-        apply_to_checkout "$(get_repo_root)"
+        local single_root
+        single_root="$(get_repo_root)" || die "Not in a git repository"
+        apply_to_checkout "$single_root"
         return $?
     fi
 
     local start_root
-    start_root="$(get_repo_root)"
+    start_root="$(get_repo_root)" || die "Not in a git repository"
 
     local line=""
     local wt_root=""
@@ -986,7 +954,7 @@ cmd_apply() {
 cmd_restore() {
     local checkout_root
     local repo_root
-    checkout_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
     if ! has_any_config "$repo_root"; then
@@ -1036,7 +1004,7 @@ cmd_sync_filters() {
     local filter_smudge
     local filter_clean
 
-    checkout_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
     if ! has_any_config "$repo_root"; then
@@ -1055,7 +1023,7 @@ cmd_sync_filters() {
     info "Syncing filter driver configuration..."
 
     # Configure git filter if missing or legacy relative path
-    common_git_dir="$(get_common_git_dir "$checkout_root")"
+    common_git_dir="$(get_common_git_dir "$checkout_root")" || die "Unable to resolve git common directory"
     expected_smudge="$common_git_dir/hooks/local-override-filter-smudge %f"
     expected_clean="$common_git_dir/hooks/local-override-filter-clean %f"
 
@@ -1099,7 +1067,7 @@ cmd_sync_filters() {
     local attributes_file
     local filter_count=0
 
-    attributes_file="$(get_attributes_file_path "$checkout_root")"
+    attributes_file="$(get_attributes_file_path "$checkout_root")" || die "Unable to resolve git attributes path"
     if [[ -f "$attributes_file" ]]; then
         # grep -c prints "0" and exits non-zero on no matches; capture the
         # count but default to 0 on failure rather than `|| echo 0`, which
@@ -1127,7 +1095,7 @@ cmd_filter_clean() {
 
 cmd_init_config() {
     local repo_root
-    repo_root="$(get_repo_root)"
+    repo_root="$(get_repo_root)" || die "Not in a git repository"
 
     local config_file="$repo_root/$CONFIG_FILE_NAME"
 
@@ -1171,7 +1139,7 @@ EOF
 cmd__get_active_targets() {
     local checkout_root
     local repo_root
-    checkout_root="$(get_repo_root)"
+    checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
     cache_config_files "$repo_root"
