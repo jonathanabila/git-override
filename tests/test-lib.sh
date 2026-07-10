@@ -1,6 +1,80 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Unified assertion harness (shared by every suite)
+# ---------------------------------------------------------------------------
+# Counting model:
+#   info() starts a test      -> TESTS_RUN++
+#   pass() records a success  -> TESTS_PASSED++
+#   fail() records a failure  -> TESTS_FAILED++ and CURRENT_TEST_STATUS=1
+#
+# finish_suite() prints the summary and exits non-zero if any test failed.
+#
+# The unit suite (tests/run-tests.sh) calls pass() exactly once per test and
+# additionally enforces the stricter invariant TESTS_PASSED == TESTS_RUN, so a
+# test that starts (info) but never reaches a pass() is caught. It opts in via
+# STRICT_PASS_COUNT=1. The integration suites call pass() once per assertion
+# (many per test), so that invariant does not apply to them and stays off by
+# default; they are green iff TESTS_FAILED == 0, matching prior behavior.
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+TESTS_RUN=0
+TESTS_PASSED=0
+TESTS_FAILED=0
+# CURRENT_TEST_STATUS is read by each suite's per-test runner loop.
+# shellcheck disable=SC2034
+CURRENT_TEST_STATUS=0
+
+pass() {
+    echo -e "${GREEN}[PASS]${NC} $*"
+    ((TESTS_PASSED++)) || true
+}
+
+fail() {
+    echo -e "${RED}[FAIL]${NC} $*"
+    ((TESTS_FAILED++)) || true
+    # shellcheck disable=SC2034  # consumed by each suite's runner loop
+    CURRENT_TEST_STATUS=1
+}
+
+info() {
+    echo -e "${YELLOW}[TEST]${NC} $*"
+    ((TESTS_RUN++)) || true
+}
+
+# Print the final summary and exit non-zero if the suite failed.
+# Set STRICT_PASS_COUNT=1 to additionally require TESTS_PASSED == TESTS_RUN
+# (used by the unit suite, whose pass() is per-test rather than per-assertion).
+finish_suite() {
+    local ok=1
+
+    if [[ $TESTS_FAILED -ne 0 ]]; then
+        ok=0
+    fi
+    if [[ "${STRICT_PASS_COUNT:-0}" == "1" && $TESTS_PASSED -ne $TESTS_RUN ]]; then
+        ok=0
+    fi
+
+    echo ""
+    echo "========================================"
+    if [[ $ok -eq 1 ]]; then
+        echo -e "  ${GREEN}All $TESTS_RUN tests passed!${NC}"
+    elif [[ "${STRICT_PASS_COUNT:-0}" == "1" ]]; then
+        echo -e "  ${RED}$TESTS_PASSED/$TESTS_RUN tests passed${NC}"
+    else
+        echo -e "  ${RED}$TESTS_FAILED/$TESTS_RUN tests failed${NC}"
+    fi
+    echo "========================================"
+    echo ""
+
+    [[ $ok -eq 1 ]] || exit 1
+}
+
 test_lib_die() {
     echo "Error: $*" >&2
     return 1
