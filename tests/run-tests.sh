@@ -16,29 +16,11 @@ CURRENT_TEST_NAME=""
 CURRENT_TEST_STATUS=0
 export PATH="$PROJECT_DIR/bin:$PATH"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_PASSED=0
-
-pass() {
-    echo -e "${GREEN}[PASS]${NC} $*"
-    ((TESTS_PASSED++)) || true
-}
-
-fail() {
-    echo -e "${RED}[FAIL]${NC} $*"
-    CURRENT_TEST_STATUS=1
-}
-
-info() {
-    echo -e "${YELLOW}[TEST]${NC} $*"
-    ((TESTS_RUN++)) || true
-}
+# The assertion harness (colors, counters, pass/fail/info, finish_suite)
+# lives in test-lib.sh. This suite calls pass() once per test, so it opts
+# into the stricter TESTS_PASSED == TESTS_RUN invariant.
+# shellcheck disable=SC2034  # read by finish_suite in test-lib.sh
+STRICT_PASS_COUNT=1
 
 count_trace_matches() {
     local output="$1"
@@ -2617,19 +2599,7 @@ main() {
         finalize_current_test_root "$CURRENT_TEST_STATUS"
     done
 
-    echo ""
-    echo "========================================"
-    if [[ $TESTS_PASSED -eq $TESTS_RUN ]]; then
-        echo -e "  ${GREEN}All $TESTS_RUN tests passed!${NC}"
-    else
-        echo -e "  ${RED}$TESTS_PASSED/$TESTS_RUN tests passed${NC}"
-    fi
-    echo "========================================"
-    echo ""
-
-    if [[ $TESTS_PASSED -ne $TESTS_RUN ]]; then
-        exit 1
-    fi
+    finish_suite
 }
 
 main "$@"
