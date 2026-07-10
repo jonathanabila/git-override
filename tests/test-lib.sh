@@ -64,10 +64,10 @@ finish_suite() {
     echo "========================================"
     if [[ $ok -eq 1 ]]; then
         echo -e "  ${GREEN}All $TESTS_RUN tests passed!${NC}"
-    elif [[ "${STRICT_PASS_COUNT:-0}" == "1" ]]; then
-        echo -e "  ${RED}$TESTS_PASSED/$TESTS_RUN tests passed${NC}"
-    else
+    elif [[ $TESTS_FAILED -ne 0 ]]; then
         echo -e "  ${RED}$TESTS_FAILED/$TESTS_RUN tests failed${NC}"
+    else
+        echo -e "  ${RED}$TESTS_PASSED/$TESTS_RUN tests passed${NC}"
     fi
     echo "========================================"
     echo ""
