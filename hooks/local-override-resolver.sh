@@ -759,23 +759,6 @@ get_config_for_target() {
     return 1
 }
 
-get_active_overrides() {
-    local repo_root="$1"
-    local entry=""
-    local target=""
-    local override=""
-
-    while IFS= read -r entry || [[ -n "$entry" ]]; do
-        [[ -z "$entry" ]] && continue
-        target="${entry%%|*}"
-        override="${entry#*|}"
-
-        if [[ -n "$override" && -f "$repo_root/$override" ]]; then
-            printf '%s\n' "$target"
-        fi
-    done < <(read_config "$repo_root")
-}
-
 get_override_files() {
     local repo_root="$1"
     local seen=""
