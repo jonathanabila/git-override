@@ -17,27 +17,7 @@ CURRENT_TEST_ROOT=""
 CURRENT_TEST_NAME=""
 CURRENT_TEST_STATUS=0
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_FAILED=0
-
-pass() {
-    echo -e "${GREEN}[PASS]${NC} $*"
-}
-
-fail() {
-    echo -e "${RED}[FAIL]${NC} $*"
-    ((TESTS_FAILED++)) || true
-}
-
-info() {
-    echo -e "${YELLOW}[TEST]${NC} $*"
-    ((TESTS_RUN++)) || true
-}
+# Colors, counters, pass/fail/info, and finish_suite come from test-lib.sh.
 
 finalize_current_test_root() {
     local status="${1:-0}"
@@ -873,15 +853,7 @@ main() {
         finalize_current_test_root 0
     done
 
-    echo ""
-    echo "========================================"
-    if [[ $TESTS_FAILED -eq 0 ]]; then
-        echo -e "  ${GREEN}All $TESTS_RUN tests passed!${NC}"
-        exit 0
-    else
-        echo -e "  ${RED}$TESTS_FAILED/$TESTS_RUN tests failed${NC}"
-        exit 1
-    fi
+    finish_suite
 }
 
 main "$@"
