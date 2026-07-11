@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-11
+
 ### Security
 
 - **Symlinked target/override write escape**: refuse symlinked managed targets and override files (and paths resolving outside the repo root) during checkout/commit/apply/restore and in the smudge/clean filters, so a malicious repository cannot use a committed symlink target to write outside the checkout
@@ -633,6 +635,7 @@ files:
 - **0.0.2** - Config-driven architecture
 - **0.0.1** - Initial release with full feature set
 
+[0.7.0]: https://github.com/jonathanabila/git-override/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/jonathanabila/git-override/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jonathanabila/git-override/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/jonathanabila/git-override/compare/v0.4.0...v0.4.1
