@@ -1103,6 +1103,237 @@ cmd_validate() {
     exit 1
 }
 
+# Print one doctor check result line: severity label + check name + detail.
+# severity is one of pass|warn|fail. Repair/guidance lines are printed by the
+# caller as indented "  -> ..." follow-ups.
+doctor_line() {
+    local severity="$1"
+    local label="$2"
+    local detail="$3"
+
+    case "$severity" in
+        pass) printf '%b[PASS]%b %-14s %s\n' "$GREEN" "$NC" "$label" "$detail" ;;
+        warn) printf '%b[WARN]%b %-14s %s\n' "$YELLOW" "$NC" "$label" "$detail" ;;
+        fail) printf '%b[FAIL]%b %-14s %s\n' "$RED" "$NC" "$label" "$detail" ;;
+    esac
+}
+
+# Read-only diagnostics with an opt-in single repair.
+#
+# doctor runs its OWN small read-only checks over the same primitives cmd_status
+# uses (has_any_config, validate_config, get_hooks_dir, filter.local-override.*,
+# get_attributes_file_path, read_config, legacy skip-worktree detection). It does
+# NOT refactor cmd_status. See plans/021-doctor-design.md for the full catalog,
+# exit-code model, and the noted follow-ups.
+#
+# Exit 0 when no check FAILs (warnings allowed); exit 1 when any check FAILs.
+# --fix applies the single proven repair: filter driver missing -> cmd_sync_filters
+# (which also re-syncs attributes and clears legacy skip-worktree bits).
+cmd_doctor() {
+    local fix=false
+    local arg=""
+    for arg in "$@"; do
+        case "$arg" in
+            --fix) fix=true ;;
+            *) die "Unknown option for doctor: $arg" ;;
+        esac
+    done
+
+    local checkout_root
+    local repo_root
+    checkout_root="$(get_repo_root)" || die "Not in a git repository"
+    repo_root="$(get_resolution_root "$checkout_root")"
+
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
+    echo "Local Override Doctor"
+    echo "====================="
+    echo ""
+
+    local fail_count=0
+    local warn_count=0
+    local pass_count=0
+
+    # Check 1: config present. Without a config nothing else is meaningful, so
+    # this is a hard FAIL and we stop early.
+    if ! has_any_config "$repo_root"; then
+        doctor_line fail "Config" "no $CONFIG_FILE_NAME found"
+        echo "  -> Run 'git-local-override init-config' to create one"
+        echo ""
+        echo "Summary: 0 passed, 0 warnings, 1 failed"
+        return 1
+    fi
+
+    local config_count=0
+    local config_path=""
+    while IFS= read -r config_path || [[ -n "$config_path" ]]; do
+        [[ -n "$config_path" ]] || continue
+        ((config_count++)) || true
+    done < <(get_cached_config_files "$repo_root")
+    doctor_line pass "Config" "$config_count config file(s) discovered"
+    ((pass_count++)) || true
+
+    # Check 2: config valid. validate_config emits errors on stderr; capture and
+    # echo them as indented follow-ups on failure.
+    local validate_errors=""
+    if validate_errors="$(validate_config "$repo_root" 2>&1 1>/dev/null)"; then
+        local target_count
+        target_count="$(read_config "$repo_root" | grep -c '|' || true)"
+        doctor_line pass "Config valid" "$target_count effective target(s)"
+        ((pass_count++)) || true
+    else
+        doctor_line fail "Config valid" "invalid configuration"
+        local err_line=""
+        while IFS= read -r err_line || [[ -n "$err_line" ]]; do
+            [[ -n "$err_line" ]] || continue
+            echo "  $err_line"
+        done <<< "$validate_errors"
+        echo "  -> Fix the errors above (see 'git-local-override validate')"
+        ((fail_count++)) || true
+    fi
+
+    # Check 3: hooks installed (direct or via the pre-commit framework), mirroring
+    # cmd_status's detection over the same primitives.
+    local hooks_dir
+    hooks_dir="$(get_hooks_dir "$checkout_root")"
+    local hooks_installed=true
+    local hook_type=""
+    for hook_type in post-checkout pre-commit post-commit; do
+        local hook_file="$hooks_dir/$hook_type"
+        if [[ ! -f "$hook_file" ]]; then
+            hooks_installed=false
+            break
+        fi
+        if grep -q "local-override" "$hook_file" 2>/dev/null; then
+            continue
+        fi
+        if grep -qF "$PRE_COMMIT_FRAMEWORK_MARKER" "$hook_file" 2>/dev/null \
+            && grep -q "local-override-$hook_type" "$checkout_root/.pre-commit-config.yaml" 2>/dev/null; then
+            continue
+        fi
+        hooks_installed=false
+        break
+    done
+
+    if [[ "$hooks_installed" == true ]]; then
+        doctor_line pass "Hooks" "installed"
+        ((pass_count++)) || true
+    else
+        doctor_line warn "Hooks" "not installed"
+        echo "  -> Install with 'pre-commit install ...' or scripts/install.sh --cli"
+        ((warn_count++)) || true
+    fi
+
+    # Check 4: filter driver configured. Healthy = (smudge AND clean) OR process,
+    # so a repo installed with GIT_LOCAL_OVERRIDE_FILTER_PROCESS=1 (plan 019) is
+    # not false-failed. This is the ONE repair --fix implements.
+    local filter_smudge
+    local filter_clean
+    local filter_process
+    filter_smudge="$(git -C "$checkout_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
+    filter_clean="$(git -C "$checkout_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
+    filter_process="$(git -C "$checkout_root" config --local filter.local-override.process 2>/dev/null || echo "")"
+
+    local filter_configured=false
+    if [[ -n "$filter_process" ]]; then
+        filter_configured=true
+    elif [[ -n "$filter_smudge" && -n "$filter_clean" ]]; then
+        filter_configured=true
+    fi
+
+    if [[ "$filter_configured" == true ]]; then
+        doctor_line pass "Filter driver" "configured"
+        ((pass_count++)) || true
+    elif [[ "$fix" == true ]]; then
+        doctor_line fail "Filter driver" "not configured — repairing via sync-filters"
+        echo ""
+        # Delegate to the existing tested repair path. cmd_sync_filters configures
+        # the filter driver, re-syncs attributes, and clears legacy skip-worktree
+        # bits — so this one delegation also resolves checks 5 and 6.
+        cmd_sync_filters
+        echo ""
+        info "Re-run 'git-local-override doctor' to confirm the repair"
+        # Repaired: cmd_sync_filters dies on failure, so reaching here means the
+        # filter driver is now configured. Do not count it as a failure — the
+        # exit code should reflect the post-fix state.
+    else
+        doctor_line fail "Filter driver" "not configured"
+        echo "  -> Run 'git-local-override doctor --fix' (delegates to sync-filters)"
+        ((fail_count++)) || true
+    fi
+
+    # Checks 5 and 6 inspect state that the check-4 repair also fixes. Skip them
+    # after a --fix run reconfigured the filter driver, since sync-filters already
+    # re-synced attributes and cleared skip-worktree bits.
+    local skip_post_fix_checks=false
+    if [[ "$fix" == true && "$filter_configured" == false ]]; then
+        skip_post_fix_checks=true
+    fi
+
+    if [[ "$skip_post_fix_checks" == false ]]; then
+        # Check 5: attributes in sync with the effective config.
+        local attributes_file
+        local filter_count=0
+        local config_target_count=0
+        attributes_file="$(get_attributes_file_path "$checkout_root")" || die "Unable to resolve git attributes path"
+        if [[ -f "$attributes_file" ]]; then
+            filter_count=$(grep -c "filter=local-override" "$attributes_file" 2>/dev/null) || filter_count=0
+        fi
+        config_target_count="$(read_config "$repo_root" | grep -c '|' || true)"
+
+        if [[ "$filter_count" -eq "$config_target_count" ]]; then
+            doctor_line pass "Attributes" "in sync ($filter_count file(s))"
+            ((pass_count++)) || true
+        else
+            doctor_line warn "Attributes" "out of sync (config: $config_target_count, filtered: $filter_count)"
+            echo "  -> Run 'git-local-override sync-filters' to resync attributes"
+            ((warn_count++)) || true
+        fi
+
+        # Check 6: legacy skip-worktree bits (read-only detection only).
+        local skip_worktree_count=0
+        local entry=""
+        local seen=""
+        local target=""
+        local ls_output=""
+        while IFS= read -r entry || [[ -n "$entry" ]]; do
+            [[ -z "$entry" ]] && continue
+            target="${entry%%|*}"
+            [[ -n "$target" ]] || continue
+            if [[ $'\n'"$seen"$'\n' == *$'\n'"$target"$'\n'* ]]; then
+                continue
+            fi
+            seen="$seen
+$target"
+            if ! git -C "$checkout_root" ls-files --error-unmatch -- "$target" >/dev/null 2>&1; then
+                continue
+            fi
+            ls_output="$(git -C "$checkout_root" ls-files -v -- "$target" 2>/dev/null || true)"
+            if [[ "${ls_output:0:1}" == "S" ]]; then
+                ((skip_worktree_count++)) || true
+            fi
+        done < <(read_config "$repo_root")
+
+        if [[ "$skip_worktree_count" -eq 0 ]]; then
+            doctor_line pass "Skip-worktree" "no legacy bits"
+            ((pass_count++)) || true
+        else
+            doctor_line warn "Skip-worktree" "$skip_worktree_count legacy bit(s) present"
+            echo "  -> Run 'git-local-override sync-filters' to clear them"
+            ((warn_count++)) || true
+        fi
+    fi
+
+    echo ""
+    echo "Summary: $pass_count passed, $warn_count warning(s), $fail_count failed"
+
+    if [[ "$fail_count" -gt 0 ]]; then
+        return 1
+    fi
+    return 0
+}
+
 # Thin wrapper: git actually runs the hook script
 # hooks/local-override-filter-smudge, so the hook is authoritative. Both this
 # subcommand and that hook call the shared run_local_override_smudge core in
@@ -1219,6 +1450,8 @@ COMMANDS:
                             --all-worktrees restores every linked worktree too
     sync-filters            Sync filter driver with config and clear legacy skip-worktree
     validate                Validate all .local-overrides.yaml files (read-only; CI-friendly)
+    doctor [--fix]          Diagnose common issues (read-only); --fix repairs a
+                            missing filter driver via sync-filters
     shell-init              Output shell function wrapping git checkout/switch
     filter-smudge <path>    Filter helper: output local override or passthrough
     filter-clean <path>     Filter helper: output index content when input matches the override, else passthrough
@@ -1339,6 +1572,7 @@ main() {
         restore)        cmd_restore "$@" ;;
         sync-filters)   cmd_sync_filters "$@" ;;
         validate)       cmd_validate "$@" ;;
+        doctor)         cmd_doctor "$@" ;;
         shell-init)     cmd_shell_init "$@" ;;
         _get-active-targets) cmd__get_active_targets "$@" ;;
         filter-smudge)  cmd_filter_smudge "$@" ;;

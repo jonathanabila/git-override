@@ -2475,6 +2475,79 @@ test_sync_filters_migrates_legacy_hook_paths() {
     fi
 }
 
+test_doctor_reports_healthy() {
+    info "Testing doctor reports a healthy repo (all pass, exit 0)..."
+    cd "$TEST_REPO"
+    create_config
+
+    # Hooks are installed by the harness; sync filters to make the repo healthy.
+    git-local-override sync-filters >/dev/null
+
+    local output
+    local exit_code=0
+    output=$(git-local-override doctor 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 \
+        && "$output" == *"[PASS] Filter driver"* \
+        && "$output" == *"0 failed"* ]]; then
+        pass "doctor reports healthy repo with exit 0"
+    else
+        fail "doctor did not report healthy (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_doctor_detects_missing_filter() {
+    info "Testing doctor detects a missing filter driver (exit non-zero)..."
+    cd "$TEST_REPO"
+    create_config
+    git-local-override sync-filters >/dev/null
+
+    # Break the repo: remove the filter driver configuration.
+    git config --local --unset-all filter.local-override.smudge 2>/dev/null || true
+    git config --local --unset-all filter.local-override.clean 2>/dev/null || true
+
+    local output
+    local exit_code=0
+    output=$(git-local-override doctor 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 \
+        && "$output" == *"[FAIL] Filter driver"* \
+        && "$output" == *"1 failed"* ]]; then
+        pass "doctor detects missing filter driver and exits non-zero"
+    else
+        fail "doctor did not detect missing filter (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_doctor_fix_repairs_filter() {
+    info "Testing doctor --fix repairs the filter driver via sync-filters..."
+    cd "$TEST_REPO"
+    create_config
+    git-local-override sync-filters >/dev/null
+
+    # Break the repo, then repair with --fix.
+    git config --local --unset-all filter.local-override.smudge 2>/dev/null || true
+    git config --local --unset-all filter.local-override.clean 2>/dev/null || true
+
+    git-local-override doctor --fix >/dev/null 2>&1
+
+    # A second doctor run should now report healthy.
+    local output
+    local exit_code=0
+    output=$(git-local-override doctor 2>&1) || exit_code=$?
+
+    local smudge_cmd
+    smudge_cmd=$(git config --local filter.local-override.smudge 2>/dev/null || echo "")
+
+    if [[ $exit_code -eq 0 \
+        && -n "$smudge_cmd" \
+        && "$output" == *"[PASS] Filter driver"* ]]; then
+        pass "doctor --fix repairs filter driver and re-check is healthy"
+    else
+        fail "doctor --fix did not repair filter (exit: $exit_code, smudge: $smudge_cmd, output: $output)"
+    fi
+}
+
 test_dash_prefixed_target_not_option() {
     info "Testing dash-prefixed target is passed as a pathspec, not an option..."
     cd "$TEST_REPO"
@@ -2688,6 +2761,9 @@ main() {
         test_filter_no_head_passthrough \
         test_filter_non_configured_file_passthrough \
         test_sync_filters_migrates_legacy_hook_paths \
+        test_doctor_reports_healthy \
+        test_doctor_detects_missing_filter \
+        test_doctor_fix_repairs_filter \
         test_dash_prefixed_target_not_option \
         test_glob_char_repo_path_normalizes \
         test_die_does_not_leak_cache_temp_file; do

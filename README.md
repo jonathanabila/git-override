@@ -608,6 +608,21 @@ For large monorepos, `fd` is strongly recommended. When `fd` is available on `PA
 
 ## 🔍 Troubleshooting
 
+**Start here:** run the diagnostic command, which checks config, hooks, the filter
+driver, attributes, and legacy state, then prints a pass/warn/fail report:
+
+```bash
+git-local-override doctor
+```
+
+It exits non-zero if any check fails. To apply the safest known repair — a missing
+filter driver (also re-syncs attributes and clears legacy skip-worktree bits, by
+delegating to `sync-filters`) — run:
+
+```bash
+git-local-override doctor --fix
+```
+
 <details>
 <summary><strong>Local changes not appearing</strong></summary>
 
