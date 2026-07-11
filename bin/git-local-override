@@ -1080,6 +1080,29 @@ cmd_sync_filters() {
     success "Synced $filter_count file(s) to filter driver"
 }
 
+# Read-only lint of the effective recursive config. Reuses the resolver's
+# validate_config (duplicate targets, subtree escapes, traversal, etc.) without
+# performing any git operation or mutating state, so it is safe to run in CI.
+cmd_validate() {
+    local checkout_root
+    local repo_root
+    checkout_root="$(get_repo_root)" || die "Not in a git repository"
+    repo_root="$(get_resolution_root "$checkout_root")"
+
+    has_any_config "$repo_root" || die "No $CONFIG_FILE_NAME found"
+
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
+    if validate_config "$repo_root"; then
+        local n
+        n="$(read_config "$repo_root" | grep -c '|' || true)"
+        success "Config valid ($n effective target(s))"
+        return 0
+    fi
+    exit 1
+}
+
 # Thin wrapper: git actually runs the hook script
 # hooks/local-override-filter-smudge, so the hook is authoritative. Both this
 # subcommand and that hook call the shared run_local_override_smudge core in
@@ -1195,6 +1218,7 @@ COMMANDS:
     restore [--all-worktrees] Manually restore all originals from git;
                             --all-worktrees restores every linked worktree too
     sync-filters            Sync filter driver with config and clear legacy skip-worktree
+    validate                Validate all .local-overrides.yaml files (read-only; CI-friendly)
     shell-init              Output shell function wrapping git checkout/switch
     filter-smudge <path>    Filter helper: output local override or passthrough
     filter-clean <path>     Filter helper: output index content when input matches the override, else passthrough
@@ -1314,6 +1338,7 @@ main() {
         apply)          cmd_apply "$@" ;;
         restore)        cmd_restore "$@" ;;
         sync-filters)   cmd_sync_filters "$@" ;;
+        validate)       cmd_validate "$@" ;;
         shell-init)     cmd_shell_init "$@" ;;
         _get-active-targets) cmd__get_active_targets "$@" ;;
         filter-smudge)  cmd_filter_smudge "$@" ;;

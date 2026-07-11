@@ -1142,6 +1142,109 @@ EOF
     create_config
 }
 
+test_validate_valid_config_passes() {
+    info "Testing validate accepts a well-formed config..."
+    cd "$TEST_REPO"
+
+    create_config
+
+    local output
+    local exit_code=0
+    output=$(git-local-override validate 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 && "$output" == *"Config valid"* ]]; then
+        pass "validate exits 0 with summary on valid config"
+    else
+        fail "validate failed on valid config (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_validate_duplicate_target_fails() {
+    info "Testing validate rejects duplicate targets..."
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: FIRST.local.md
+    replaces:
+      - CLAUDE.md
+  - override: SECOND.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    echo "# FIRST" > FIRST.local.md
+    echo "# SECOND" > SECOND.local.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override validate 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"Duplicate"* ]]; then
+        pass "validate rejects duplicate target"
+    else
+        fail "validate did not reject duplicate target (exit: $exit_code, output: $output)"
+    fi
+
+    rm -f FIRST.local.md SECOND.local.md
+    create_config
+}
+
+test_validate_subtree_escape_rejected() {
+    info "Testing validate rejects subtree escapes..."
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+EOF
+
+    mkdir -p backend
+    cat > backend/.local-overrides.yaml << 'EOF'
+pattern: ".private"
+files:
+  - override: CLAUDE.private.md
+    replaces:
+      - ../CLAUDE.md
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override validate 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"escapes its subtree"* ]]; then
+        pass "validate rejects subtree escape"
+    else
+        fail "validate did not reject subtree escape (exit: $exit_code, output: $output)"
+    fi
+
+    rm -f backend/.local-overrides.yaml
+    create_config
+}
+
+test_validate_no_config_dies() {
+    info "Testing validate dies without a config..."
+    cd "$TEST_REPO"
+
+    rm -f .local-overrides.yaml .local-overrides
+
+    local output
+    local exit_code=0
+    output=$(git-local-override validate 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"No .local-overrides.yaml"* ]]; then
+        pass "validate dies with no-config message"
+    else
+        fail "validate did not die on missing config (exit: $exit_code, output: $output)"
+    fi
+
+    create_config
+}
+
 test_init_config_has_pattern() {
     info "Testing init-config creates config with pattern..."
     cd "$TEST_REPO"
@@ -2568,6 +2671,10 @@ main() {
         test_multi_target_override \
         test_multi_target_pre_commit_restores_all \
         test_duplicate_target_error \
+        test_validate_valid_config_passes \
+        test_validate_duplicate_target_fails \
+        test_validate_subtree_escape_rejected \
+        test_validate_no_config_dies \
         test_list_shows_grouped_targets \
         test_filter_smudge_applies_override \
         test_filter_smudge_passthrough \

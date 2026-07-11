@@ -490,10 +490,31 @@ The CLI provides utility commands (included with the default install):
 | `git-local-override restore` | Manually restore all originals |
 | `git-local-override restore --all-worktrees` | Restore originals across the main checkout and every linked worktree |
 | `git-local-override sync-filters` | Sync filter configuration and clear legacy managed `skip-worktree` bits |
+| `git-local-override validate` | Validate all `.local-overrides.yaml` files (read-only; CI-friendly) |
 | `git-local-override shell-init` | Output shell wrapper for transparent checkout/switch |
 | `git-local-override init-config` | Create a `.local-overrides.yaml` template |
 | `git-local-override --version` | Show the CLI version |
 | `git-local-override help` | Show help |
+
+### Validate config (CI-friendly)
+
+`git-local-override validate` runs the same checks the hooks use — duplicate
+targets, subtree escapes, path traversal, and the rest — against every
+discovered `.local-overrides.yaml`, **without touching git state**. It exits `0`
+with a summary when the config is well-formed and non-zero (printing the offending
+error) otherwise, so it is safe to run in a pipeline.
+
+For teams on the pre-commit path, lint the config in CI so a bad
+`.local-overrides.yaml` is caught before it reaches a contributor:
+
+```yaml
+# .github/workflows/lint.yml
+- name: Lint local-override config
+  run: git-local-override validate
+```
+
+`validate` is read-only: it never applies overrides, restores originals, or
+writes filter attributes.
 
 ---
 
