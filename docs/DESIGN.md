@@ -17,7 +17,7 @@ Current releases (v0.2+) are config-driven and repository-local:
 
 - Configuration: `.local-overrides.yaml`
 - Installer scripts: `scripts/install.sh`, `scripts/uninstall.sh`
-- CLI commands: `add`, `remove`, `list`, `status`, `apply`, `restore`, `sync-filters`, `init-config`, `help`
+- CLI commands: `add`, `remove`, `list`, `status`, `apply`, `restore`, `sync-filters`, `validate`, `doctor`, `shell-init`, `init-config`, `version`, `help`
 - Hook + filter model: per-repo hooks plus `smudge`/`clean` filter drivers
 
 For accurate and up-to-date behavior, use:

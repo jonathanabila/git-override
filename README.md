@@ -491,6 +491,7 @@ The CLI provides utility commands (included with the default install):
 | `git-local-override restore --all-worktrees` | Restore originals across the main checkout and every linked worktree |
 | `git-local-override sync-filters` | Sync filter configuration and clear legacy managed `skip-worktree` bits |
 | `git-local-override validate` | Validate all `.local-overrides.yaml` files (read-only; CI-friendly) |
+| `git-local-override doctor [--fix]` | Diagnose common issues (read-only); `--fix` repairs a missing filter driver |
 | `git-local-override shell-init` | Output shell wrapper for transparent checkout/switch |
 | `git-local-override init-config` | Create a `.local-overrides.yaml` template |
 | `git-local-override --version` | Show the CLI version |
@@ -810,7 +811,7 @@ Uninstall restores `.chained` hooks only when it is safe, and preserves newer un
 
 With `--global`: Also installs to `~/.config/git/template/hooks/` for new repos.
 
-With `--cli`: Installs CLI to `~/.local/bin/git-local-override` and installs `local-override-resolver.sh` to `~/.local/share/git-local-override`.
+With `--cli`: Installs CLI to `~/.local/bin/git-local-override` and installs its support files — `local-override-resolver.sh`, `local-override-shell-init.sh`, and `VERSION` — to `~/.local/share/git-local-override`.
 
 ---
 

@@ -49,6 +49,9 @@ git-local-override/
 │   ├── local-override-post-commit
 │   ├── local-override-filter-smudge   # Smudge filter (checkout)
 │   └── local-override-filter-clean    # Clean filter (staging)
+├── shared/                       # Shared shell modules
+│   ├── local-override-resolver.sh # Canonical recursive config resolver
+│   └── local-override-shell-init.sh # Shell wrapper source (printed by shell-init)
 ├── scripts/                      # Installation and release scripts
 │   ├── install.sh
 │   ├── uninstall.sh
@@ -56,6 +59,9 @@ git-local-override/
 ├── tests/                        # Test suite
 │   ├── run-tests.sh              # Main test runner (unit tests)
 │   ├── run-docker.sh             # Docker test launcher
+│   ├── test-lib.sh               # Shared assertion harness (info/pass/fail, counters)
+│   ├── coverage.sh               # kcov entrypoint (opt-in coverage run)
+│   ├── bench-filter-process.sh   # filter.process benchmark + roundtrip harness
 │   ├── docker/                   # Docker test infrastructure
 │   │   ├── Dockerfile            # Ubuntu test image
 │   │   ├── Dockerfile.bash3      # Bash 3.2 compatibility image
@@ -63,16 +69,20 @@ git-local-override/
 │   └── integration/              # Integration tests
 │       ├── test-install.sh       # Install/uninstall tests
 │       ├── test-git-ops.sh       # Git operations tests
-│       └── test-precommit.sh     # Pre-commit framework tests
+│       ├── test-precommit.sh     # Pre-commit framework tests
+│       └── test-worktrees.sh     # Linked-worktree tests
 ├── .github/                      # GitHub configuration
 │   ├── workflows/                # CI and release workflows
 │   ├── ISSUE_TEMPLATE/           # Issue templates
 │   └── PULL_REQUEST_TEMPLATE.md
 ├── docs/                         # Additional documentation
 │   └── DESIGN.md                 # Historical design (v0.0.1)
+├── Formula/                      # Draft Homebrew formula (unpublished)
+│   └── git-local-override.rb
 ├── .pre-commit-hooks.yaml        # Pre-commit integration definitions
 ├── .pre-commit-config.yaml       # Pre-commit hooks for this repo
 ├── Makefile                      # Build automation
+├── VERSION                       # Release version file (synced by scripts/release.sh)
 ├── README.md                     # User documentation
 ├── CONTRIBUTING.md               # Contributor guidelines (this file)
 ├── CHANGELOG.md                  # Version history
@@ -245,7 +255,8 @@ Types:
 
 #### PR Checklist
 
-- [ ] Tests pass (`make test-docker` - authoritative)
+- [ ] Full CI-equivalent suite passes (`make ci` — authoritative)
+- [ ] Tests pass (`make test-docker` - Docker suites)
 - [ ] Tests pass (`make test` - local verification)
 - [ ] Code follows style guidelines
 - [ ] Bash 3.2 compatible
