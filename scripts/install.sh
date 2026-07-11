@@ -94,6 +94,14 @@ get_version_content() {
     fi
 }
 
+get_shell_init_content() {
+    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-shell-init.sh" ]]; then
+        cat "$PROJECT_DIR/shared/local-override-shell-init.sh"
+    else
+        curl -fsSL "$REMOTE_BASE/shared/local-override-shell-init.sh"
+    fi
+}
+
 get_cli_content() {
     if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/bin/git-local-override" ]]; then
         cat "$PROJECT_DIR/bin/git-local-override"
@@ -652,6 +660,8 @@ install_cli() {
     get_shared_resolver_content > "$data_dir/local-override-resolver.sh"
     chmod +x "$data_dir/local-override-resolver.sh"
     success "Installed: $data_dir/local-override-resolver.sh"
+    get_shell_init_content > "$data_dir/local-override-shell-init.sh"
+    success "Installed: $data_dir/local-override-shell-init.sh"
     get_version_content > "$data_dir/VERSION"
     success "Installed: $data_dir/VERSION"
 
