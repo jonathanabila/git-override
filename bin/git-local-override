@@ -894,10 +894,9 @@ cmd_apply() {
     success "Applied overrides in $applied_count checkout(s)"
 }
 
-cmd_restore() {
-    local checkout_root
+restore_in_checkout() {
+    local checkout_root="$1"
     local repo_root
-    checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
     if ! has_any_config "$repo_root"; then
@@ -936,6 +935,66 @@ cmd_restore() {
     done < <(read_config "$repo_root")
 
     success "Restored $count file(s)"
+}
+
+cmd_restore() {
+    local all_worktrees=false
+    local arg=""
+
+    for arg in "$@"; do
+        case "$arg" in
+            --all-worktrees) all_worktrees=true ;;
+            *) die "Unknown option for restore: $arg" ;;
+        esac
+    done
+
+    if [[ "$all_worktrees" == false ]]; then
+        local single_root
+        single_root="$(get_repo_root)" || die "Not in a git repository"
+        restore_in_checkout "$single_root"
+        return $?
+    fi
+
+    local start_root
+    start_root="$(get_repo_root)" || die "Not in a git repository"
+
+    local line=""
+    local wt_root=""
+    local restored_count=0
+    local failed_count=0
+
+    # NUL-delimited worktree records (via the shared resolver helper) so
+    # worktree paths containing newlines parse correctly on git >= 2.36.
+    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
+        case "$line" in
+            worktree\ *) ;;
+            *) continue ;;
+        esac
+        wt_root="${line#worktree }"
+
+        if [[ ! -d "$wt_root" ]]; then
+            info "Skipping missing worktree: $wt_root"
+            continue
+        fi
+        if ! git -C "$wt_root" rev-parse --show-toplevel >/dev/null 2>&1; then
+            info "Skipping non-checkout entry: $wt_root"
+            continue
+        fi
+
+        info "=== Restoring in $wt_root ==="
+        # Subshell: restore_in_checkout may die/exit on per-checkout failure;
+        # the subshell absorbs it so remaining worktrees still run.
+        if (cd "$wt_root" && restore_in_checkout "$wt_root"); then
+            ((restored_count++)) || true
+        else
+            ((failed_count++)) || true
+        fi
+    done < <(list_worktrees_porcelain_nul "$start_root")
+
+    if [[ "$failed_count" -gt 0 ]]; then
+        die "restore failed in $failed_count worktree(s) (succeeded in $restored_count)"
+    fi
+    success "Restored originals in $restored_count checkout(s)"
 }
 
 cmd_sync_filters() {
@@ -1133,7 +1192,8 @@ COMMANDS:
     status                  Show detailed status (includes filter driver status)
     apply [--all-worktrees] Manually apply all overrides (syncs filters);
                             --all-worktrees refreshes every linked worktree too
-    restore                 Manually restore all originals from git
+    restore [--all-worktrees] Manually restore all originals from git;
+                            --all-worktrees restores every linked worktree too
     sync-filters            Sync filter driver with config and clear legacy skip-worktree
     shell-init              Output shell function wrapping git checkout/switch
     filter-smudge <path>    Filter helper: output local override or passthrough
@@ -1163,6 +1223,9 @@ EXAMPLES:
 
     # Restore originals (hooks do this before commits)
     git-local-override restore
+
+    # Restore originals across the main checkout and every linked worktree
+    git-local-override restore --all-worktrees
 
     # Sync filter driver with config (useful after config changes)
     git-local-override sync-filters

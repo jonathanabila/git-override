@@ -352,6 +352,12 @@ After editing an override file, refresh every checkout in one go:
 git-local-override apply --all-worktrees
 ```
 
+To restore original tracked content across the main checkout and every linked worktree in one command:
+
+```bash
+git-local-override restore --all-worktrees
+```
+
 Configs that live inside a *nested* linked worktree (one checked out under the main worktree's directory) belong to that worktree only — the main checkout's discovery ignores them.
 
 ### Shell Integration
@@ -480,7 +486,9 @@ The CLI provides utility commands (included with the default install):
 | `git-local-override list` | List configured overrides and status |
 | `git-local-override status` | Show detailed system status |
 | `git-local-override apply` | Manually apply all overrides |
+| `git-local-override apply --all-worktrees` | Apply overrides across the main checkout and every linked worktree |
 | `git-local-override restore` | Manually restore all originals |
+| `git-local-override restore --all-worktrees` | Restore originals across the main checkout and every linked worktree |
 | `git-local-override sync-filters` | Sync filter configuration and clear legacy managed `skip-worktree` bits |
 | `git-local-override shell-init` | Output shell wrapper for transparent checkout/switch |
 | `git-local-override init-config` | Create a `.local-overrides.yaml` template |

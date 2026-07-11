@@ -756,6 +756,68 @@ EOF
     pass "Failing worktree tallied and isolated; healthy checkouts refreshed"
 }
 
+test_restore_all_worktrees() {
+    info "Testing restore --all-worktrees restores originals in every checkout..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-restore-all"
+    git worktree add -q -b wt-restore-all "$wt" >/dev/null 2>&1
+
+    # Materialize the override in every checkout so each has non-tracked content.
+    if ! "$PROJECT_DIR/bin/git-local-override" apply --all-worktrees >/dev/null 2>&1; then
+        fail "apply --all-worktrees exited non-zero during setup"
+        return 1
+    fi
+
+    local checkout
+    for checkout in "$TEST_DIR" "$wt"; do
+        if ! grep -q "Private override content" "$checkout/AGENTS.md"; then
+            fail "Setup: override not materialized in $checkout"
+            return 1
+        fi
+    done
+
+    if ! "$PROJECT_DIR/bin/git-local-override" restore --all-worktrees >/dev/null 2>&1; then
+        fail "restore --all-worktrees exited non-zero"
+        return 1
+    fi
+
+    for checkout in "$TEST_DIR" "$wt"; do
+        if ! grep -q "Tracked AGENTS.md" "$checkout/AGENTS.md"; then
+            fail "Original not restored in $checkout: $(cat "$checkout/AGENTS.md")"
+            return 1
+        fi
+        if grep -q "Private override content" "$checkout/AGENTS.md"; then
+            fail "Override content lingers in $checkout after restore"
+            return 1
+        fi
+    done
+
+    pass "Both checkouts restored to tracked content"
+}
+
+test_restore_rejects_unknown_option() {
+    info "Testing restore rejects an unknown option..."
+
+    cd "$TEST_DIR"
+
+    local output=""
+    local status=0
+    output="$("$PROJECT_DIR/bin/git-local-override" restore --bogus 2>&1)" || status=$?
+
+    if [[ "$status" -eq 0 ]]; then
+        fail "restore --bogus exited zero instead of rejecting the option"
+        return 1
+    fi
+
+    if ! echo "$output" | grep -q "Unknown option for restore"; then
+        fail "restore --bogus missing a clear error message: $output"
+        return 1
+    fi
+
+    pass "restore rejects unknown options with a clear message"
+}
+
 test_rebase_in_fallback_worktree() {
     info "Testing rebase completes cleanly in a fallback worktree with filters active..."
 
@@ -837,6 +899,8 @@ main() {
         test_apply_all_worktrees \
         test_apply_all_worktrees_with_space_path \
         test_apply_all_worktrees_isolates_failures \
+        test_restore_all_worktrees \
+        test_restore_rejects_unknown_option \
         test_rebase_in_fallback_worktree; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
