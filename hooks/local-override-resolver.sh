@@ -22,9 +22,20 @@ local_override_trace_enabled() {
     [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
 }
 
+# Tag-aware trace log (single canonical implementation; lib.sh no longer
+# shadows it). A single argument prints untagged `Trace: <msg>`; two or more
+# arguments print `Trace[<tag>]: <msg...>` (the first arg is the tag). This
+# keeps every existing call site's format: 1-arg resolver calls stay untagged,
+# and 2-arg calls (clean core, hook code) stay tagged regardless of entry point.
 local_override_trace_log() {
     if local_override_trace_enabled; then
-        printf 'Trace: %s\n' "$*" >&2
+        if [[ $# -ge 2 ]]; then
+            local trace_tag="$1"
+            shift
+            printf 'Trace[%s]: %s\n' "$trace_tag" "$*" >&2
+        else
+            printf 'Trace: %s\n' "${1:-}" >&2
+        fi
     fi
 }
 

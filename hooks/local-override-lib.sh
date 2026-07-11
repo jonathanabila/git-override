@@ -26,11 +26,8 @@ local_override_log() {
     printf 'git-local-override: %s\n' "$*" >&2
 }
 
-local_override_trace_log() {
-    if local_override_trace_enabled; then
-        printf 'Trace[%s]: %s\n' "${1:-hook}" "${2:-}" >&2
-    fi
-}
+# local_override_trace_log now lives once in the shared resolver (sourced
+# above) as a tag-aware implementation. lib.sh no longer shadows it.
 
 run_with_lifecycle_logging() {
     local operation_name="$1"
