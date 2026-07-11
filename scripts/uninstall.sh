@@ -160,6 +160,7 @@ remove_managed_hook_artifacts() {
         local-override-resolver.sh \
         local-override-filter-smudge \
         local-override-filter-clean \
+        local-override-filter-process \
         local-override-post-checkout \
         local-override-pre-commit \
         local-override-post-commit \
@@ -233,6 +234,12 @@ remove_cli_tool() {
     if [[ -f "$resolver_file" ]]; then
         rm "$resolver_file"
         success "Removed: $resolver_file"
+    fi
+
+    local shell_init_file="$DATA_DIR/local-override-shell-init.sh"
+    if [[ -f "$shell_init_file" ]]; then
+        rm "$shell_init_file"
+        success "Removed: $shell_init_file"
     fi
 
     local version_file="$DATA_DIR/VERSION"

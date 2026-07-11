@@ -1254,6 +1254,68 @@ test_uninstall_from_repo() {
     fi
 }
 
+test_uninstall_removes_all_installed_artifacts() {
+    info "Testing uninstall removes every installed artifact..."
+
+    # Reset global config first
+    reset_git_config
+
+    local repo_dir="$TEST_DIR/repo-uninstall-artifacts"
+    create_test_repo "$repo_dir"
+
+    # Install CLI + repo hooks/filters
+    "$PROJECT_DIR/scripts/install.sh" --repo --cli
+
+    local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override"
+    local shell_init_file="$data_dir/local-override-shell-init.sh"
+    local resolver_file="$data_dir/local-override-resolver.sh"
+    local version_file="$data_dir/VERSION"
+
+    local hooks_dir
+    hooks_dir="$(get_common_hooks_dir_for_repo "$repo_dir")" || {
+        fail "Pre-condition: could not resolve hooks dir"
+        return 1
+    }
+    local filter_process_hook="$hooks_dir/local-override-filter-process"
+
+    # Pre-conditions: the newer installed artifacts must be present
+    if [[ -f "$shell_init_file" ]]; then
+        pass "Pre-condition: shell-init installed in data dir"
+    else
+        fail "Pre-condition: shell-init not installed in data dir"
+        return 1
+    fi
+
+    if [[ -f "$filter_process_hook" ]]; then
+        pass "Pre-condition: filter-process installed in hooks dir"
+    else
+        fail "Pre-condition: filter-process not installed in hooks dir"
+        return 1
+    fi
+
+    # Run uninstall (non-interactive)
+    local uninstall_output="$TEST_DIR/uninstall-artifacts.out"
+    run_uninstall_non_interactive_capture "$uninstall_output"
+
+    # filter-process must be gone from the hooks dir
+    if [[ ! -f "$filter_process_hook" ]]; then
+        pass "filter-process removed from hooks dir"
+    else
+        fail "filter-process still present in hooks dir"
+        return 1
+    fi
+
+    # Data dir either removed entirely, or contains none of the CLI data files
+    if [[ ! -d "$data_dir" ]]; then
+        pass "CLI data dir removed"
+    elif [[ ! -f "$resolver_file" && ! -f "$shell_init_file" && ! -f "$version_file" ]]; then
+        pass "CLI data files removed from data dir"
+    else
+        fail "CLI data files survive in data dir after uninstall"
+        return 1
+    fi
+}
+
 test_uninstall_restores_chained_hook_when_wrapper_is_managed() {
     info "Testing uninstall restores chained hook for managed wrapper..."
 
@@ -1885,6 +1947,7 @@ main() {
         test_install_cli \
         test_install_gitignore \
         test_uninstall_from_repo \
+        test_uninstall_removes_all_installed_artifacts \
         test_uninstall_restores_chained_hook_when_wrapper_is_managed \
         test_uninstall_does_not_overwrite_newer_user_hook \
         test_new_repo_gets_hooks_after_global_install \

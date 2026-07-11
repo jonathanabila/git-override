@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`uninstall.sh` now removes every installed artifact**: it deletes `local-override-shell-init.sh` from the CLI data dir (so the data dir is then empty and gets `rmdir`'d as intended) and `local-override-filter-process` from hook directories (previously it survived in `.git/hooks/` and the global template dir, where every future `git clone` copied the stale script into new repos). The installed-file manifest was duplicated between `install.sh` and `uninstall.sh` with no shared list, so two recently added files drifted out of the uninstaller
 - **User-facing doc gaps**: the README CLI Commands table now lists `doctor` (previously only in help/dispatch/troubleshooting prose); the "What Gets Installed" `--cli` line now names all support files written to the CLI data dir (`local-override-shell-init.sh` and `VERSION` alongside `local-override-resolver.sh`); the CONTRIBUTING project tree now lists `shared/` (both modules), the shared test harness and the linked-worktree suite, `Formula/`, and `VERSION`, and its PR checklist leads with `make ci`; and `docs/DESIGN.md`'s command list adds `validate`, `doctor`, `shell-init`, and `version`
 
 ## [0.7.0] - 2026-07-11
