@@ -376,7 +376,7 @@ install_filter_scripts_to_dir() {
     mkdir -p "$hooks_dir"
 
     local filter_script
-    for filter_script in local-override-filter-smudge local-override-filter-clean; do
+    for filter_script in local-override-filter-smudge local-override-filter-clean local-override-filter-process; do
         get_hook_content "$filter_script" > "$hooks_dir/$filter_script"
         chmod +x "$hooks_dir/$filter_script"
         success "Installed: $hooks_dir/$filter_script"
@@ -476,10 +476,21 @@ install_filters() {
     smudge_script="$common_git_dir/hooks/local-override-filter-smudge"
     clean_script="$common_git_dir/hooks/local-override-filter-clean"
 
-    git -C "$repo_root" config --local filter.local-override.smudge "$smudge_script %f"
-    git -C "$repo_root" config --local filter.local-override.clean "$clean_script %f"
+    # Opt-in EXPERIMENTAL long-running filter.process prototype (plan 019).
+    # Default stays the per-file %f smudge/clean scripts.
+    if [[ "${GIT_LOCAL_OVERRIDE_FILTER_PROCESS:-0}" == "1" ]]; then
+        local process_script="$common_git_dir/hooks/local-override-filter-process"
+        git -C "$repo_root" config --local --unset-all filter.local-override.smudge 2>/dev/null || true
+        git -C "$repo_root" config --local --unset-all filter.local-override.clean 2>/dev/null || true
+        git -C "$repo_root" config --local filter.local-override.process "$process_script"
+        success "Configured local filter.local-override (experimental filter.process, opt-in)"
+    else
+        git -C "$repo_root" config --local --unset-all filter.local-override.process 2>/dev/null || true
+        git -C "$repo_root" config --local filter.local-override.smudge "$smudge_script %f"
+        git -C "$repo_root" config --local filter.local-override.clean "$clean_script %f"
+        success "Configured local filter.local-override"
+    fi
     git -C "$repo_root" config --local filter.local-override.required false
-    success "Configured local filter.local-override"
 
     sync_attributes "$repo_root"
 }
@@ -635,10 +646,20 @@ install_to_template() {
     git config --global init.templateDir "${XDG_CONFIG_HOME:-$HOME/.config}/git/template"
     success "Configured git template directory"
 
-    git config --global filter.local-override.smudge "$template_dir/local-override-filter-smudge %f"
-    git config --global filter.local-override.clean "$template_dir/local-override-filter-clean %f"
+    # Opt-in EXPERIMENTAL long-running filter.process prototype (plan 019).
+    # Default stays the per-file %f smudge/clean scripts.
+    if [[ "${GIT_LOCAL_OVERRIDE_FILTER_PROCESS:-0}" == "1" ]]; then
+        git config --global --unset-all filter.local-override.smudge 2>/dev/null || true
+        git config --global --unset-all filter.local-override.clean 2>/dev/null || true
+        git config --global filter.local-override.process "$template_dir/local-override-filter-process"
+        success "Configured global filter.local-override (experimental filter.process, opt-in)"
+    else
+        git config --global --unset-all filter.local-override.process 2>/dev/null || true
+        git config --global filter.local-override.smudge "$template_dir/local-override-filter-smudge %f"
+        git config --global filter.local-override.clean "$template_dir/local-override-filter-clean %f"
+        success "Configured global filter.local-override"
+    fi
     git config --global filter.local-override.required false
-    success "Configured global filter.local-override"
 
     echo ""
     info "New repositories created with 'git init' or 'git clone' will have hooks installed."

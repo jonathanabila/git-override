@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+#
+# local-override-filter-process
+#
+# EXPERIMENTAL / opt-in prototype (plan 019). A long-running git filter that
+# speaks git's `filter.<driver>.process` pkt-line protocol, so ONE process
+# serves every smudge/clean request for an entire git command (e.g. a whole
+# checkout) instead of git spawning a fresh bash per filtered file.
+#
+# The bash startup + resolver source (~25KB) is paid ONCE per git command here,
+# not once per managed file. The actual content transform reuses the shared
+# resolver cores run_local_override_smudge / run_local_override_clean, so the
+# bytes it emits are identical to the per-file %f smudge/clean scripts.
+#
+# OPT-IN ONLY: wired via `filter.local-override.process` when
+# GIT_LOCAL_OVERRIDE_FILTER_PROCESS=1 is set at install/sync-filters time. The
+# shipped default remains the per-file %f smudge/clean scripts. See plan 019
+# and plans/019-filter-process-design.md.
+#
+# BINARY SAFETY: bash variables cannot hold NUL bytes and `read` is line
+# oriented, so all binary payloads move through temp files via `dd bs=1`, never
+# through shell variables. Only the 4-hex length header and text key=value
+# packets (ASCII) are ever assigned to variables. See the design doc for why
+# `dd bs=1` (not `head -c`) is the portable exact-byte reader.
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=local-override-lib.sh
+source "$SCRIPT_DIR/local-override-lib.sh"
+
+# ---------------------------------------------------------------------------
+# Scratch space. Every request reuses these files, so the whole checkout only
+# creates one temp directory.
+# ---------------------------------------------------------------------------
+PKT_TMPDIR=""
+
+pkt_cleanup() {
+    if [[ -n "$PKT_TMPDIR" && -d "$PKT_TMPDIR" ]]; then
+        rm -rf "$PKT_TMPDIR"
+    fi
+}
+trap pkt_cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# pkt-line reading (from git, on stdin).
+#
+# A pkt-line is a 4-hex-digit length prefix (length INCLUDES the 4 header
+# bytes) followed by that many minus four payload bytes. "0000" is a flush
+# packet. `dd bs=1 count=N` reads EXACTLY N bytes from the pipe without
+# over-reading (BSD `head -c` buffers ahead and corrupts the stream), so it is
+# the only portable binary-safe exact-byte reader available in Bash 3.2.
+# ---------------------------------------------------------------------------
+
+# Read a list of text "key=value" pkt-lines until a flush packet, appending
+# each newline-stripped line to file $1. Text only (ASCII) — safe in vars.
+# Returns 0 on flush, 1 on EOF (git closed the pipe).
+read_kv_list() {
+    local out="$1"
+    local hdr len payload
+    : > "$out"
+    while true; do
+        hdr="$(dd bs=1 count=4 2>/dev/null || true)"
+        [[ -z "$hdr" ]] && return 1
+        [[ "$hdr" == "0000" ]] && return 0
+        len=$((16#$hdr))
+        payload="$(dd bs=1 count=$((len - 4)) 2>/dev/null || true)"
+        printf '%s\n' "$payload" >> "$out"
+    done
+}
+
+# Read a content section (zero or more binary packets until a flush) writing
+# the raw bytes to file $1. Returns 0 on flush, 1 on EOF.
+read_content_to_file() {
+    local out="$1"
+    local hdr len
+    : > "$out"
+    while true; do
+        hdr="$(dd bs=1 count=4 2>/dev/null || true)"
+        [[ -z "$hdr" ]] && return 1
+        [[ "$hdr" == "0000" ]] && return 0
+        len=$((16#$hdr))
+        dd bs=1 count=$((len - 4)) 2>/dev/null >> "$out"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# pkt-line writing (to git, on stdout).
+#
+# ORDER + FLUSH SAFETY: bash builtins write to a stdio buffer while `dd`/`cat`
+# write directly to the fd, so interleaving them on stdout would scramble the
+# framing and a buffered response could deadlock (git blocks reading a reply
+# still sitting in our buffer). We therefore BUILD the whole response in a temp
+# file (ordered `>>` appends) and emit it with a single external `cat`, which
+# flushes on exit — one atomic, correctly ordered write per response.
+# ---------------------------------------------------------------------------
+RESP_FILE=""
+
+resp_open() {
+    RESP_FILE="$PKT_TMPDIR/response"
+    : > "$RESP_FILE"
+}
+
+# Append one text pkt-line (a trailing newline is added, matching git's own
+# text packets, e.g. "status=success\n").
+resp_text() {
+    local s="$1"
+    local line="$s"$'\n'
+    printf '%04x%s' "$((${#line} + 4))" "$line" >> "$RESP_FILE"
+}
+
+resp_flush() {
+    printf '0000' >> "$RESP_FILE"
+}
+
+# Append the bytes of file $1 as one or more content packets, chunked at the
+# protocol maximum (65516 payload bytes per packet). Empty file => no packets.
+resp_content_from_file() {
+    local f="$1"
+    local block=65516
+    local size nfull rem b=0
+    size="$(wc -c < "$f")"
+    size=$((size))
+    [[ "$size" -eq 0 ]] && return 0
+    nfull=$((size / block))
+    rem=$((size % block))
+    while [[ "$b" -lt "$nfull" ]]; do
+        printf '%04x' "$((block + 4))" >> "$RESP_FILE"
+        dd bs="$block" skip="$b" count=1 if="$f" 2>/dev/null >> "$RESP_FILE"
+        b=$((b + 1))
+    done
+    if [[ "$rem" -gt 0 ]]; then
+        printf '%04x' "$((rem + 4))" >> "$RESP_FILE"
+        dd bs="$block" skip="$nfull" count=1 if="$f" 2>/dev/null >> "$RESP_FILE"
+    fi
+}
+
+resp_send() {
+    cat "$RESP_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Handshake + capability negotiation.
+# ---------------------------------------------------------------------------
+do_handshake() {
+    local list="$PKT_TMPDIR/handshake"
+
+    # Welcome: git sends "git-filter-client", "version=2", flush.
+    if ! read_kv_list "$list"; then
+        die "filter.process: unexpected EOF during welcome"
+    fi
+    if ! grep -qxF 'git-filter-client' "$list"; then
+        die "filter.process: missing git-filter-client welcome"
+    fi
+    if ! grep -qxF 'version=2' "$list"; then
+        die "filter.process: unsupported protocol version (need 2)"
+    fi
+
+    resp_open
+    resp_text 'git-filter-server'
+    resp_text 'version=2'
+    resp_flush
+    resp_send
+
+    # Capabilities: git advertises clean/smudge/delay; we take clean+smudge.
+    if ! read_kv_list "$list"; then
+        die "filter.process: unexpected EOF during capability negotiation"
+    fi
+
+    resp_open
+    resp_text 'capability=clean'
+    resp_text 'capability=smudge'
+    resp_flush
+    resp_send
+}
+
+# ---------------------------------------------------------------------------
+# Per-request transform. Reuses the shared resolver cores verbatim so the
+# emitted bytes match the per-file %f filters exactly (byte-exact roundtrip).
+# ---------------------------------------------------------------------------
+run_filter_command() {
+    local command="$1"
+    local pathname="$2"
+    local in="$3"
+    local out="$4"
+
+    case "$command" in
+        smudge)
+            run_local_override_smudge "$pathname" < "$in" > "$out"
+            ;;
+        clean)
+            run_local_override_clean "$pathname" < "$in" > "$out"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+serve() {
+    local meta="$PKT_TMPDIR/meta"
+    local content_in="$PKT_TMPDIR/content_in"
+    local content_out="$PKT_TMPDIR/content_out"
+    local command pathname line
+
+    while true; do
+        # Command metadata list; EOF here means git closed the pipe => done.
+        if ! read_kv_list "$meta"; then
+            return 0
+        fi
+
+        command=""
+        pathname=""
+        while IFS= read -r line; do
+            case "$line" in
+                command=*) command="${line#command=}" ;;
+                pathname=*) pathname="${line#pathname=}" ;;
+            esac
+        done < "$meta"
+
+        # Content section (may be empty).
+        if ! read_content_to_file "$content_in"; then
+            return 0
+        fi
+
+        resp_open
+        if run_filter_command "$command" "$pathname" "$content_in" "$content_out"; then
+            resp_text 'status=success'
+            resp_flush
+            resp_content_from_file "$content_out"
+            resp_flush
+            resp_flush
+        else
+            # Unknown command / transform failure: report error but keep the
+            # process alive for subsequent blobs (required=false => git falls
+            # back to the raw content).
+            resp_text 'status=error'
+            resp_flush
+        fi
+        resp_send
+    done
+}
+
+main() {
+    PKT_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/local-override-filter-process.XXXXXX")"
+    do_handshake
+    serve
+}
+
+main "$@"
