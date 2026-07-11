@@ -210,7 +210,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jonathanabila/git-override
-    rev: v0.4.0  # Use latest version
+    rev: v0.6.0  # Use latest version
     hooks:
       - id: local-override-pre-commit
       - id: local-override-post-commit
@@ -239,7 +239,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 <summary>📌 Pin to Specific Version</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.4.0/scripts/install.sh | bash -s -- --cli
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.6.0/scripts/install.sh | bash -s -- --cli
 ```
 
 </details>
