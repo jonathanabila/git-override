@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **AGENTS.md agent instructions refreshed** to match the current repo: the structure tree now lists `shared/local-override-shell-init.sh`, the shared test harness (`tests/test-lib.sh`), `tests/coverage.sh`, `tests/bench-filter-process.sh`, the linked-worktree suite (`tests/integration/test-worktrees.sh`), `Formula/`, `VERSION`, `plans/`, and the `CLAUDE.md -> AGENTS.md` symlink; the Testing section documents `make ci` as the single CI-parity command plus `make test-docker-worktree` and the opt-in `make coverage`; the CLI function list adds `cmd_validate`/`cmd_doctor`/`cmd_shell_init`/`cmd_version` and the `--all-worktrees` flags; and the file now states the shared-harness rule and the resolver mirror rule (`make check-resolver-sync`)
+
 ## [0.7.0] - 2026-07-11
 
 ### Security

@@ -22,14 +22,18 @@ git-local-override/
 │   ├── local-override-pre-commit
 │   └── local-override-post-commit
 ├── shared/                       # Shared shell modules
-│   └── local-override-resolver.sh # Canonical recursive config resolver
+│   ├── local-override-resolver.sh # Canonical recursive config resolver
+│   └── local-override-shell-init.sh # Shell wrapper source (printed by shell-init)
 ├── scripts/                      # Installation and release scripts
 │   ├── install.sh
 │   ├── uninstall.sh
 │   └── release.sh                # Changelog release prep helper
 ├── tests/                        # Test suite
-│   ├── run-tests.sh              # Main test runner
+│   ├── run-tests.sh              # Main test runner (unit suite)
 │   ├── run-docker.sh             # Docker test launcher
+│   ├── test-lib.sh               # Shared assertion harness (info/pass/fail, counters)
+│   ├── coverage.sh               # kcov entrypoint (opt-in coverage run)
+│   ├── bench-filter-process.sh   # filter.process benchmark + roundtrip harness
 │   ├── docker/                   # Docker test infrastructure
 │   │   ├── Dockerfile            # Ubuntu test image
 │   │   ├── Dockerfile.bash3      # Bash 3.2 compatibility image
@@ -37,7 +41,8 @@ git-local-override/
 │   └── integration/              # Integration tests
 │       ├── test-install.sh       # Install/uninstall tests
 │       ├── test-git-ops.sh       # Git operations tests
-│       └── test-precommit.sh     # Pre-commit framework tests
+│       ├── test-precommit.sh     # Pre-commit framework tests
+│       └── test-worktrees.sh     # Linked-worktree tests
 ├── .github/                      # GitHub configuration
 │   ├── workflows/
 │   │   ├── test.yml              # CI test workflow
@@ -46,8 +51,13 @@ git-local-override/
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   ├── CODEOWNERS
 │   └── dependabot.yml
-├── docs/                         # Additional documentation
-│   └── DESIGN.md                 # Original design specification (v0.0.1, obsolete)
+├── docs/                         # Additional documentation (DESIGN.md + design notes/)
+├── plans/                        # Implementation plans + index (plans/README.md)
+├── Formula/                      # Draft Homebrew formula (unpublished)
+│   └── git-local-override.rb
+├── AGENTS.md                     # Canonical agent instructions (this file)
+├── CLAUDE.md                     # Symlink -> AGENTS.md
+├── VERSION                       # Release version file (synced by scripts/release.sh)
 ├── .pre-commit-hooks.yaml        # Pre-commit integration definitions
 ├── .pre-commit-config.yaml       # Pre-commit hooks for this repo
 ├── .editorconfig                 # Editor configuration
@@ -60,6 +70,9 @@ git-local-override/
 ├── CODE_OF_CONDUCT.md            # Contributor code of conduct
 └── LICENSE                       # MIT license
 ```
+
+`coverage/` (kcov HTML output) is a gitignored build artifact, not a source
+directory.
 
 ## Architecture
 
@@ -198,6 +211,7 @@ make test-docker-bash3
 make test-docker-unit     # Unit tests only
 make test-docker-install  # Install/uninstall tests
 make test-docker-gitops   # Git operations tests
+make test-docker-worktree # Linked-worktree tests
 make test-docker-precommit # Pre-commit integration tests
 
 # Match CI matrix before committing (required)
@@ -207,6 +221,18 @@ make test-docker-bash3    # Bash compatibility suite (Bash 3.2 CI equivalent)
 # If developing on macOS, also run native suites to mirror macOS CI job
 make test
 tests/integration/test-install.sh && tests/integration/test-git-ops.sh && tests/integration/test-precommit.sh
+```
+
+The single command that mirrors the full CI matrix is `make ci`, which runs
+`lint check-resolver-sync test-docker test-docker-bash3` (see `Makefile:174`).
+Run it before committing; the individual targets above are for selective runs.
+
+```bash
+# Full CI-equivalent suite (requires Docker) — run this before committing
+make ci
+
+# Opt-in coverage diagnostic (kcov; writes gitignored coverage/index.html; NOT a CI gate)
+make coverage
 ```
 
 ### Running Tests Locally (Quick Check Only)
@@ -225,8 +251,8 @@ make clean
 
 Before creating any commit, run the full local CI-equivalent suite and ensure all pass:
 
-- `make test-docker`
-- `make test-docker-bash3`
+- `make ci` — the authoritative single command
+  (`lint check-resolver-sync test-docker test-docker-bash3`)
 - On macOS: `make test` plus all integration scripts in `tests/integration/`
 
 ### Writing Tests
@@ -258,6 +284,15 @@ main() {
 }
 ```
 
+The assertion harness — `info`/`pass`/`fail`, the terminal color vars, the
+`TESTS_RUN`/`TESTS_PASSED`/`TESTS_FAILED` counters, and the `finish_suite`
+summary/exit helper — lives once in `tests/test-lib.sh`. Suites source it and
+must NOT redefine these. `tests/run-tests.sh` (the unit suite) calls `pass`
+exactly once per test, so it sets `STRICT_PASS_COUNT=1` to additionally require
+`TESTS_PASSED == TESTS_RUN` (a test that starts but never reaches a `pass()`
+fails the build); the integration suites call `pass` once per assertion and
+leave that flag off.
+
 ### Test Environment
 
 - Tests run in an isolated environment: `tests/test-repo/`
@@ -266,6 +301,11 @@ main() {
 - The `XDG_CONFIG_HOME` is overridden to prevent system pollution
 
 ## Key Files to Understand
+
+**Resolver mirror rule**: `shared/local-override-resolver.sh` is the canonical
+recursive config resolver. Any edit to it must be mirrored byte-identically to
+`hooks/local-override-resolver.sh` (the installed runtime copy). `make
+check-resolver-sync` (part of `make ci`) fails if the two copies differ.
 
 ### `hooks/local-override-lib.sh`
 
@@ -335,9 +375,13 @@ Optional CLI tool. Key functions:
 - `cmd_remove()` - Remove override, restore original
 - `cmd_list()` - Show configured files and status
 - `cmd_status()` - Show detailed system status (config, hooks, pattern, filter status)
-- `cmd_apply()` - Manually apply all overrides using the shared recursive resolver
-- `cmd_restore()` - Manually restore all originals
+- `cmd_apply()` - Manually apply all overrides using the shared recursive resolver (`--all-worktrees` applies across every linked worktree)
+- `cmd_restore()` - Manually restore all originals (`--all-worktrees` restores across every linked worktree)
 - `cmd_sync_filters()` - Sync filter configuration with the effective recursive config and clear legacy managed `skip-worktree` bits
+- `cmd_validate()` - Read-only config validation (CI-friendly); reuses the resolver's `validate_config`
+- `cmd_doctor()` - Read-only diagnostics; `--fix` repairs a missing filter driver by delegating to `cmd_sync_filters`
+- `cmd_shell_init()` - Print the shell wrapper (content lives in `shared/local-override-shell-init.sh`, installed to the CLI data dir)
+- `cmd_version()` - Print the version, read from the `VERSION` file (repo checkout or installed support dir)
 - `cmd_filter_smudge()` - Internal: smudge filter for git filter driver
 - `cmd_filter_clean()` - Internal: clean filter for git filter driver
 - `cmd_init_config()` - Create a `.local-overrides.yaml` template
@@ -351,7 +395,8 @@ Optional CLI tool. Key functions:
 2. Add case in `main()` switch
 3. Update help text in `cmd_help()`
 4. Add test in `tests/run-tests.sh`
-5. Update `README.md`
+5. Update `README.md` (the CLI Commands table — `make check-docs-sync` enforces coverage)
+6. Update this file (`AGENTS.md`) — the "Key Files … `bin/git-local-override`" list
 
 ### Modifying Hook Behavior
 
