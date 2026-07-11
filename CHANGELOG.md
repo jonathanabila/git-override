@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`make check-docs-sync` gate** (`tests/check-docs-sync.sh`, wired into `make ci` next to `check-resolver-sync` and into the CI `lint` job): fails the build when a hardcoded documentation version pin (pre-commit `rev:` snippets, pinned `/vX.Y.Z/scripts/install.sh` URLs) does not match `VERSION`, or when a public CLI command in the dispatch `case` is missing from the `help` text or the README CLI Commands table
+
 ### Changed
 
 - **`scripts/release.sh` now bumps the documentation version pins** (`README.md`, `SECURITY.md`, `.pre-commit-hooks.yaml`, `bin/git-local-override`) from the previous release to the new one, so the pinned install/pre-commit snippets no longer have to be re-bumped by hand each release

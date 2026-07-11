@@ -168,10 +168,13 @@ check-resolver-sync: ## Verify shared/ and hooks/ resolver copies are identical
 		&& echo "resolver copies in sync" \
 		|| { echo "ERROR: shared/ and hooks/ resolver copies differ"; exit 1; }
 
+check-docs-sync: ## Verify doc version pins and CLI command coverage match the code
+	@$(SRC_TESTS)/check-docs-sync.sh
+
 # NOTE: fmt-check is not part of `ci` yet — the tree predates shfmt and is not
 # formatted under any shfmt flag combination (see plan 005); adding the gate
 # requires a maintainer decision (mass-reformat vs. dropping the gate).
-ci: lint check-resolver-sync test-docker test-docker-bash3 ## Run the full CI-equivalent suite (requires Docker)
+ci: lint check-resolver-sync check-docs-sync test-docker test-docker-bash3 ## Run the full CI-equivalent suite (requires Docker)
 
 #------------------------------------------------------------------------------
 # Manual Installation (alternative to install script)

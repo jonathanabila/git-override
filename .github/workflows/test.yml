@@ -90,3 +90,6 @@ jobs:
 
       - name: Check resolver copies are in sync
         run: make check-resolver-sync
+
+      - name: Check docs are in sync (version pins + CLI command coverage)
+        run: make check-docs-sync
