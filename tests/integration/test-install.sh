@@ -1066,6 +1066,15 @@ EOF
         return 1
     fi
 
+    local repair_marker
+    repair_marker="$(git -C "$repo_dir" rev-parse --absolute-git-dir)/local-override-skipworktree-repaired"
+    if [[ -f "$repair_marker" ]]; then
+        pass "install writes skip-worktree repair marker"
+    else
+        fail "install did not write skip-worktree repair marker ($repair_marker)"
+        return 1
+    fi
+
     if grep -q '^\*\*/AGENTS.md filter=agents-local$' "$attributes_file"; then
         pass "Foreign attributes entry preserved on reinstall"
     else

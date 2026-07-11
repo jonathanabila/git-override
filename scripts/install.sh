@@ -59,54 +59,15 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
     fi
 fi
 
-# Get hook content (from local file or remote URL)
-get_hook_content() {
-    local hook_name="$1"
+# Emit a project file: from the local checkout when running from a clone,
+# else from the remote raw URL (curl-pipe install path).
+get_project_file_content() {
+    local rel_path="$1"
 
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/hooks/$hook_name" ]]; then
-        cat "$PROJECT_DIR/hooks/$hook_name"
+    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/$rel_path" ]]; then
+        cat "$PROJECT_DIR/$rel_path"
     else
-        curl -fsSL "$REMOTE_BASE/hooks/$hook_name"
-    fi
-}
-
-get_lib_content() {
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/hooks/local-override-lib.sh" ]]; then
-        cat "$PROJECT_DIR/hooks/local-override-lib.sh"
-    else
-        curl -fsSL "$REMOTE_BASE/hooks/local-override-lib.sh"
-    fi
-}
-
-get_shared_resolver_content() {
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
-        cat "$PROJECT_DIR/shared/local-override-resolver.sh"
-    else
-        curl -fsSL "$REMOTE_BASE/shared/local-override-resolver.sh"
-    fi
-}
-
-get_version_content() {
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/VERSION" ]]; then
-        cat "$PROJECT_DIR/VERSION"
-    else
-        curl -fsSL "$REMOTE_BASE/VERSION"
-    fi
-}
-
-get_shell_init_content() {
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-shell-init.sh" ]]; then
-        cat "$PROJECT_DIR/shared/local-override-shell-init.sh"
-    else
-        curl -fsSL "$REMOTE_BASE/shared/local-override-shell-init.sh"
-    fi
-}
-
-get_cli_content() {
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/bin/git-local-override" ]]; then
-        cat "$PROJECT_DIR/bin/git-local-override"
-    else
-        curl -fsSL "$REMOTE_BASE/bin/git-local-override"
+        curl -fsSL "$REMOTE_BASE/$rel_path"
     fi
 }
 
@@ -358,7 +319,7 @@ read_config_pairs() {
         lib_file="$PROJECT_DIR/shared/local-override-resolver.sh"
     else
         lib_file="$(mktemp)"
-        get_shared_resolver_content > "$lib_file"
+        get_project_file_content "shared/local-override-resolver.sh" > "$lib_file"
     fi
 
     # shellcheck disable=SC1090
@@ -377,7 +338,7 @@ install_filter_scripts_to_dir() {
 
     local filter_script
     for filter_script in local-override-filter-smudge local-override-filter-clean local-override-filter-process; do
-        get_hook_content "$filter_script" > "$hooks_dir/$filter_script"
+        get_project_file_content "hooks/$filter_script" > "$hooks_dir/$filter_script"
         chmod +x "$hooks_dir/$filter_script"
         success "Installed: $hooks_dir/$filter_script"
     done
@@ -387,7 +348,7 @@ install_shared_resolver_to_dir() {
     local target_dir="$1"
 
     mkdir -p "$target_dir"
-    get_shared_resolver_content > "$target_dir/local-override-resolver.sh"
+    get_project_file_content "shared/local-override-resolver.sh" > "$target_dir/local-override-resolver.sh"
     chmod +x "$target_dir/local-override-resolver.sh"
     success "Installed: $target_dir/local-override-resolver.sh"
 }
@@ -408,7 +369,7 @@ sync_attributes() {
     else
         lib_file="$(mktemp)"
         cleanup_lib=true
-        get_shared_resolver_content > "$lib_file"
+        get_project_file_content "shared/local-override-resolver.sh" > "$lib_file"
     fi
 
     (
@@ -458,14 +419,16 @@ install_filters() {
     sync_attributes "$repo_root"
 }
 
+# Delegates to the resolver's canonical clear_legacy_skip_worktree (sourced via
+# $lib_file = local-override-lib.sh, which sources the resolver) instead of
+# re-implementing the detect+repair loop, and writes the plan-013 one-shot
+# repair marker so the first post-checkout after install doesn't repeat the
+# repair. The subshell's only stdout is the count clear_legacy_skip_worktree
+# prints; the marker write is silent.
 repair_legacy_skip_worktree() {
     local repo_root="$1"
     local lib_file="$2"
     local repaired_count="0"
-    local entry=""
-    local target=""
-    local seen_targets=""
-    local ls_output=""
 
     if ! git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name 2>/dev/null | grep -qxE '(.*/)?\.local-overrides\.yaml'; then
         return 0
@@ -475,33 +438,9 @@ repair_legacy_skip_worktree() {
     repaired_count="$({
         # shellcheck disable=SC1090
         source "$lib_file"
-
-        while IFS= read -r entry || [[ -n "$entry" ]]; do
-            [[ -z "$entry" ]] && continue
-
-            target="${entry%%|*}"
-            [[ -n "$target" ]] || continue
-
-            if echo "$seen_targets" | grep -qxF "$target"; then
-                continue
-            fi
-            seen_targets="$seen_targets
-$target"
-
-            if ! git -C "$repo_root" ls-files --error-unmatch -- "$target" >/dev/null 2>&1; then
-                continue
-            fi
-
-            ls_output="$(git -C "$repo_root" ls-files -v -- "$target" 2>/dev/null || true)"
-            if [[ "${ls_output:0:1}" != "S" ]]; then
-                continue
-            fi
-
-            git -C "$repo_root" update-index --no-skip-worktree -- "$target"
-            ((repaired_count++)) || true
-        done < <(read_config "$repo_root")
-
-        printf '%s\n' "$repaired_count"
+        clear_legacy_skip_worktree "$repo_root"
+        repair_marker="$(skip_worktree_repair_marker "$repo_root" 2>/dev/null || true)"
+        [[ -n "$repair_marker" ]] && : > "$repair_marker"
     })"
 
     if [[ -n "$repaired_count" && "$repaired_count" -gt 0 ]]; then
@@ -523,7 +462,7 @@ install_hooks_to_dir() {
 
     # Install the shared library
     info "Installing shared library..."
-    get_lib_content > "$lib_dir/local-override-lib.sh"
+    get_project_file_content "hooks/local-override-lib.sh" > "$lib_dir/local-override-lib.sh"
     chmod +x "$lib_dir/local-override-lib.sh"
     success "Installed: $lib_dir/local-override-lib.sh"
     install_shared_resolver_to_dir "$lib_dir"
@@ -535,7 +474,7 @@ install_hooks_to_dir() {
 
         # Get our hook content (lib is in same dir, so SCRIPT_DIR works as-is)
         local hook_content
-        hook_content="$(get_hook_content "$our_hook")"
+        hook_content="$(get_project_file_content "hooks/$our_hook")"
 
         if [[ -f "$hook_file" ]]; then
             prune_duplicate_precommit_legacy_hook "$hook_file" "$hook_type"
@@ -638,15 +577,15 @@ install_cli() {
     mkdir -p "$data_dir"
 
     info "Installing CLI tool..."
-    get_cli_content > "$bin_dir/git-local-override"
+    get_project_file_content "bin/git-local-override" > "$bin_dir/git-local-override"
     chmod +x "$bin_dir/git-local-override"
     success "Installed: $bin_dir/git-local-override"
-    get_shared_resolver_content > "$data_dir/local-override-resolver.sh"
+    get_project_file_content "shared/local-override-resolver.sh" > "$data_dir/local-override-resolver.sh"
     chmod +x "$data_dir/local-override-resolver.sh"
     success "Installed: $data_dir/local-override-resolver.sh"
-    get_shell_init_content > "$data_dir/local-override-shell-init.sh"
+    get_project_file_content "shared/local-override-shell-init.sh" > "$data_dir/local-override-shell-init.sh"
     success "Installed: $data_dir/local-override-shell-init.sh"
-    get_version_content > "$data_dir/VERSION"
+    get_project_file_content "VERSION" > "$data_dir/VERSION"
     success "Installed: $data_dir/VERSION"
 
     # Check if bin_dir is in PATH
