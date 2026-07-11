@@ -804,30 +804,23 @@ apply_to_checkout() {
     success "Applied $count override(s) in $(resolver_elapsed_milliseconds "$apply_start_ms")ms"
 }
 
-cmd_apply() {
-    local all_worktrees=false
-    local arg=""
-
-    for arg in "$@"; do
-        case "$arg" in
-            --all-worktrees) all_worktrees=true ;;
-            *) die "Unknown option for apply: $arg" ;;
-        esac
-    done
-
-    if [[ "$all_worktrees" == false ]]; then
-        local single_root
-        single_root="$(get_repo_root)" || die "Not in a git repository"
-        apply_to_checkout "$single_root"
-        return $?
-    fi
+# Runs "$per_checkout_fn <root>" in every worktree of the current repo.
+# $2 present-participle label ("Applying"); $3 failure verb ("apply");
+# $4 success message printf-format taking the count ("Applied overrides in
+# %s checkout(s)"). Isolates each checkout in a subshell so one failure is
+# tallied without aborting the rest, then dies if any failed.
+run_in_each_worktree() {
+    local per_checkout_fn="$1"
+    local running_label="$2"
+    local fail_verb="$3"
+    local success_format="$4"
 
     local start_root
     start_root="$(get_repo_root)" || die "Not in a git repository"
 
     local line=""
     local wt_root=""
-    local applied_count=0
+    local ok_count=0
     local failed_count=0
 
     # NUL-delimited worktree records (via the shared resolver helper) so
@@ -848,20 +841,43 @@ cmd_apply() {
             continue
         fi
 
-        info "=== Applying in $wt_root ==="
-        # Subshell: apply_to_checkout may die/exit on per-checkout failure;
-        # the subshell absorbs it so remaining worktrees still run.
-        if (cd "$wt_root" && apply_to_checkout "$wt_root"); then
-            ((applied_count++)) || true
+        info "=== $running_label in $wt_root ==="
+        # Subshell: the per-checkout function may die/exit on failure; the
+        # subshell absorbs it so remaining worktrees still run.
+        if (cd "$wt_root" && "$per_checkout_fn" "$wt_root"); then
+            ((ok_count++)) || true
         else
             ((failed_count++)) || true
         fi
     done < <(list_worktrees_porcelain_nul "$start_root")
 
     if [[ "$failed_count" -gt 0 ]]; then
-        die "apply failed in $failed_count worktree(s) (succeeded in $applied_count)"
+        die "$fail_verb failed in $failed_count worktree(s) (succeeded in $ok_count)"
     fi
-    success "Applied overrides in $applied_count checkout(s)"
+    # success_format is a trusted constant supplied by the caller.
+    # shellcheck disable=SC2059
+    success "$(printf "$success_format" "$ok_count")"
+}
+
+cmd_apply() {
+    local all_worktrees=false
+    local arg=""
+
+    for arg in "$@"; do
+        case "$arg" in
+            --all-worktrees) all_worktrees=true ;;
+            *) die "Unknown option for apply: $arg" ;;
+        esac
+    done
+
+    if [[ "$all_worktrees" == false ]]; then
+        local single_root
+        single_root="$(get_repo_root)" || die "Not in a git repository"
+        apply_to_checkout "$single_root"
+        return $?
+    fi
+
+    run_in_each_worktree apply_to_checkout "Applying" "apply" "Applied overrides in %s checkout(s)"
 }
 
 restore_in_checkout() {
@@ -925,46 +941,7 @@ cmd_restore() {
         return $?
     fi
 
-    local start_root
-    start_root="$(get_repo_root)" || die "Not in a git repository"
-
-    local line=""
-    local wt_root=""
-    local restored_count=0
-    local failed_count=0
-
-    # NUL-delimited worktree records (via the shared resolver helper) so
-    # worktree paths containing newlines parse correctly on git >= 2.36.
-    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
-        case "$line" in
-            worktree\ *) ;;
-            *) continue ;;
-        esac
-        wt_root="${line#worktree }"
-
-        if [[ ! -d "$wt_root" ]]; then
-            info "Skipping missing worktree: $wt_root"
-            continue
-        fi
-        if ! git -C "$wt_root" rev-parse --show-toplevel >/dev/null 2>&1; then
-            info "Skipping non-checkout entry: $wt_root"
-            continue
-        fi
-
-        info "=== Restoring in $wt_root ==="
-        # Subshell: restore_in_checkout may die/exit on per-checkout failure;
-        # the subshell absorbs it so remaining worktrees still run.
-        if (cd "$wt_root" && restore_in_checkout "$wt_root"); then
-            ((restored_count++)) || true
-        else
-            ((failed_count++)) || true
-        fi
-    done < <(list_worktrees_porcelain_nul "$start_root")
-
-    if [[ "$failed_count" -gt 0 ]]; then
-        die "restore failed in $failed_count worktree(s) (succeeded in $restored_count)"
-    fi
-    success "Restored originals in $restored_count checkout(s)"
+    run_in_each_worktree restore_in_checkout "Restoring" "restore" "Restored originals in %s checkout(s)"
 }
 
 cmd_sync_filters() {
