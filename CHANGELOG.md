@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`scripts/release.sh` now bumps the documentation version pins** (`README.md`, `SECURITY.md`, `.pre-commit-hooks.yaml`, `bin/git-local-override`) from the previous release to the new one, so the pinned install/pre-commit snippets no longer have to be re-bumped by hand each release
+- **AGENTS.md agent instructions refreshed** to match the current repo: the structure tree now lists `shared/local-override-shell-init.sh`, the shared test harness (`tests/test-lib.sh`), `tests/coverage.sh`, `tests/bench-filter-process.sh`, the linked-worktree suite (`tests/integration/test-worktrees.sh`), `Formula/`, `VERSION`, `plans/`, and the `CLAUDE.md -> AGENTS.md` symlink; the Testing section documents `make ci` as the single CI-parity command plus `make test-docker-worktree` and the opt-in `make coverage`; the CLI function list adds `cmd_validate`/`cmd_doctor`/`cmd_shell_init`/`cmd_version` and the `--all-worktrees` flags; and the file now states the shared-harness rule and the resolver mirror rule (`make check-resolver-sync`)
+
 ### Fixed
 
 - **User-facing doc gaps**: the README CLI Commands table now lists `doctor` (previously only in help/dispatch/troubleshooting prose); the "What Gets Installed" `--cli` line now names all support files written to the CLI data dir (`local-override-shell-init.sh` and `VERSION` alongside `local-override-resolver.sh`); the CONTRIBUTING project tree now lists `shared/` (both modules), the shared test harness and the linked-worktree suite, `Formula/`, and `VERSION`, and its PR checklist leads with `make ci`; and `docs/DESIGN.md`'s command list adds `validate`, `doctor`, `shell-init`, and `version`
-
-### Changed
-
-- **AGENTS.md agent instructions refreshed** to match the current repo: the structure tree now lists `shared/local-override-shell-init.sh`, the shared test harness (`tests/test-lib.sh`), `tests/coverage.sh`, `tests/bench-filter-process.sh`, the linked-worktree suite (`tests/integration/test-worktrees.sh`), `Formula/`, `VERSION`, `plans/`, and the `CLAUDE.md -> AGENTS.md` symlink; the Testing section documents `make ci` as the single CI-parity command plus `make test-docker-worktree` and the opt-in `make coverage`; the CLI function list adds `cmd_validate`/`cmd_doctor`/`cmd_shell_init`/`cmd_version` and the `--all-worktrees` flags; and the file now states the shared-harness rule and the resolver mirror rule (`make check-resolver-sync`)
 
 ## [0.7.0] - 2026-07-11
 

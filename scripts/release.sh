@@ -87,7 +87,41 @@ rm -f "${CHANGELOG}.bak"
 
 printf '%s\n' "$VERSION" > "$VERSION_FILE"
 
+# Bump hardcoded documentation version pins from the previous release to this one.
+# release.sh otherwise only updates CHANGELOG.md and VERSION, leaving the pinned
+# install/pre-commit snippets stale (they had to be re-bumped by hand for v0.6.0
+# and v0.7.0). Each of these files pins `v<prev>` in a `rev:` line or a
+# `/v<prev>/scripts/install.sh` URL; a global literal replace is safe because no
+# other `v<prev>` string occurs in them. `make check-docs-sync` guards the result.
+PIN_FILES="README.md SECURITY.md .pre-commit-hooks.yaml bin/git-local-override"
+PREV_PIN_ESC=$(printf '%s' "$PREV_VERSION" | sed 's/[.]/\\./g')
+UPDATED_PINS=""
+for pin_file in $PIN_FILES; do
+    if [[ ! -f "$pin_file" ]]; then
+        echo "Warning: pin file $pin_file not found; skipping" >&2
+        continue
+    fi
+    if ! grep -qF "v${PREV_VERSION}" "$pin_file"; then
+        echo "Warning: no v${PREV_VERSION} pin found in $pin_file; skipping" >&2
+        continue
+    fi
+    sed "s/v${PREV_PIN_ESC}/v${VERSION}/g" "$pin_file" > "${pin_file}.tmp" \
+        && mv "${pin_file}.tmp" "$pin_file"
+    UPDATED_PINS="${UPDATED_PINS} ${pin_file}"
+done
+
+# Assert no stale pin remains in any of the pin files after the bump.
+for pin_file in $PIN_FILES; do
+    [[ -f "$pin_file" ]] || continue
+    if grep -qF "v${PREV_VERSION}" "$pin_file"; then
+        die "Stale version pin v${PREV_VERSION} still present in $pin_file after bump"
+    fi
+done
+
 echo "Released version $VERSION"
+if [[ -n "$UPDATED_PINS" ]]; then
+    echo "Bumped doc version pins (v${PREV_VERSION} -> v${VERSION}):${UPDATED_PINS}"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Review changes: git diff -- CHANGELOG.md VERSION"
