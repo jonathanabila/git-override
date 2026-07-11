@@ -804,6 +804,31 @@ test_status_command() {
     fi
 }
 
+test_status_recognizes_filter_process_mode() {
+    info "Testing status recognizes the experimental filter.process driver..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    # Configure only the experimental process driver (unset smudge/clean).
+    git config --local --unset-all filter.local-override.smudge 2>/dev/null || true
+    git config --local --unset-all filter.local-override.clean 2>/dev/null || true
+    git config --local filter.local-override.process "x"
+
+    local output
+    local filter_line
+    output=$(git-local-override status)
+    # Strip ANSI color codes and isolate the Filter: line.
+    filter_line=$(printf '%s\n' "$output" | sed $'s/\033\[[0-9;]*m//g' | grep '^Filter:' || true)
+
+    if [[ "$filter_line" == *"installed (filter.process"* \
+        && "$filter_line" != *"not installed"* ]]; then
+        pass "Status recognizes filter.process mode"
+    else
+        fail "Status did not recognize filter.process mode (Filter line: '$filter_line')"
+    fi
+}
+
 test_status_in_worktree() {
     info "Testing status command from inside a linked worktree..."
 
@@ -2756,6 +2781,7 @@ main() {
         test_post_checkout_falls_back_and_refreshes_attributes_when_config_changes \
         test_pre_rebase_trace_reuses_config_discovery_cache \
         test_status_command \
+        test_status_recognizes_filter_process_mode \
         test_status_in_worktree \
         test_status_detects_precommit_framework_hooks \
         test_status_shim_without_local_override_ids \
