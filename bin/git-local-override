@@ -1037,10 +1037,13 @@ cmd_validate() {
     checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
-    has_any_config "$repo_root" || die "No $CONFIG_FILE_NAME found"
-
+    # Cache discovery before has_any_config so the check hits the cache instead
+    # of paying a throwaway walk first (matches cmd_sync_filters). Without this
+    # ordering validate runs two full discovery walks per invocation.
     cache_config_files "$repo_root"
     trap 'clear_config_files_cache' RETURN
+
+    has_any_config "$repo_root" || die "No $CONFIG_FILE_NAME found"
 
     if validate_config "$repo_root"; then
         local n
