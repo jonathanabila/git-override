@@ -43,7 +43,7 @@ Then set up a repo in three steps:
 ```yaml
 repos:
   - repo: https://github.com/jonathanabila/git-override
-    rev: v0.8.0  # Use the latest version
+    rev: v0.9.0  # Use the latest version
     hooks:
       - id: local-override-pre-commit
       - id: local-override-post-commit
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/main/scr
 **Pin to a specific version:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.8.0/scripts/install.sh | bash -s -- --cli
+curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.9.0/scripts/install.sh | bash -s -- --cli
 ```
 
 Re-running the install one-liner in an existing repo is the supported upgrade
