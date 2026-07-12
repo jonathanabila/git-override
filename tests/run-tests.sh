@@ -788,6 +788,201 @@ test_pre_rebase_trace_reuses_config_discovery_cache() {
     fi
 }
 
+test_discovery_full_finds_directly_ignored_config() {
+    info "Testing full discovery finds a directly-ignored config in a walked dir..."
+
+    cd "$TEST_REPO"
+
+    mkdir -p tools
+    cat > tools/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    # Ignore the config file itself; its parent dir (tools/) is still walked.
+    echo "tools/.local-overrides.yaml" >> .git/info/exclude
+
+    local output
+    output="$(
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        discover_config_files "$PWD"
+    )"
+
+    if printf '%s\n' "$output" | grep -qxF "tools/.local-overrides.yaml"; then
+        pass "Full discovery finds a directly-ignored config in a walked directory"
+    else
+        fail "Directly-ignored config not discovered (output: $output)"
+    fi
+}
+
+test_discovery_skips_config_inside_ignored_dir() {
+    info "Testing full discovery skips a config inside a wholly-ignored directory..."
+
+    cd "$TEST_REPO"
+
+    mkdir -p vendor/dep
+    cat > vendor/dep/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: x.local.md
+    replaces:
+      - x.md
+EOF
+    # Ignore the whole vendor/ tree: git collapses it under --directory, so the
+    # config inside is never discovered (carve-out 1).
+    echo "vendor/" >> .git/info/exclude
+
+    local output
+    output="$(
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        discover_config_files "$PWD"
+    )"
+
+    if printf '%s\n' "$output" | grep -qF "vendor/dep/.local-overrides.yaml"; then
+        fail "Config inside a wholly-ignored directory was discovered (output: $output)"
+    else
+        pass "Config inside a wholly-ignored directory is not discovered"
+    fi
+}
+
+test_discovery_hot_mode_unions_stamped_paths() {
+    info "Testing hot discovery unions stamped paths but skips the ignored tree..."
+
+    cd "$TEST_REPO"
+
+    # Root config is untracked-but-not-ignored, so pass 1 always finds it.
+    create_config
+    mkdir -p tools
+    cat > tools/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    echo "tools/.local-overrides.yaml" >> .git/info/exclude
+
+    local hot_plain hot_extra hot_missing
+    hot_plain="$(
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        discover_config_files "$PWD" hot
+    )"
+    hot_extra="$(
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        discover_config_files "$PWD" hot "tools/.local-overrides.yaml"
+    )"
+    hot_missing="$(
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        discover_config_files "$PWD" hot "gone/.local-overrides.yaml"
+    )"
+
+    local extra_count missing_count
+    extra_count="$(printf '%s\n' "$hot_extra" | grep -cxF "tools/.local-overrides.yaml" || true)"
+    missing_count="$(printf '%s\n' "$hot_missing" | grep -cxF "gone/.local-overrides.yaml" || true)"
+
+    if ! printf '%s\n' "$hot_plain" | grep -qxF "tools/.local-overrides.yaml" &&
+       [[ "$extra_count" -eq 1 ]] &&
+       [[ "$missing_count" -eq 0 ]]; then
+        pass "Hot discovery skips the ignored tree, unions existing stamped paths once, drops missing ones"
+    else
+        fail "Hot mode union incorrect (plain=[$hot_plain] extra_count=$extra_count missing_count=$missing_count)"
+    fi
+}
+
+test_discovery_never_reads_git_dir_configs() {
+    info "Testing discovery never reads configs inside .git/..."
+
+    cd "$TEST_REPO"
+
+    mkdir -p .git/sub
+    cat > .git/sub/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: x.local.md
+    replaces:
+      - x.md
+EOF
+
+    local output
+    output="$(
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        discover_config_files "$PWD"
+    )"
+
+    if printf '%s\n' "$output" | grep -qF ".git/sub/.local-overrides.yaml"; then
+        fail "Config inside .git/ was discovered (output: $output)"
+    else
+        pass "Configs inside .git/ are never discovered (carve-out 3 tripwire)"
+    fi
+}
+
+test_new_gitignored_config_registered_by_sync_filters() {
+    info "Testing a new gitignored config is registered only after sync-filters..."
+
+    cd "$TEST_REPO"
+
+    # Tracked root config + its override; sync-filters records the stamp.
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add tracked root config"
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+
+    git-local-override sync-filters >/dev/null 2>&1
+
+    local head
+    head="$(git rev-parse HEAD)"
+    # Warm the attributes/stamp via one hook run.
+    .git/hooks/post-checkout "$head" "$head" "1" >/dev/null 2>&1
+
+    # A brand-new gitignored config in a walked subdir, managing a tracked
+    # target. No tracked config diff can see it.
+    mkdir -p sub
+    echo "# original notes" > sub/notes.md
+    git add sub/notes.md
+    git commit -q -m "Add tracked subdir target"
+    cat > sub/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    echo "sub/.local-overrides.yaml" >> .gitignore
+    echo "# SUB LOCAL notes" > sub/notes.local.md
+
+    head="$(git rev-parse HEAD)"
+
+    # Before sync-filters: hooks trust the stamp, so the new gitignored config
+    # is invisible and the new target is left untouched.
+    .git/hooks/post-checkout "$head" "$head" "1" >/dev/null 2>&1
+    local before_applied=false
+    if grep -q "SUB LOCAL notes" sub/notes.md; then
+        before_applied=true
+    fi
+
+    # sync-filters runs full discovery, registering the new config + stamp.
+    git-local-override sync-filters >/dev/null 2>&1
+    .git/hooks/post-checkout "$head" "$head" "1" >/dev/null 2>&1
+    local after_applied=false
+    if grep -q "SUB LOCAL notes" sub/notes.md; then
+        after_applied=true
+    fi
+
+    if [[ "$before_applied" == false && "$after_applied" == true ]]; then
+        pass "New gitignored config unregistered until sync-filters, then applied on checkout"
+    else
+        fail "Expected new target unmanaged before sync-filters and managed after (before=$before_applied after=$after_applied)"
+    fi
+}
+
 test_status_command() {
     info "Testing status command..."
 
@@ -2875,6 +3070,11 @@ main() {
         test_post_checkout_trace_single_discovery_when_config_unchanged \
         test_post_checkout_falls_back_and_refreshes_attributes_when_config_changes \
         test_pre_rebase_trace_reuses_config_discovery_cache \
+        test_discovery_full_finds_directly_ignored_config \
+        test_discovery_skips_config_inside_ignored_dir \
+        test_discovery_hot_mode_unions_stamped_paths \
+        test_discovery_never_reads_git_dir_configs \
+        test_new_gitignored_config_registered_by_sync_filters \
         test_status_command \
         test_status_recognizes_filter_process_mode \
         test_status_in_worktree \
