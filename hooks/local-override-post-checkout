@@ -56,17 +56,14 @@ checkout_config_change_state() {
 resolve_post_checkout_entries_fast() {
     local repo_root="$1"
     local resolution_root="$2"
-    local previous_head="$3"
-    local new_head="$4"
-    local config_change_state=""
     local config_entries=""
 
-    config_change_state="$(checkout_config_change_state "$repo_root" "$previous_head" "$new_head")"
-    [[ "$config_change_state" == "unchanged" ]] || return 1
-
-    # A tracked HEAD diff cannot see edits to gitignored/untracked configs;
-    # compare the on-disk config set against the stamp recorded by the last
-    # full resolution and fall back to full discovery on any drift.
+    # The caller has already confirmed there is no tracked-config HEAD diff and
+    # populated the hot discovery cache. A tracked HEAD diff cannot see edits to
+    # gitignored/untracked configs, so compare the on-disk config set (the hot
+    # cache) against the stamp recorded by the last full resolution and fall
+    # back to full discovery on any drift. Equality here means exactly "no
+    # config drift is visible without an ignored-tree walk".
     if ! config_stamp_matches "$repo_root" "$resolution_root"; then
         local_override_trace_log "post-checkout" "config-stamp drift; falling back to full discovery"
         return 1
@@ -74,7 +71,7 @@ resolve_post_checkout_entries_fast() {
 
     config_entries="$(read_config_entries_from_attributes "$resolution_root" 2>/dev/null)" || return 1
 
-    local_override_trace_log "post-checkout" "fast-path config=$config_change_state managed_targets=$(count_list_entries "$config_entries")"
+    local_override_trace_log "post-checkout" "fast-path config=unchanged managed_targets=$(count_list_entries "$config_entries")"
     printf '%s' "$config_entries"
 }
 
@@ -99,15 +96,30 @@ run_post_checkout() {
     # checkout for fallback worktrees); target writes and index repairs stay
     # on the checkout root.
     resolution_root="$(get_resolution_root "$repo_root")"
-
-    # Both the fast path's config-stamp drift check and the slow path need
-    # config discovery; cache it once so they share a single walk.
-    cache_config_files "$resolution_root"
     trap 'clear_config_files_cache' RETURN
 
-    if config_entries="$(resolve_post_checkout_entries_fast "$repo_root" "$resolution_root" "$_previous_head" "$_new_head")"; then
-        using_fast_path=true
-    else
+    # A tracked-config HEAD diff is the only signal the hot path acts on: when
+    # the tracked configs are unchanged, discovery can skip the ignored-tree
+    # walk and trust the stamp for known gitignored configs.
+    local config_change_state
+    config_change_state="$(checkout_config_change_state "$repo_root" "$_previous_head" "$_new_head")"
+
+    if [[ "$config_change_state" == "unchanged" ]]; then
+        # Hot discovery: one non-ignored-tree walk plus the stamped gitignored
+        # configs. A brand-new gitignored config is registered by
+        # sync-filters/apply (full discovery), not here.
+        cache_config_files "$resolution_root" hot "$(get_stamped_config_paths "$repo_root")"
+        if config_entries="$(resolve_post_checkout_entries_fast "$repo_root" "$resolution_root")"; then
+            using_fast_path=true
+        fi
+    fi
+
+    if [[ "$using_fast_path" != true ]]; then
+        # Slow path: re-run full discovery (directly-ignored configs included)
+        # and re-sync attributes + stamp so the next hot path can trust them.
+        clear_config_files_cache
+        cache_config_files "$resolution_root"
+
         if ! has_any_config "$resolution_root"; then
             return 0
         fi
