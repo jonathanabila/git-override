@@ -81,5 +81,5 @@ We will not pursue legal action against researchers who follow these guidelines.
 5. **Use version pinning** when installing via curl to ensure reproducible installs:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.7.0/scripts/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/jonathanabila/git-override/v0.8.0/scripts/install.sh | bash
    ```

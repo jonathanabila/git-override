@@ -105,8 +105,14 @@ for pin_file in $PIN_FILES; do
         echo "Warning: no v${PREV_VERSION} pin found in $pin_file; skipping" >&2
         continue
     fi
+    # Write through the .tmp file but preserve the original mode: `mv` of a
+    # fresh temp file would reset perms to the umask default and strip the
+    # executable bit off bin/git-local-override, breaking every hook/test that
+    # execs it. cp --preserve isn't portable to macOS, so copy the sed output
+    # back into the original inode (which keeps its mode) and drop the temp.
     sed "s/v${PREV_PIN_ESC}/v${VERSION}/g" "$pin_file" > "${pin_file}.tmp" \
-        && mv "${pin_file}.tmp" "$pin_file"
+        && cat "${pin_file}.tmp" > "$pin_file" \
+        && rm -f "${pin_file}.tmp"
     UPDATED_PINS="${UPDATED_PINS} ${pin_file}"
 done
 

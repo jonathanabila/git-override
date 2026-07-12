@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-12
+
 ### Added
 
 - **CLI error-path and clean-filter characterization tests**: two unit tests pin the previously untested `die "Not in a git repository"` guard (running `status`/`list`/`apply` from outside any git worktree) and the `die "Unknown command"` dispatch fallback; one git-ops characterization test locks the clean filter's current contract for a never-tracked managed target — staging a brand-new target that holds override content passes those bytes through to the index (there is no index/HEAD blob to substitute), so `hooks/local-override-pre-commit` remains the leak gate. The characterization test is a tripwire for a future clean-core refactor, not an endorsement of the passthrough (unit 91→93, git-ops 37→38 native)
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`scripts/release.sh` no longer strips the executable bit off `bin/git-local-override`**: the doc-pin bump wrote each file via `sed > tmp && mv tmp file`, and `mv` of a fresh temp file reset the mode to the umask default — dropping the `+x` bit on the CLI, so every hook and test that execs it failed with `Permission denied` right after a release prep. The bump now copies the rewritten content back into the original inode (`cat tmp > file`), preserving the file's existing mode
 - **`validate` no longer runs config discovery twice per invocation.** `cmd_validate` called `has_any_config` *before* `cache_config_files`, so the check missed the in-process cache and paid a throwaway full discovery walk, then `cache_config_files` walked a second time — visible as two `strategy=full` trace lines where every other command logs one. Reordered to cache first (matching `cmd_sync_filters`), so `has_any_config` hits the cache. Pure reordering, no output change; saves one full discovery walk per `validate`, which matters most in CI where the repo is often cold (3–5× the warm cost)
 - **Configs inside `.git/` or inside a wholly-gitignored directory are no longer discovered or honored.** The old `fd --no-ignore` strategy (and the old unconditional ignored pass) could discover and act on a `.local-overrides.yaml` planted inside `.git/` or inside a vendored/gitignored tree (e.g. an npm package shipping a config plus override files), letting third-party content overwrite arbitrary repo files at checkout. Discovery now skips both. Configs whose own path is gitignored but whose parent directory is walked (the documented gitignored-config use case) remain fully supported
 - **Test-infra hygiene**: the four integration runner loops no longer overwrite `CURRENT_TEST_STATUS` with the test function's raw return code — they key fail-fast and artifact preservation off `CURRENT_TEST_STATUS` (which `fail()` sets to 1) like the unit runner, so a future test that calls `fail` without `return 1` still stops the suite and preserves its test root under `TEST_KEEP_ARTIFACTS=1` instead of silently continuing and deleting it (latent today: all ~327 `fail` sites currently `return 1`). `tests/run-docker.sh` now passes `-e CI=true` so the dev launcher reproduces the Makefile gate's assertions (the worktree fd-strategy legs hard-fail instead of soft-skipping). The Docker test image pins `pre-commit==4.6.*` (was unpinned `pip3 install pre-commit`, rebuilt every CI run) so an upstream release can't break CI on an unrelated PR
@@ -669,6 +672,7 @@ files:
 - **0.0.2** - Config-driven architecture
 - **0.0.1** - Initial release with full feature set
 
+[0.8.0]: https://github.com/jonathanabila/git-override/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/jonathanabila/git-override/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/jonathanabila/git-override/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jonathanabila/git-override/compare/v0.4.1...v0.5.0
