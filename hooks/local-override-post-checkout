@@ -69,6 +69,17 @@ resolve_post_checkout_entries_fast() {
         return 1
     fi
 
+    # A missing or empty attributes file means the managed block was deleted or
+    # truncated out-of-band. The stamp/tracked-config checks cannot see that, so
+    # force the slow path to rebuild attributes rather than "succeeding" with an
+    # empty entry set (which would silently disable the filter driver).
+    local attributes_file=""
+    attributes_file="$(get_attributes_file_path "$resolution_root" 2>/dev/null || true)"
+    if [[ -z "$attributes_file" || ! -s "$attributes_file" ]]; then
+        local_override_trace_log "post-checkout" "attributes missing/empty; falling back to full discovery"
+        return 1
+    fi
+
     config_entries="$(read_config_entries_from_attributes "$resolution_root" 2>/dev/null)" || return 1
 
     local_override_trace_log "post-checkout" "fast-path config=unchanged managed_targets=$(count_list_entries "$config_entries")"

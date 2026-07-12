@@ -1930,6 +1930,47 @@ test_checkout_fast_path_when_config_unchanged() {
     git checkout -q "$default_branch"
 }
 
+test_checkout_resyncs_deleted_attributes() {
+    info "Testing checkout re-syncs a deleted .git/info/attributes file..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    # Warm up: the first checkout after install runs the slow path, syncs
+    # attributes, and records the config stamp so later checkouts are
+    # eligible for the fast path.
+    git checkout -q -b attributes-resync-warmup
+    git checkout -q "$default_branch"
+
+    if grep -q "filter=local-override" .git/info/attributes; then
+        pass "Pre-condition: attributes file has managed filter lines"
+    else
+        fail "Pre-condition: attributes file missing managed filter lines"
+        return 1
+    fi
+
+    # Simulate out-of-band deletion. No config changes, so the stamp still
+    # matches and tracked configs are unchanged — only an attributes-file
+    # check can catch this.
+    rm .git/info/attributes
+
+    # Branch checkout fires post-checkout; the fast path must disqualify
+    # itself so the slow path rebuilds the attributes file.
+    git checkout -q attributes-resync-warmup
+
+    if [[ -s .git/info/attributes ]] && grep -q "filter=local-override" .git/info/attributes; then
+        pass "Deleted attributes file was re-synced on branch checkout"
+    else
+        fail "Attributes file not re-synced after out-of-band deletion"
+        git checkout -q "$default_branch" 2>/dev/null || true
+        return 1
+    fi
+
+    git checkout -q "$default_branch"
+}
+
 test_worktree_add_with_filters() {
     info "Testing git worktree add works with filters..."
 
@@ -2091,6 +2132,7 @@ main() {
         test_disable_env_var_allows_restore \
         test_gitignored_config_edit_applies_new_target_on_checkout \
         test_checkout_fast_path_when_config_unchanged \
+        test_checkout_resyncs_deleted_attributes \
         test_worktree_add_with_filters; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo
