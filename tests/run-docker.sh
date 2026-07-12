@@ -61,9 +61,11 @@ fi
 info "Building Docker image: $IMAGE_NAME"
 docker build -t "$IMAGE_NAME" -f "$DOCKERFILE" "$PROJECT_DIR"
 
-# Run the tests
+# Run the tests. Set the CI env (matching the Makefile gate) so the worktree
+# suite's fd-strategy legs hard-fail instead of soft-skipping when fd is
+# missing — this dev launcher then reproduces the same assertions as the gate.
 info "Running tests: ${TEST_SUITES[*]}"
-docker run --rm "$IMAGE_NAME" "${TEST_SUITES[@]}"
+docker run --rm -e CI=true "$IMAGE_NAME" "${TEST_SUITES[@]}"
 
 exit_code=$?
 
