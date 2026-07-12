@@ -318,6 +318,7 @@ Shared library sourced by all hooks. Key functions:
 - `get_override_files()` - List unique override files from config
 - `get_targets_for_override()` - Get all target files for a specific override
 - `get_override_for_file()` - Find the override file for a given target file path; returns an absolute path resolved against the checkout's resolution root
+- `override_path_is_symlink_safe()` - Read-side symlink gate for override files (in the shared resolver): delegates to `path_is_symlink_safe` for regular paths; follows a symlinked override only when the user set `git config --local local-override.followSymlinkedOverrides true` AND the symlink is untracked AND it resolves to a regular file. Targets (write side) never use it.
 - `validate_config()` - Validate config format and check for duplicate targets
 
 ### `hooks/local-override-post-checkout`
@@ -379,7 +380,7 @@ Optional CLI tool. Key functions:
 - `cmd_restore()` - Manually restore all originals (`--all-worktrees` restores across every linked worktree)
 - `cmd_sync_filters()` - Sync filter configuration with the effective recursive config and clear legacy managed `skip-worktree` bits
 - `cmd_validate()` - Read-only config validation (CI-friendly); reuses the resolver's `validate_config`
-- `cmd_doctor()` - Read-only diagnostics; `--fix` repairs a missing filter driver by delegating to `cmd_sync_filters`
+- `cmd_doctor()` - Read-only diagnostics; `--fix` repairs a missing filter driver by delegating to `cmd_sync_filters`; also classifies symlinked overrides (followed / ignored / tracked-refused / dangling) against the `local-override.followSymlinkedOverrides` opt-in
 - `cmd_shell_init()` - Print the shell wrapper (content lives in `shared/local-override-shell-init.sh`, installed to the CLI data dir)
 - `cmd_version()` - Print the version, read from the `VERSION` file (repo checkout or installed support dir)
 - `cmd_filter_smudge()` - Internal: smudge filter for git filter driver

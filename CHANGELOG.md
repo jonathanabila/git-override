@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in support for symlinked override files** (`git config --local local-override.followSymlinkedOverrides true`): override files that are symlinks created by the user — e.g. pointing at a canonical copy kept in a separate dotfiles repo — are now followed by `add`, `apply`, the smudge/clean filters, and the post-commit reapply. The opt-in is deliberately impossible to ship in repo content: it lives only in git config, and a symlink that is *tracked* by git is refused even when the opt-in is set, so a hostile repo can neither enable following nor plant a link (the plan-001 read-leak and write-escape guards are otherwise unchanged — symlinked *targets* are always refused). Dangling symlinks are treated as a missing override. `list`/`status` mark symlinked overrides and show their real (followed vs ignored) state, and `doctor` gained a check that prints the exact opt-in command when a symlinked override is being ignored (unit 102→113)
+
 ## [0.8.0] - 2026-07-12
 
 ### Added

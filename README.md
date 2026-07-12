@@ -241,6 +241,24 @@ Both modes also add `*.local.*` to the global gitignore.
 | `GIT_LOCAL_OVERRIDE_TRACE=1` | Emit verbose timing/lifecycle trace to stderr from hooks, filters, and `apply` (includes `discover_config_files strategy=hot\|full` lines) |
 | `GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1` | Disable a linked worktree inheriting the main worktree's config/overrides |
 
+### Git config settings
+
+| Setting | Effect |
+|---------|--------|
+| `local-override.followSymlinkedOverrides` (bool, default false) | Follow override files that are **symlinks you created** (e.g. pointing at a canonical copy kept outside the repo). Set per repo with `git config --local local-override.followSymlinkedOverrides true`. Symlinks tracked by git are always refused (a repo cannot ship a link at you), as are symlinked *target* files. Dangling symlinks are treated as a missing override. |
+
+**Recipe — keep your override's canonical copy outside the repo:**
+
+```bash
+# Canonical file lives in your own (version-controlled) location:
+ln -s ~/dotfiles/CLAUDE.private.md CLAUDE.private.md
+git config --local local-override.followSymlinkedOverrides true
+git-local-override apply
+```
+
+`git-local-override doctor` explains the state of any symlinked override
+(followed, ignored pending opt-in, tracked-and-refused, or dangling).
+
 **Tip:** to commit your local content intentionally, bypass the pre-commit hook
 with `git commit --no-verify`.
 
