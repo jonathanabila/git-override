@@ -817,12 +817,17 @@ apply_to_checkout() {
             copy_start_ms="$apply_target_start_ms"
             # Refuse symlinked targets before cp follows the link (write
             # side). Overrides are read-side: user-created symlinks pass
-            # behind the local opt-in.
+            # behind the local opt-in. A refused entry is a benign skip
+            # (matching post-checkout and the filters), so later entries
+            # still apply and sync_attributes below keeps attributes
+            # consistent.
             if ! path_is_symlink_safe "$checkout_root" "$target"; then
-                die "refusing symlinked path: $target"
+                printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
+                continue
             fi
             if ! override_path_is_symlink_safe "$repo_root" "$override" "$repo_root"; then
-                die "refusing symlinked path: $override"
+                printf 'git-local-override: refusing symlinked override for %s\n' "$target" >&2
+                continue
             fi
             # Explicit guard: inside `if (subshell)` errexit is suppressed, so
             # a bare cp failure would be silently absorbed by the caller.

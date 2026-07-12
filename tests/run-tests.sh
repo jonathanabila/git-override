@@ -2349,7 +2349,7 @@ test_override_symlink_helper_decision_table() {
 }
 
 test_symlink_override_refused_without_optin_cli() {
-    info "Testing CLI apply refuses symlinked override without opt-in..."
+    info "Testing CLI apply skips symlinked override without opt-in..."
 
     cd "$TEST_REPO"
     create_config
@@ -2364,12 +2364,18 @@ test_symlink_override_refused_without_optin_cli() {
     local exit_code=0
     output=$(git-local-override apply 2>&1) || exit_code=$?
 
-    if [[ $exit_code -ne 0 ]] \
-       && [[ "$output" == *"refusing symlinked path"* ]] \
-       && grep -q "Original CLAUDE.md content" CLAUDE.md; then
-        pass "Symlinked override refused by apply without opt-in"
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+
+    # Refused symlinked override is a benign skip: apply exits 0, the target
+    # keeps its original content, and attributes are still synced.
+    if [[ $exit_code -eq 0 ]] \
+       && [[ "$output" == *"refusing symlinked override"* ]] \
+       && grep -q "Original CLAUDE.md content" CLAUDE.md \
+       && grep -q "filter=local-override" "$attributes_file"; then
+        pass "Symlinked override skipped by apply without opt-in"
     else
-        fail "Expected apply to die (exit: $exit_code, output: '$output')"
+        fail "Expected apply to warn-skip (exit: $exit_code, output: '$output')"
     fi
 }
 
@@ -2418,9 +2424,15 @@ test_tracked_symlink_override_refused_with_optin() {
     local exit_code=0
     output=$(git-local-override apply 2>&1) || exit_code=$?
 
-    if [[ $exit_code -ne 0 ]] \
-       && [[ "$output" == *"refusing symlinked path"* ]] \
-       && grep -q "Original CLAUDE.md content" CLAUDE.md; then
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+
+    # Refused (tracked) symlinked override is a benign skip: apply exits 0,
+    # the target keeps its original content, and attributes are still synced.
+    if [[ $exit_code -eq 0 ]] \
+       && [[ "$output" == *"refusing symlinked override"* ]] \
+       && grep -q "Original CLAUDE.md content" CLAUDE.md \
+       && grep -q "filter=local-override" "$attributes_file"; then
         pass "Tracked symlinked override refused despite opt-in"
     else
         fail "Tracked symlink not refused (exit: $exit_code, output: '$output')"
@@ -2477,12 +2489,52 @@ EOF
     after="$(cat "$outside_file")"
     rm -f evil-target.md evil.local.md
 
-    if [[ $exit_code -ne 0 ]] \
+    # The refusal is now a benign skip (exit 0), but the write guard must
+    # still hold: the outside file is never overwritten.
+    if [[ $exit_code -eq 0 ]] \
        && [[ "$output" == *"refusing symlinked path"* ]] \
        && [[ "$after" == "OUTSIDE SECRET" ]]; then
         pass "Symlinked target still refused; opt-in is read-side only"
     else
         fail "Target write escape with opt-in (outside now: '$after', output: '$output')"
+    fi
+}
+
+# Regression for the pre-skip behavior: apply used to die on the first refused
+# symlinked override, aborting before later entries applied and before
+# attributes were synced (an order-dependent partial state). Now the refused
+# entry is skipped, the rest apply, and attributes are synced.
+test_apply_skips_refused_symlink_and_applies_rest() {
+    info "Testing apply skips refused symlink and applies the rest..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    # First config entry: symlinked override, opt-in off -> refused.
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+    # Second config entry: regular override -> must still apply.
+    echo "# LOCAL AGENTS CONTENT" > AGENTS.local.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override apply 2>&1) || exit_code=$?
+
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+
+    if [[ $exit_code -eq 0 ]] \
+       && [[ "$output" == *"refusing symlinked override"* ]] \
+       && grep -q "Original CLAUDE.md content" CLAUDE.md \
+       && grep -q "LOCAL AGENTS CONTENT" AGENTS.md \
+       && grep -q "^CLAUDE.md filter=local-override" "$attributes_file" \
+       && grep -q "^AGENTS.md filter=local-override" "$attributes_file"; then
+        pass "Apply skipped the refused symlink and applied the remaining override"
+    else
+        fail "Apply partial-skip wrong (exit: $exit_code, output: '$output', CLAUDE: '$(cat CLAUDE.md)', AGENTS: '$(cat AGENTS.md)')"
     fi
 }
 
@@ -2696,18 +2748,25 @@ test_post_commit_reapply_refuses_parent_symlinked_override() {
         get_resolution_root "$TEST_REPO"
     )"
     state_file="$(git rev-parse --absolute-git-dir)/local-override-post-commit-state"
-    printf 'CLAUDE.md|%s/x/secret\n' "$resolution_root" > "$state_file"
 
-    local output
-    output=$(.git/hooks/post-commit 2>&1) || true
+    # Quiet by default: the refusal must not print on a normal commit.
+    printf 'CLAUDE.md|%s/x/secret\n' "$resolution_root" > "$state_file"
+    local output_quiet
+    output_quiet=$(.git/hooks/post-commit 2>&1) || true
+
+    # Under trace, the refusal is still observable (and still refused).
+    printf 'CLAUDE.md|%s/x/secret\n' "$resolution_root" > "$state_file"
+    local output_trace
+    output_trace=$(GIT_LOCAL_OVERRIDE_TRACE=1 .git/hooks/post-commit 2>&1) || true
 
     rm -f x
 
     if cmp -s CLAUDE.md "$target_before" \
-       && [[ "$output" == *"refusing symlinked path"* ]]; then
+       && [[ "$output_quiet" != *"refusing symlinked"* ]] \
+       && [[ "$output_trace" == *"refusing symlinked override"* ]]; then
         pass "Reapply refused the parent-symlinked override; target untouched"
     else
-        fail "Reapply followed a symlinked parent dir (output: '$output', now: '$(cat CLAUDE.md)')"
+        fail "Reapply refusal wrong (quiet: '$output_quiet', trace: '$output_trace', now: '$(cat CLAUDE.md)')"
     fi
 }
 
@@ -3854,6 +3913,7 @@ main() {
         test_tracked_symlink_override_refused_with_optin \
         test_dangling_symlink_override_treated_missing \
         test_symlink_target_still_refused_with_optin \
+        test_apply_skips_refused_symlink_and_applies_rest \
         test_add_preserves_existing_symlink_override_with_optin \
         test_symlink_override_filter_roundtrip_with_optin \
         test_symlink_override_post_commit_reapply_with_optin \

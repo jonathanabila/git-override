@@ -169,7 +169,10 @@ reapply_post_commit_state() {
             if ! path_is_symlink_safe "$repo_root" "$target" \
                || [[ "$reapply_override_rel" == "$override" ]] \
                || ! override_path_is_symlink_safe "$reapply_resolution_root" "$reapply_override_rel" "$repo_root"; then
-                printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
+                # Refusing is correct but routine (e.g. an ignored symlinked
+                # override exists); log at trace level so every commit does
+                # not print a scary stderr line.
+                local_override_trace_log "reapply" "refusing symlinked override for $target"
                 continue
             fi
             cp "$override" "$repo_root/$target"
