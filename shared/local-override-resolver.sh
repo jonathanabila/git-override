@@ -570,8 +570,27 @@ list_worktrees_porcelain_nul() {
 get_nested_worktree_dirs() {
     local repo_root="$1"
     local canonical_root=""
+    local common_dir=""
     local line=""
     local wt_path=""
+
+    # No linked worktrees can exist without a $GIT_COMMON_DIR/worktrees dir, so
+    # skip the `git worktree list` spawn entirely in the common single-checkout
+    # case (this runs on every discovery). Reuse the memoized git context when
+    # it matches, else resolve the common dir with one cheap rev-parse.
+    if [[ -n "$_GIT_CTX_ROOT" && "$repo_root" == "$_GIT_CTX_ROOT" ]]; then
+        common_dir="$_GIT_CTX_COMMON_DIR"
+    else
+        common_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    fi
+    [[ -n "$common_dir" ]] || return 0
+    # --git-common-dir is ".git" (relative to repo_root) for a main worktree and
+    # absolute for a linked one; anchor the relative form before the -d test.
+    case "$common_dir" in
+        /*) ;;
+        *) common_dir="$repo_root/$common_dir" ;;
+    esac
+    [[ -d "$common_dir/worktrees" ]] || return 0
 
     # `git worktree list` resolves symlinks in the paths it prints (e.g. macOS
     # /var -> /private/var), so compare against repo_root's resolved form too
