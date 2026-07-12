@@ -2137,6 +2137,48 @@ test_filter_smudge_passthrough() {
     fi
 }
 
+test_filter_smudge_single_git_spawn() {
+    info "Testing smudge filter establishes git context with a single rev-parse spawn..."
+    cd "$TEST_REPO"
+    create_config
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    if [[ ! -f "$smudge_script" ]]; then
+        fail "Smudge filter script not found"
+        return
+    fi
+
+    echo "# LOCAL SMUDGE CONTENT" > CLAUDE.local.md
+
+    # Resolve the real git BEFORE putting the shim on PATH so the shim can exec it.
+    local real_git
+    real_git="$(command -v git)"
+
+    local shim_dir="$CURRENT_TEST_ROOT/git-shim"
+    local git_log="$CURRENT_TEST_ROOT/git-calls.log"
+    mkdir -p "$shim_dir"
+    : > "$git_log"
+
+    cat > "$shim_dir/git" << EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$git_log"
+exec "$real_git" "\$@"
+EOF
+    chmod +x "$shim_dir/git"
+
+    # Run with cwd = repo top, matching git's filter cwd.
+    printf 'blob\n' | PATH="$shim_dir:$PATH" "$smudge_script" CLAUDE.md > /dev/null
+
+    local rev_parse_count
+    rev_parse_count="$(grep -c 'rev-parse' "$git_log" 2>/dev/null || true)"
+
+    if [[ "$rev_parse_count" == "1" ]]; then
+        pass "Smudge filter spawns exactly one git rev-parse"
+    else
+        fail "Expected exactly 1 rev-parse spawn, got $rev_parse_count (log: $(tr '\n' '|' < "$git_log"))"
+    fi
+}
+
 test_filter_smudge_trace_env_var() {
     info "Testing smudge filter trace logging when GIT_LOCAL_OVERRIDE_TRACE=1..."
     cd "$TEST_REPO"
@@ -2876,6 +2918,7 @@ main() {
         test_list_shows_grouped_targets \
         test_filter_smudge_applies_override \
         test_filter_smudge_passthrough \
+        test_filter_smudge_single_git_spawn \
         test_filter_smudge_trace_env_var \
         test_filter_clean_returns_original \
         test_filter_clean_passthrough \

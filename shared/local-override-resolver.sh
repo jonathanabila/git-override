@@ -76,6 +76,41 @@ get_repo_root() {
     git rev-parse --show-toplevel 2>/dev/null
 }
 
+# Memoized git context (one combined rev-parse instead of five). Keyed by
+# repo root: consumers only trust it when their root argument matches
+# _GIT_CTX_ROOT, so multi-root callers (apply --all-worktrees) fall back to
+# per-call spawns. Loaded only from a process whose cwd is the worktree top
+# (true for git-invoked filters and hooks) because the --git-path/--git-dir
+# outputs are cwd-relative.
+_GIT_CTX_ROOT=""
+_GIT_CTX_GIT_DIR=""
+_GIT_CTX_COMMON_DIR=""
+_GIT_CTX_REBASE_MERGE=""
+_GIT_CTX_REBASE_APPLY=""
+
+load_git_context() {
+    local output=""
+    local line_num=0
+    local line=""
+
+    _GIT_CTX_ROOT=""
+    output="$(git rev-parse --show-toplevel --git-dir --git-common-dir \
+        --git-path rebase-merge --git-path rebase-apply 2>/dev/null)" || return 1
+
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+        case "$line_num" in
+            1) _GIT_CTX_ROOT="$line" ;;
+            2) _GIT_CTX_GIT_DIR="$line" ;;
+            3) _GIT_CTX_COMMON_DIR="$line" ;;
+            4) _GIT_CTX_REBASE_MERGE="$line" ;;
+            5) _GIT_CTX_REBASE_APPLY="$line" ;;
+        esac
+    done <<< "$output"
+
+    [[ -n "$_GIT_CTX_ROOT" && "$line_num" -ge 5 ]] || { _GIT_CTX_ROOT=""; return 1; }
+}
+
 # Git common directory as an absolute path (shared across linked worktrees).
 get_common_git_dir() {
     local repo_root="$1"
@@ -1013,8 +1048,13 @@ is_linked_worktree() {
     local git_dir=""
     local common_dir=""
 
-    git_dir="$(git -C "$repo_root" rev-parse --git-dir 2>/dev/null || echo "")"
-    common_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    if [[ -n "$_GIT_CTX_ROOT" && "$1" == "$_GIT_CTX_ROOT" ]]; then
+        git_dir="$_GIT_CTX_GIT_DIR"
+        common_dir="$_GIT_CTX_COMMON_DIR"
+    else
+        git_dir="$(git -C "$repo_root" rev-parse --git-dir 2>/dev/null || echo "")"
+        common_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "")"
+    fi
     [[ -n "$git_dir" && -n "$common_dir" ]] || return 1
 
     [[ "$git_dir" != "$common_dir" ]]
@@ -1099,11 +1139,17 @@ is_rebase_in_progress() {
     local rebase_merge_path=""
     local rebase_apply_path=""
 
-    rebase_merge_path="$(git -C "$repo_root" rev-parse --git-path rebase-merge 2>/dev/null || true)"
-    rebase_apply_path="$(git -C "$repo_root" rev-parse --git-path rebase-apply 2>/dev/null || true)"
-
+    # Free env check first — avoids spawning git when a rebase set it.
     if [[ "${GIT_REFLOG_ACTION:-}" == rebase* ]]; then
         return 0
+    fi
+
+    if [[ -n "$_GIT_CTX_ROOT" && "$1" == "$_GIT_CTX_ROOT" ]]; then
+        rebase_merge_path="$_GIT_CTX_REBASE_MERGE"
+        rebase_apply_path="$_GIT_CTX_REBASE_APPLY"
+    else
+        rebase_merge_path="$(git -C "$repo_root" rev-parse --git-path rebase-merge 2>/dev/null || true)"
+        rebase_apply_path="$(git -C "$repo_root" rev-parse --git-path rebase-apply 2>/dev/null || true)"
     fi
 
     if [[ -n "$rebase_merge_path" && -d "$rebase_merge_path" ]]; then
@@ -1154,11 +1200,9 @@ run_local_override_smudge() {
     fi
 
     local repo_root
-    repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-        cat
-        return 0
-    }
-    if [[ -z "$repo_root" ]]; then
+    if load_git_context; then
+        repo_root="$_GIT_CTX_ROOT"
+    else
         cat
         return 0
     fi
@@ -1217,12 +1261,9 @@ run_local_override_clean() {
     fi
 
     local repo_root
-    repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-        cat "$stdin_tmp"
-        rm -f "$stdin_tmp"
-        return 0
-    }
-    if [[ -z "$repo_root" ]]; then
+    if load_git_context; then
+        repo_root="$_GIT_CTX_ROOT"
+    else
         cat "$stdin_tmp"
         rm -f "$stdin_tmp"
         return 0
