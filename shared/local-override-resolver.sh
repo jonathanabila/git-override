@@ -17,6 +17,9 @@ LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL="__LOCAL_OVERRIDE_PARSE_ERROR__"
 # Cache for discover_config_files results (temp file path, empty = no cache)
 _DISCOVER_CACHE_FILE=""
 _DISCOVER_CACHE_ROOT=""
+# Discovery mode the cache was built with (full|hot). A hot cache must not be
+# served to a full caller, so the mode is part of the reuse key.
+_DISCOVER_CACHE_MODE=""
 
 local_override_trace_enabled() {
     [[ "${GIT_LOCAL_OVERRIDE_TRACE:-0}" == "1" ]]
@@ -303,16 +306,21 @@ clear_legacy_skip_worktree_once() {
 
 cache_config_files() {
     local repo_root="$1"
-    # Already cached for this root; callers that mutate config files must
-    # clear_config_files_cache first.
+    local mode="${2:-full}"
+    local extra_paths="${3:-}"
+    # Already cached for this root+mode; callers that mutate config files must
+    # clear_config_files_cache first. Serving a hot cache to a full caller
+    # (or vice versa) would hide/leak ignored configs, so the mode is keyed.
     if [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" \
-        && "$_DISCOVER_CACHE_ROOT" == "$repo_root" ]]; then
+        && "$_DISCOVER_CACHE_ROOT" == "$repo_root" \
+        && "$_DISCOVER_CACHE_MODE" == "$mode" ]]; then
         return 0
     fi
     clear_config_files_cache
     _DISCOVER_CACHE_FILE="$(mktemp)"
     _DISCOVER_CACHE_ROOT="$repo_root"
-    discover_config_files "$repo_root" > "$_DISCOVER_CACHE_FILE"
+    _DISCOVER_CACHE_MODE="$mode"
+    discover_config_files "$repo_root" "$mode" "$extra_paths" > "$_DISCOVER_CACHE_FILE"
 }
 
 clear_config_files_cache() {
@@ -321,13 +329,14 @@ clear_config_files_cache() {
     fi
     _DISCOVER_CACHE_FILE=""
     _DISCOVER_CACHE_ROOT=""
+    _DISCOVER_CACHE_MODE=""
 }
 
 get_cached_config_files() {
     local repo_root="$1"
     if [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" \
         && "$_DISCOVER_CACHE_ROOT" == "$repo_root" ]]; then
-        local_override_trace_log "discover_config_files cache=hit file=$_DISCOVER_CACHE_FILE"
+        local_override_trace_log "discover_config_files cache=hit mode=$_DISCOVER_CACHE_MODE file=$_DISCOVER_CACHE_FILE"
         cat "$_DISCOVER_CACHE_FILE"
     else
         local_override_trace_log "discover_config_files cache=miss"
@@ -542,13 +551,6 @@ path_is_symlink_safe() {
     return 0
 }
 
-# Escape fd glob metacharacters so a literal path can be used as an -E
-# exclude pattern. An invalid glob makes fd exit non-zero, which discovery
-# swallows into an empty result — every config silently lost.
-escape_fd_glob() {
-    printf '%s\n' "$1" | sed 's/[][\*?{}]/\\&/g'
-}
-
 # Emit `git worktree list --porcelain` records NUL-terminated. `-z` (git >=
 # 2.36) is preferred: it is the only form that survives newlines in worktree
 # paths. Older gits fall back to converting the newline-terminated porcelain
@@ -591,12 +593,23 @@ get_nested_worktree_dirs() {
     done < <(list_worktrees_porcelain_nul "$repo_root")
 }
 
+# discover_config_files <repo_root> [<mode>] [<extra_paths>]
+#   mode = full (default): pass 1 (non-ignored tree) ∪ pass 2 (directly-ignored
+#          configs in walked directories). Every existing caller keeps today's
+#          contract.
+#   mode = hot: pass 1 only ∪ <extra_paths> (newline-separated repo-relative
+#          list — the config stamp's known gitignored configs). No ignored-tree
+#          walk, so a brand-new gitignored config is invisible until
+#          sync-filters/apply (full discovery) registers it.
+# Neither mode descends into wholly-ignored directories or `.git`, so configs
+# planted inside vendored/ignored trees are never discovered (see plan 043).
 discover_config_files() {
     local repo_root="$1"
+    local mode="${2:-full}"
+    local extra_paths="${3:-}"
     local seen=""
     local path=""
-    local discover_output=""
-    local strategy="git"
+    local strategy="$mode"
     local trace_on=false
     local discover_start_ms
     local tracked_start_ms
@@ -609,8 +622,6 @@ discover_config_files() {
     local nested_dirs=""
     local nested_dir=""
     local under_nested=false
-    local -a fd_exclude_args
-    local nested_exclude_count=0
 
     nested_dirs="$(get_nested_worktree_dirs "$repo_root")"
 
@@ -620,35 +631,31 @@ discover_config_files() {
         tracked_start_ms="$discover_start_ms"
     fi
 
-    if command -v fd >/dev/null 2>&1; then
-        strategy="fd"
-        # Prune nested checkouts during traversal: fd otherwise descends into
-        # every linked worktree checked out under this root, which dominates
-        # the walk in large monorepos. The post-hoc filter below still guards
-        # correctness if an exclude glob fails to match.
-        fd_exclude_args=()
-        if [[ -n "$nested_dirs" ]]; then
-            while IFS= read -r nested_dir; do
-                [[ -n "$nested_dir" ]] || continue
-                fd_exclude_args+=(-E "$(escape_fd_glob "$nested_dir")")
-                ((nested_exclude_count++)) || true
-            done <<< "$nested_dirs"
-        fi
-        discover_output="$(fd --hidden --no-ignore ${fd_exclude_args[@]+"${fd_exclude_args[@]}"} --glob "$CONFIG_FILE_NAME" "$repo_root" 2>/dev/null || true)"
-        combined_output="$(printf '%s\n' "$discover_output" | LC_ALL=C sort)"
-        tracked_output="$combined_output"
-        if [[ "$trace_on" == true ]]; then
-            tracked_ms="$(resolver_elapsed_milliseconds "$tracked_start_ms")"
-        fi
-    else
-        tracked_output="$(git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
+    # Pass 1: the non-ignored tree (tracked + untracked-not-ignored). This is
+    # O(non-ignored tree) and is the only walk hot mode performs.
+    tracked_output="$(git -C "$repo_root" ls-files --cached --others --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
 
+    if [[ "$trace_on" == true ]]; then
+        tracked_ms="$(resolver_elapsed_milliseconds "$tracked_start_ms")"
+    fi
+
+    if [[ "$mode" == "hot" ]]; then
+        # Hot mode: pass 1 plus the caller-supplied extra paths (stamped
+        # gitignored configs). Extras join the candidate set BEFORE the sort so
+        # ordering/dedup/filtering match pass-1 results exactly.
+        combined_output="$({ printf '%s\n' "$tracked_output"; printf '%s\n' "$extra_paths"; } | LC_ALL=C sort)"
+    else
+        # Pass 2 (full only): directly-ignored configs. --directory keeps git
+        # from descending into wholly-ignored directories — it collapses each to
+        # its dir name (trailing slash), which the basename filter below then
+        # drops, so node_modules/x/.local-overrides.yaml is never discovered. Do
+        # NOT add git's emptiness-probing flag: it forces descent into ignored
+        # dirs to test emptiness, which is exactly the walk we are avoiding.
         if [[ "$trace_on" == true ]]; then
-            tracked_ms="$(resolver_elapsed_milliseconds "$tracked_start_ms")"
             ignored_start_ms="$(resolver_now_milliseconds)"
         fi
 
-        ignored_output="$(git -C "$repo_root" ls-files --others --ignored --exclude-standard --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
+        ignored_output="$(git -C "$repo_root" ls-files --others --ignored --exclude-standard --directory --full-name -- "$CONFIG_FILE_NAME" "*/$CONFIG_FILE_NAME" 2>/dev/null || true)"
         combined_output="$({ printf '%s\n' "$tracked_output"; printf '%s\n' "$ignored_output"; } | LC_ALL=C sort)"
 
         if [[ "$trace_on" == true ]]; then
@@ -690,7 +697,7 @@ $path"
     done <<< "$combined_output"
 
     if [[ "$trace_on" == true ]]; then
-        local_override_trace_log "discover_config_files strategy=${strategy} excluded=${nested_exclude_count} tracked_ms=${tracked_ms} ignored_ms=${ignored_ms} total_ms=$(resolver_elapsed_milliseconds "$discover_start_ms") count=$(count_list_entries "$seen")"
+        local_override_trace_log "discover_config_files strategy=${strategy} excluded=$(count_list_entries "$nested_dirs") tracked_ms=${tracked_ms} ignored_ms=${ignored_ms} total_ms=$(resolver_elapsed_milliseconds "$discover_start_ms") count=$(count_list_entries "$seen")"
     fi
 }
 
