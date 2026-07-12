@@ -2452,6 +2452,63 @@ test_symlink_override_post_commit_reapply_with_optin() {
     fi
 }
 
+test_list_marks_symlinked_override() {
+    info "Testing list marks symlinked overrides..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    local without_optin
+    without_optin=$(git-local-override list 2>&1)
+
+    git config local-override.followSymlinkedOverrides true
+    local with_optin
+    with_optin=$(git-local-override list 2>&1)
+
+    if [[ "$without_optin" == *"[symlink ignored]"* ]] \
+       && [[ "$without_optin" == *"(symlink)"* ]] \
+       && [[ "$with_optin" == *"[active]"* ]] \
+       && [[ "$with_optin" == *"(symlink)"* ]]; then
+        pass "list shows symlink marker and ignored/active state"
+    else
+        fail "list output wrong (no opt-in: '$without_optin'; opt-in: '$with_optin')"
+    fi
+}
+
+test_doctor_warns_symlinked_override_without_optin() {
+    info "Testing doctor surfaces the symlink opt-in hint..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    # Make the repo otherwise healthy so warns are the only signal.
+    git-local-override sync-filters > /dev/null 2>&1
+
+    local output
+    local exit_code=0
+    output=$(git-local-override doctor 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 ]] \
+       && [[ "$output" == *"followSymlinkedOverrides"* ]] \
+       && [[ "$output" == *"ignored"* ]]; then
+        pass "doctor warns with the exact opt-in command"
+    else
+        fail "doctor missing symlink hint (exit: $exit_code, output: '$output')"
+    fi
+}
+
 test_recursive_three_level_nearest_config_wins() {
     info "Testing three-level nearest config ownership..."
 
@@ -3499,6 +3556,8 @@ main() {
         test_add_preserves_existing_symlink_override_with_optin \
         test_symlink_override_filter_roundtrip_with_optin \
         test_symlink_override_post_commit_reapply_with_optin \
+        test_list_marks_symlinked_override \
+        test_doctor_warns_symlinked_override_without_optin \
         test_recursive_three_level_nearest_config_wins \
         test_recursive_three_level_add_uses_nearest_pattern \
         test_recursive_empty_child_blocks_parent_targets \
