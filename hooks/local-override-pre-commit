@@ -87,6 +87,13 @@ $config_path"
 
     [[ -n "$relevant_configs" ]] || return 0
 
+    # This commit touches a managed area, so there is config to enforce. Heal
+    # a missing filter driver (plan 050) so the very first commit in a fresh
+    # pre-commit-framework clone — before any branch checkout has run the
+    # post-checkout heal — still leaves a configured driver behind for
+    # subsequent staging and path-limited commits.
+    maybe_self_heal_filter_driver "$repo_root"
+
     local config_entry
     while IFS= read -r config_path || [[ -n "$config_path" ]]; do
         [[ -n "$config_path" ]] || continue

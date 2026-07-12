@@ -54,6 +54,11 @@ repos:
 Then run `pre-commit install --hook-type pre-commit --hook-type post-commit
 --hook-type post-checkout --hook-type pre-rebase`.
 
+The hooks configure the smudge/clean filter driver automatically on their
+first run in a repo with a `.local-overrides.yaml` (copying the filter
+scripts into `.git/hooks/`), so no extra `sync-filters` step is needed with
+this install method.
+
 **Global install** (hooks for every new repo, via the git template dir):
 
 ```bash

@@ -552,6 +552,112 @@ EOF
     fi
 }
 
+# Plan 050: the pre-commit-framework install path copies only the four hook
+# entry points and never configures the filter driver, leaving the armed
+# attributes pointing at a driver git treats as identity. The hooks must
+# self-heal: copy the filter machinery next to themselves into .git/hooks and
+# configure filter.local-override.* on the first run that has config to
+# enforce.
+test_precommit_framework_self_heals_filter_driver() {
+    info "Testing framework-style install self-heals the filter driver..."
+
+    cd "$TEST_DIR"
+
+    pre-commit install \
+        --hook-type pre-commit \
+        --hook-type post-commit \
+        --hook-type post-checkout \
+        --hook-type pre-rebase 2>/dev/null || true
+
+    # The framework install path must start with the driver unconfigured —
+    # that is the gap being healed.
+    if [[ -z "$(git config --local filter.local-override.clean 2>/dev/null || true)" ]]; then
+        pass "filter driver starts unconfigured (framework install path)"
+    else
+        fail "filter driver unexpectedly configured before any hook ran"
+        return 1
+    fi
+
+    echo "# MY LOCAL CLAUDE.md - self-heal test" > CLAUDE.local.md
+
+    # First branch op fires post-checkout through the framework shim; the
+    # tracked tree is clean, so no framework stash interferes.
+    git checkout -q -b self-heal-branch 2>/dev/null || true
+
+    # Resolve physically (pwd -P): the hook computes its paths from git's
+    # physical repo root, while $TMPDIR on macOS reaches the repo through the
+    # /var -> /private/var symlink.
+    local common_git_dir
+    common_git_dir="$(git rev-parse --git-common-dir)"
+    [[ "$common_git_dir" == /* ]] || common_git_dir="$PWD/$common_git_dir"
+    common_git_dir="$(cd "$common_git_dir" && pwd -P)"
+
+    local smudge_cmd clean_cmd required_cfg
+    smudge_cmd="$(git config --local filter.local-override.smudge 2>/dev/null || echo "")"
+    clean_cmd="$(git config --local filter.local-override.clean 2>/dev/null || echo "")"
+    required_cfg="$(git config --local filter.local-override.required 2>/dev/null || echo "")"
+
+    if [[ "$smudge_cmd" == "$common_git_dir/hooks/local-override-filter-smudge %f" &&
+          "$clean_cmd" == "$common_git_dir/hooks/local-override-filter-clean %f" &&
+          "$required_cfg" == "false" ]]; then
+        pass "first hook run configured the filter driver at stable .git/hooks paths"
+    else
+        fail "filter driver not configured after the first hook run"
+        echo "smudge:   $smudge_cmd"
+        echo "clean:    $clean_cmd"
+        echo "required: $required_cfg"
+        return 1
+    fi
+
+    # The copied machinery must be complete (the filter scripts source the
+    # lib, which sources the resolver) and executable.
+    if [[ -x "$common_git_dir/hooks/local-override-filter-smudge" &&
+          -x "$common_git_dir/hooks/local-override-filter-clean" &&
+          -f "$common_git_dir/hooks/local-override-lib.sh" &&
+          -f "$common_git_dir/hooks/local-override-resolver.sh" ]]; then
+        pass "filter machinery copied next to the configured driver"
+    else
+        fail "filter machinery missing from $common_git_dir/hooks"
+        ls -la "$common_git_dir/hooks" || true
+        return 1
+    fi
+
+    # End-to-end smudge: a FILE checkout (the post-checkout hook exits early
+    # for those) must serve the override via the filter driver alone.
+    rm -f CLAUDE.md
+    git checkout -- CLAUDE.md
+    if grep -q "MY LOCAL CLAUDE.md - self-heal test" CLAUDE.md; then
+        pass "smudge filter serves the override end-to-end"
+    else
+        fail "smudge filter did not serve the override on file checkout"
+        cat CLAUDE.md 2>/dev/null || true
+        return 1
+    fi
+
+    # Regression (Phase A residual-staged hazard): staging the override must
+    # put the ORIGINAL in the index — the clean filter runs — so no residual
+    # staged override survives for a later `git commit --no-verify` to commit.
+    git add CLAUDE.md
+    if git show :CLAUDE.md | grep -q "Original CLAUDE.md content"; then
+        pass "clean filter keeps the override out of the index (residual-staged hazard closed)"
+    else
+        fail "override content reached the index despite the healed clean filter"
+        git show :CLAUDE.md 2>/dev/null || true
+        return 1
+    fi
+
+    # A second hook run must be a silent no-op: the heal happens once.
+    local second_run_output
+    second_run_output="$("$PROJECT_DIR/hooks/local-override-post-checkout" "" "" "1" 2>&1 || true)"
+    if [[ "$second_run_output" != *"self-heal"* ]]; then
+        pass "second hook run does not re-heal (configured driver is left alone)"
+    else
+        fail "self-heal fired again on an already-configured driver"
+        printf '%s\n' "$second_run_output"
+        return 1
+    fi
+}
+
 test_precommit_from_remote_repo() {
     info "Testing pre-commit config pointing to our remote repo..."
 
@@ -661,6 +767,7 @@ main() {
         test_precommit_skip_without_config \
         test_precommit_new_target_leak_blocked \
         test_precommit_new_target_canonical_commits \
+        test_precommit_framework_self_heals_filter_driver \
         test_precommit_from_remote_repo; do
         CURRENT_TEST_NAME="$test_fn"
         setup_repo

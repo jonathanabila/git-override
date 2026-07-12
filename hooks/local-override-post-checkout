@@ -154,6 +154,12 @@ run_post_checkout() {
         return 0
     fi
 
+    # Reaching here means there is config to enforce (both paths above bail
+    # when there is none). Heal a missing filter driver — the pre-commit
+    # framework install path never configures one (plan 050) — so the
+    # attributes synced above always reference a working driver.
+    maybe_self_heal_filter_driver "$repo_root"
+
     local repaired_count
     repaired_count="$(clear_legacy_skip_worktree_once "$repo_root" "$config_entries")"
     if [[ "$repaired_count" -gt 0 ]]; then

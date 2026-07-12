@@ -185,3 +185,103 @@ reapply_post_commit_state() {
 # Config-stamp helpers (get_config_stamp_file, compute_config_stamp,
 # write_config_stamp, config_stamp_matches) now live once in the shared
 # resolver (shared/local-override-resolver.sh), sourced above.
+
+# Self-heal a missing filter driver (plan 050).
+#
+# The pre-commit-framework install path copies only the four hook entry points
+# and never configures `filter.local-override.*`, so the managed
+# `filter=local-override` lines post-checkout writes into .git/info/attributes
+# reference a driver git treats as identity: checkout/merge friction, a
+# permanently dirty status, and — for path-limited commits — the override left
+# staged in the main index where a later `git commit --no-verify` commits it
+# verbatim. When a hook runs with config to enforce but no driver configured
+# anywhere, copy the filter machinery from the running hook's own directory
+# (the framework's cache clone ships the full hooks/ dir next to the entry
+# points) into `$common_git_dir/hooks/` — the exact layout scripts/install.sh
+# and `sync-filters` produce — and point the driver config at those stable
+# copies. The cache clone path itself is never written into config: it moves
+# on rev bumps and `pre-commit gc/clean`.
+#
+# Contract:
+# - No-op (a single `git config` spawn, zero writes) when any driver is
+#   already configured — install.sh/template installs see no behavior change.
+# - Callers gate on "this repo has git-local-override config to enforce";
+#   this function does not re-check config presence.
+# - Never breaks the calling hook: every failure path returns 0 and logs at
+#   trace level only (GIT_LOCAL_OVERRIDE_TRACE=1).
+maybe_self_heal_filter_driver() {
+    local repo_root="$1"
+
+    # Cheap gate, checked on every hook run: any effective smudge/clean/process
+    # driver — local (install.sh, sync-filters, a previous heal) or global
+    # (template install), including the experimental filter.process opt-in —
+    # means a working or intentionally customized setup. Leave it alone.
+    if git -C "$repo_root" config --get-regexp \
+        '^filter\.local-override\.(smudge|clean|process)$' >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local common_git_dir=""
+    common_git_dir="$(get_common_git_dir "$repo_root" 2>/dev/null)" || return 0
+    [[ -n "$common_git_dir" ]] || return 0
+
+    local dest_dir="$common_git_dir/hooks"
+
+    # The filter entry points source local-override-lib.sh, which sources
+    # local-override-resolver.sh from its own directory: all four files must
+    # travel together or the copied driver cannot run.
+    local required_file
+    for required_file in \
+        local-override-filter-smudge \
+        local-override-filter-clean \
+        local-override-lib.sh \
+        local-override-resolver.sh; do
+        if [[ ! -f "$HOOK_LIB_DIR/$required_file" ]]; then
+            local_override_trace_log "self-heal" \
+                "filter driver unconfigured but $required_file is not next to the hooks; skipping"
+            return 0
+        fi
+    done
+
+    if ! mkdir -p "$dest_dir" 2>/dev/null; then
+        local_override_trace_log "self-heal" "cannot create $dest_dir; skipping"
+        return 0
+    fi
+
+    # local-override-filter-process is part of the install.sh hooks layout but
+    # not needed by the default smudge/clean driver; copy it when present.
+    local heal_file
+    for heal_file in \
+        local-override-filter-smudge \
+        local-override-filter-clean \
+        local-override-filter-process \
+        local-override-lib.sh \
+        local-override-resolver.sh; do
+        [[ -f "$HOOK_LIB_DIR/$heal_file" ]] || continue
+        # Direct installs run the hooks from $dest_dir itself; never copy a
+        # file onto itself.
+        if [[ ! "$HOOK_LIB_DIR/$heal_file" -ef "$dest_dir/$heal_file" ]]; then
+            if ! cp "$HOOK_LIB_DIR/$heal_file" "$dest_dir/$heal_file" 2>/dev/null; then
+                local_override_trace_log "self-heal" \
+                    "cannot copy $heal_file into $dest_dir; skipping"
+                return 0
+            fi
+        fi
+        chmod +x "$dest_dir/$heal_file" 2>/dev/null || true
+    done
+
+    # Same config cmd_sync_filters and install.sh write. Config not yet set
+    # (partial failure above returns before this), so the gate retries the
+    # heal on the next hook run if anything here fails.
+    if ! git -C "$repo_root" config --local filter.local-override.smudge \
+            "$dest_dir/local-override-filter-smudge %f" 2>/dev/null \
+       || ! git -C "$repo_root" config --local filter.local-override.clean \
+            "$dest_dir/local-override-filter-clean %f" 2>/dev/null \
+       || ! git -C "$repo_root" config --local filter.local-override.required \
+            false 2>/dev/null; then
+        local_override_trace_log "self-heal" "unable to write filter driver config; skipping"
+        return 0
+    fi
+
+    local_override_log "configured missing filter driver (self-heal): $dest_dir"
+}
