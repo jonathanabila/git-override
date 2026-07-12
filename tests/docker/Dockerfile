@@ -25,7 +25,10 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && ln -s "$(command -v fdfind)" /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir pre-commit
+    # Pin pre-commit so an upstream release can't break CI on an unrelated PR;
+    # bump this deliberately (dependabot's Docker ecosystem watches FROM lines,
+    # not pip installs inside RUN).
+    && pip3 install --no-cache-dir 'pre-commit==4.6.*'
 
 # Configure git for testing
 RUN git config --global user.email "test@example.com" \
