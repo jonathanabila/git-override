@@ -1305,6 +1305,57 @@ test_pull_with_overridden_file() {
     fi
 }
 
+# Characterization (tripwire), NOT an endorsement: the clean filter substitutes
+# the original tracked content only when `git show :<path>` succeeds. For a
+# never-tracked managed target being staged for the first time there is no index
+# blob to substitute, so run_local_override_clean passes the incoming bytes
+# through — the override content reaches the index. hooks/local-override-pre-commit
+# (plan 003) is what refuses to actually COMMIT such a leak; this test pins the
+# current filter contract so a future refactor of the clean core can't silently
+# change it. If the team later closes the --no-verify bypass by making the clean
+# filter refuse/substitute for new targets, flip this asserted contract.
+test_clean_filter_new_target_index_content() {
+    info "Testing clean filter passes never-tracked target content through..."
+
+    cd "$TEST_DIR"
+
+    # A brand-new managed target that is absent from git history.
+    if git cat-file -e "HEAD:NEWDOC.md" 2>/dev/null; then
+        fail "Pre-condition: NEWDOC.md unexpectedly exists in HEAD"
+        return 1
+    fi
+
+    cat >> .local-overrides.yaml << 'EOF'
+  - override: NEWDOC.local.md
+    replaces:
+      - NEWDOC.md
+EOF
+    git-local-override sync-filters >/dev/null
+
+    # User created a brand-new managed target holding the override content.
+    printf '# override-only content\nnever tracked\n' > NEWDOC.local.md
+    printf '# override-only content\nnever tracked\n' > NEWDOC.md
+
+    # Stage (do NOT commit — the pre-commit gate is tested separately and would
+    # fire). The clean filter runs during `git add`.
+    git add NEWDOC.md
+
+    local staged_out="$TEST_ROOT/newdoc-staged.out"
+    git show ":NEWDOC.md" > "$staged_out"
+
+    if cmp -s "$staged_out" NEWDOC.local.md; then
+        pass "clean filter passes new-target content through (pre-commit hook is the leak gate)"
+    else
+        fail "clean filter did not pass new-target content through as characterized"
+        git reset -q NEWDOC.md 2>/dev/null || true
+        return 1
+    fi
+
+    # Restore state (each test re-clones, but keep the repo tidy).
+    git reset -q NEWDOC.md 2>/dev/null || true
+    rm -f NEWDOC.md NEWDOC.local.md "$staged_out"
+}
+
 test_merge_with_overridden_file() {
     info "Testing git merge with overridden file..."
 
@@ -2025,6 +2076,7 @@ main() {
         test_shell_init_checkout_with_divergent_file \
         test_switch_with_divergent_overridden_file \
         test_pull_with_overridden_file \
+        test_clean_filter_new_target_index_content \
         test_merge_with_overridden_file \
         test_rebase_with_overridden_file \
         test_stash_with_overridden_file \
