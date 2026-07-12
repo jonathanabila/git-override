@@ -1464,15 +1464,19 @@ test_new_repo_gets_hooks_after_global_install() {
     cd "$new_repo"
     git init -q
 
-    # Check if hooks were copied from template
+    # Copying hooks from init.templateDir at `git init` is core git behavior,
+    # not version-dependent, so the template copy MUST happen.
     if [[ -f "$new_repo/.git/hooks/pre-commit" ]] &&
        grep -q "local-override" "$new_repo/.git/hooks/pre-commit" 2>/dev/null; then
         pass "New repo got hooks from template"
     else
-        # This is expected to fail if git doesn't copy the template hooks
-        # (depends on git version and config)
-        info "Note: Git didn't auto-copy template hooks (may be expected)"
-        pass "Global install completed (template hooks ready)"
+        fail "New repo did not get hooks from git template"
+        echo "  init.templateDir: $(git config --global init.templateDir 2>/dev/null || echo '<unset>')"
+        echo "  template hooks dir contents:"
+        ls -la "$(git config --global init.templateDir 2>/dev/null)/hooks" 2>&1 | sed 's/^/    /' || true
+        echo "  new repo hooks dir contents:"
+        ls -la "$new_repo/.git/hooks" 2>&1 | sed 's/^/    /' || true
+        return 1
     fi
 }
 
