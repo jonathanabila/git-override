@@ -1313,6 +1313,59 @@ test_validate_no_config_dies() {
     create_config
 }
 
+test_unknown_command_dies() {
+    info "Testing unknown command dies..."
+    cd "$TEST_REPO"
+
+    local output
+    local exit_code=0
+    output=$(git-local-override definitely-not-a-command 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"Unknown command"* ]]; then
+        pass "unknown command dies with message"
+    else
+        fail "unknown command did not die (exit: $exit_code, output: $output)"
+    fi
+}
+
+test_outside_repo_dies() {
+    info "Testing commands die outside a git repository..."
+
+    local scratch
+    scratch="$(mktemp -d "${TMPDIR:-/tmp}/glo-norepo.XXXXXX")"
+    cd "$scratch"
+
+    # Guard against a vacuous pass: if the scratch dir is somehow inside a
+    # repository, the "not in a repo" assertion would be meaningless.
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        cd "$TEST_REPO"
+        rm -rf "$scratch"
+        fail "scratch dir is unexpectedly inside a git repo: $scratch"
+        return
+    fi
+
+    local ok=1
+    local bad=""
+    local cmd output exit_code
+    for cmd in status list apply; do
+        exit_code=0
+        output=$(git-local-override "$cmd" 2>&1) || exit_code=$?
+        if [[ $exit_code -eq 0 || "$output" != *"Not in a git repository"* ]]; then
+            ok=0
+            bad="$bad $cmd(exit=$exit_code)"
+        fi
+    done
+
+    cd "$TEST_REPO"
+    rm -rf "$scratch"
+
+    if [[ $ok -eq 1 ]]; then
+        pass "status/list/apply die outside a git repository"
+    else
+        fail "commands did not die outside a repo:$bad"
+    fi
+}
+
 test_init_config_has_pattern() {
     info "Testing init-config creates config with pattern..."
     cd "$TEST_REPO"
@@ -2818,6 +2871,8 @@ main() {
         test_validate_duplicate_target_fails \
         test_validate_subtree_escape_rejected \
         test_validate_no_config_dies \
+        test_unknown_command_dies \
+        test_outside_repo_dies \
         test_list_shows_grouped_targets \
         test_filter_smudge_applies_override \
         test_filter_smudge_passthrough \
