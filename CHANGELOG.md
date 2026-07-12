@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **filter.process now under CI**: the byte-exact roundtrip verifier (`tests/bench-filter-process.sh --verify-only`, the six plan-009 hazardous cases — binary/NUL, CRLF, empty blob, empty override, no trailing newline, multiple trailing newlines) runs through the real `filter.process` handshake as a Docker suite (`filterprocess` verb; `make test-docker-filter-process`, and added to `make test-docker`), plus a new opt-in install-wiring integration test (`test_install_filter_process_mode`) that asserts `GIT_LOCAL_OVERRIDE_FILTER_PROCESS=1` install sets `filter.local-override.process` (and unsets per-file smudge), then drives smudge (checkout serves override) and clean (staging yields original tracked bytes) end to end and confirms `doctor` reports healthy. Previously the 251-line protocol implementation and its install wiring were executed by nothing in CI (install suite 32→33)
 - **`make check-docs-sync` gate** (`tests/check-docs-sync.sh`, wired into `make ci` next to `check-resolver-sync` and into the CI `lint` job): fails the build when a hardcoded documentation version pin (pre-commit `rev:` snippets, pinned `/vX.Y.Z/scripts/install.sh` URLs) does not match `VERSION`, or when a public CLI command in the dispatch `case` is missing from the `help` text or the README CLI Commands table
 
 ### Changed

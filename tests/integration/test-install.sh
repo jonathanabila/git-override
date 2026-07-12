@@ -1550,6 +1550,87 @@ EOF
     fi
 }
 
+test_install_filter_process_mode() {
+    info "Testing opt-in filter.process install wiring (experimental)..."
+
+    local repo_dir="$TEST_DIR/repo-filter-process"
+    create_test_repo "$repo_dir"
+
+    # Config + a committed managed target to drive smudge/clean end to end.
+    cat > "$repo_dir/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: AGENTS.local.md
+    replaces:
+      - AGENTS.md
+EOF
+    printf 'original tracked content\n' > "$repo_dir/AGENTS.md"
+    git -C "$repo_dir" add .local-overrides.yaml AGENTS.md
+    git -C "$repo_dir" commit -q -m "Add managed target"
+
+    # Opt-in process-mode install.
+    ( cd "$repo_dir" && GIT_LOCAL_OVERRIDE_FILTER_PROCESS=1 "$PROJECT_DIR/scripts/install.sh" --repo )
+
+    cd "$repo_dir"
+
+    # filter.local-override.process is set to an existing, executable script.
+    local process_cmd
+    process_cmd=$(git config --local filter.local-override.process 2>/dev/null || echo "")
+    if [[ -n "$process_cmd" ]] && [[ "$process_cmd" == *"local-override-filter-process"* ]]; then
+        pass "Filter process command configured"
+    else
+        fail "Filter process command not configured (got: '$process_cmd')"
+        return 1
+    fi
+    if [[ -x "$process_cmd" ]]; then
+        pass "Filter process script exists and is executable"
+    else
+        fail "Filter process script missing or not executable (got: '$process_cmd')"
+        return 1
+    fi
+
+    # Process mode replaces per-file mode: smudge must NOT be set.
+    local smudge_cmd
+    smudge_cmd=$(git config --local filter.local-override.smudge 2>/dev/null || echo "")
+    if [[ -z "$smudge_cmd" ]]; then
+        pass "Per-file smudge unset in process mode"
+    else
+        fail "Per-file smudge still set in process mode (got: '$smudge_cmd')"
+        return 1
+    fi
+
+    # End-to-end smudge through the real protocol: checkout serves override.
+    printf 'LOCAL OVERRIDE content\n' > "$repo_dir/AGENTS.local.md"
+    rm -f "$repo_dir/AGENTS.md"
+    git -C "$repo_dir" checkout -- AGENTS.md
+    if [[ "$(cat "$repo_dir/AGENTS.md")" == "LOCAL OVERRIDE content" ]]; then
+        pass "Process-mode smudge served override content on checkout"
+    else
+        fail "Process-mode smudge did not serve override (got: '$(cat "$repo_dir/AGENTS.md")')"
+        return 1
+    fi
+
+    # End-to-end clean: staging the override yields the original tracked bytes.
+    git -C "$repo_dir" add AGENTS.md
+    local staged_file="$repo_dir/.staged-agents.md"
+    git -C "$repo_dir" show :AGENTS.md > "$staged_file"
+    printf 'original tracked content\n' > "$repo_dir/.expected-agents.md"
+    if cmp -s "$staged_file" "$repo_dir/.expected-agents.md"; then
+        pass "Process-mode clean staged the original tracked content"
+    else
+        fail "Process-mode clean did not restore original in index"
+        return 1
+    fi
+
+    # doctor treats a .process driver as healthy.
+    if "$PROJECT_DIR/bin/git-local-override" doctor >/dev/null 2>&1; then
+        pass "doctor reports healthy with filter.process driver"
+    else
+        fail "doctor failed with filter.process driver"
+        return 1
+    fi
+}
+
 test_install_populates_attributes() {
     info "Testing install populates .git/info/attributes..."
 
@@ -1961,6 +2042,7 @@ main() {
         test_uninstall_does_not_overwrite_newer_user_hook \
         test_new_repo_gets_hooks_after_global_install \
         test_install_configures_filter_driver \
+        test_install_filter_process_mode \
         test_install_populates_attributes \
         test_install_idempotent_attributes \
         test_uninstall_removes_filter_config \

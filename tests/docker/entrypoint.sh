@@ -9,6 +9,7 @@
 #   ./entrypoint.sh gitops        # Run git operations tests
 #   ./entrypoint.sh worktree      # Run linked worktree tests
 #   ./entrypoint.sh precommit     # Run pre-commit tests
+#   ./entrypoint.sh filterprocess # Run filter.process roundtrip verifier
 #   ./entrypoint.sh coverage      # Run unit suite under kcov (writes to /out)
 #
 set -euo pipefail
@@ -98,6 +99,20 @@ run_precommit_tests() {
     fi
 }
 
+run_filterprocess_tests() {
+    # bench-filter-process.sh needs the --verify-only argument, which run_suite
+    # cannot pass through, so replicate its pass/fail-by-exit-code tracking here.
+    header "Running: Filter Process Roundtrip"
+    ((SUITES_RUN++)) || true
+    if "$TESTS_DIR/bench-filter-process.sh" --verify-only; then
+        success "Filter Process Roundtrip passed"
+        ((SUITES_PASSED++)) || true
+    else
+        error "Filter Process Roundtrip failed"
+        FAILED_SUITES+=("Filter Process Roundtrip")
+    fi
+}
+
 print_summary() {
     echo ""
     echo -e "${BLUE}========================================${NC}"
@@ -158,6 +173,7 @@ main() {
     local run_gitops=false
     local run_worktree=false
     local run_precommit=false
+    local run_filterprocess=false
 
     if [[ $# -eq 0 ]] || [[ "$1" == "all" ]]; then
         run_all=true
@@ -169,10 +185,11 @@ main() {
                 gitops) run_gitops=true ;;
                 worktree) run_worktree=true ;;
                 precommit) run_precommit=true ;;
+                filterprocess) run_filterprocess=true ;;
                 all) run_all=true ;;
                 *)
                     error "Unknown test suite: $arg"
-                    echo "Available: all, unit, install, gitops, worktree, precommit"
+                    echo "Available: all, unit, install, gitops, worktree, precommit, filterprocess"
                     exit 1
                     ;;
             esac
@@ -186,12 +203,14 @@ main() {
         run_gitops_tests
         run_worktree_tests
         run_precommit_tests
+        run_filterprocess_tests
     else
         [[ "$run_unit" == true ]] && run_unit_tests
         [[ "$run_install" == true ]] && run_install_tests
         [[ "$run_gitops" == true ]] && run_gitops_tests
         [[ "$run_worktree" == true ]] && run_worktree_tests
         [[ "$run_precommit" == true ]] && run_precommit_tests
+        [[ "$run_filterprocess" == true ]] && run_filterprocess_tests
     fi
 
     print_summary

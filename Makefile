@@ -11,6 +11,7 @@
        check-resolver-sync ci coverage \
        test-docker test-docker-bash3 test-docker-unit test-docker-install \
        test-docker-gitops test-docker-worktree test-docker-precommit \
+       test-docker-filter-process \
        docker-build docker-build-bash3
 
 # Default target
@@ -102,6 +103,10 @@ test-docker: docker-build ## Run all tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) gitops
 	@docker run --rm -e CI=true $(DOCKER_IMAGE) worktree
 	@docker run --rm $(DOCKER_IMAGE) precommit
+	@docker run --rm $(DOCKER_IMAGE) filterprocess
+
+test-docker-filter-process: docker-build ## Run filter.process roundtrip verification in Docker
+	@docker run --rm $(DOCKER_IMAGE) filterprocess
 
 test-docker-bash3: docker-build-bash3 ## Run tests under genuine bash 3.2.57 (bash-version compatibility)
 	@echo "Running tests under genuine bash 3.2.57..."
