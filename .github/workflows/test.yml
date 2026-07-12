@@ -56,8 +56,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Show bash version
-        run: bash --version
+      - name: Pin bash to /bin/bash (3.2) and assert
+        run: |
+          mkdir -p "$RUNNER_TEMP/bash3bin"
+          ln -s /bin/bash "$RUNNER_TEMP/bash3bin/bash"
+          echo "$RUNNER_TEMP/bash3bin" >> "$GITHUB_PATH"
+          /bin/bash -c 'echo "Pinned bash: $BASH_VERSION"'
+          /bin/bash -c '[[ "${BASH_VERSINFO[0]}" -eq 3 ]]'
 
       - name: Run unit tests
         run: make test

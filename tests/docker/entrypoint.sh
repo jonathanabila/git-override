@@ -143,6 +143,14 @@ main() {
         info "Pre-commit: not installed"
     fi
 
+    # Self-verify the interpreter under test. The bash3 image sets
+    # EXPECT_BASH_MAJOR=3; if the image ever regresses to a newer bash, fail
+    # loudly instead of silently testing the wrong interpreter version.
+    if [[ -n "${EXPECT_BASH_MAJOR:-}" && "${BASH_VERSINFO[0]}" -ne "${EXPECT_BASH_MAJOR}" ]]; then
+        error "Expected bash major version ${EXPECT_BASH_MAJOR}, got ${BASH_VERSION}"
+        exit 1
+    fi
+
     # Parse arguments
     local run_all=false
     local run_unit=false

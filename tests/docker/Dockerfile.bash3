@@ -1,17 +1,25 @@
-# Dockerfile for bash compatibility testing
+# Dockerfile for bash 3.2 compatibility testing
 #
-# This uses Alpine's bash but runs tests in a way that helps catch
-# bash 4+ features that would break on macOS.
+# This runs a genuine from-source bash 3.2.57 (the version macOS ships) on an
+# Alpine/musl base, provided by Docker Hub's community `bash:3.2` image at
+# /usr/local/bin/bash. This is the repo's real enforcement of the "must work
+# on bash 3.2" rule: `#!/usr/bin/env bash` resolves to /usr/local/bin/bash
+# here, so every script and git-spawned hook runs under 3.2.57.
 #
-# The real bash 3.2 compatibility testing happens on macOS in GitHub Actions.
+# Do NOT `apk add bash` — that installs bash 5.x to /bin/bash and muddies the
+# interpreter under test. The EXPECT_BASH_MAJOR guard in entrypoint.sh hard-
+# fails the lane if the interpreter is ever not major version 3.
 #
-FROM alpine:3.19
+# Scope: this is a bash-version + musl-portability lane (busybox userland),
+# NOT a BSD-userland lane. macOS BSD tool behavior is covered by the native
+# macOS CI job.
+#
+FROM bash:3.2
 
 # Install runtime dependencies. Alpine's fd package installs the binary as `fd`
 # directly (no fdfind rename), so the resolver's fd discovery strategy is
 # exercised in the bash-compat image too.
 RUN apk add --no-cache \
-    bash \
     git \
     curl \
     fd
@@ -22,7 +30,7 @@ RUN git config --global user.email "test@example.com" \
     && git config --global init.defaultBranch main
 
 # Create test user
-RUN adduser -D -s /bin/bash testuser
+RUN adduser -D -s /usr/local/bin/bash testuser
 USER testuser
 WORKDIR /home/testuser
 
@@ -42,6 +50,9 @@ RUN rm -rf .git \
 
 # Set up PATH
 ENV PATH="/home/testuser/.local/bin:${PATH}"
+
+# Arm the entrypoint's interpreter guard: this lane must run under bash 3.x.
+ENV EXPECT_BASH_MAJOR=3
 
 # Entry point - run without pre-commit tests (no pre-commit in alpine)
 ENTRYPOINT ["./tests/docker/entrypoint.sh"]

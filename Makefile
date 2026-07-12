@@ -103,8 +103,8 @@ test-docker: docker-build ## Run all tests in Docker
 	@docker run --rm -e CI=true $(DOCKER_IMAGE) worktree
 	@docker run --rm $(DOCKER_IMAGE) precommit
 
-test-docker-bash3: docker-build-bash3 ## Run tests with bash 3.2 (macOS compatibility)
-	@echo "Running tests with bash 3.2..."
+test-docker-bash3: docker-build-bash3 ## Run tests under genuine bash 3.2.57 (bash-version compatibility)
+	@echo "Running tests under genuine bash 3.2.57..."
 	@docker run --rm $(DOCKER_IMAGE_BASH3) unit
 	@docker run --rm $(DOCKER_IMAGE_BASH3) install
 	@docker run --rm $(DOCKER_IMAGE_BASH3) gitops
