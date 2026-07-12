@@ -13,7 +13,6 @@ Be respectful, inclusive, and constructive. We're all here to build something us
 - Bash 3.2+ (macOS) or Bash 4+ (Linux)
 - Git 2.0+
 - Make (for running tests and installation)
-- `fd` on `PATH` is strongly recommended when profiling config discovery in large monorepos
 
 ### Setting Up Development Environment
 
@@ -140,13 +139,13 @@ All changes should include tests. The test suite is in `tests/run-tests.sh`.
 
 **IMPORTANT: Tests must be run inside Docker to ensure isolation and consistency.**
 
-When debugging performance in large repositories, use trace mode and note whether config discovery is using `fd` or the Git fallback:
+When debugging performance in large repositories, use trace mode and note which discovery mode ran:
 
 ```bash
 GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override apply
 ```
 
-Look for `discover_config_files strategy=fd` versus `discover_config_files strategy=git`. Large-repo timings can differ substantially depending on whether `fd` is installed.
+Look for `discover_config_files strategy=hot` versus `discover_config_files strategy=full`. `hot` (hook checkouts) walks only the non-ignored tree plus the stamped gitignored configs; `full` (`apply`, `sync-filters`) also scans directly-ignored configs but still skips wholly-ignored directories and `.git/`. The `tracked_ms`/`ignored_ms`/`total_ms` fields on that line break down the cost.
 
 ```bash
 # Run the full CI-equivalent suite: lint, resolver sync, and both Docker

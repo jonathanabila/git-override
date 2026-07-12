@@ -35,11 +35,6 @@ Then set up a repo in three steps:
 2. Create your local override file: `cp CLAUDE.md CLAUDE.local.md`, then edit it.
 3. That's it — your local content is active and protected from commits.
 
-For large monorepos, also install [`fd`](https://github.com/sharkdp/fd)
-(`brew install fd`; on Debian/Ubuntu install `fd-find` and expose it as `fd` on
-`PATH`). `git-local-override` uses it automatically for much faster
-`.local-overrides.yaml` discovery.
-
 <details>
 <summary>Other install options</summary>
 
@@ -161,6 +156,12 @@ files recursively:
 - An empty child config still claims its subtree and blocks parent targets there
 - A deeper config can still take ownership below an empty child config
 
+Discovery walks the tracked and untracked-but-not-ignored tree, plus configs
+whose own path is gitignored inside a walked directory. Configs that live
+**inside a wholly-gitignored directory** (e.g. `node_modules/dep/.local-overrides.yaml`)
+or inside `.git/` are deliberately never discovered — this keeps hooks fast on
+large monorepos and prevents a vendored tree from injecting overrides.
+
 For example, a root config using `pattern: ".local"` for `CLAUDE.md` plus a
 `backend/.local-overrides.yaml` using `pattern: ".private"` means root
 `CLAUDE.md` uses `CLAUDE.local.md`, `backend/CLAUDE.md` uses
@@ -237,7 +238,7 @@ Both modes also add `*.local.*` to the global gitignore.
 | Variable | Effect |
 |----------|--------|
 | `GIT_LOCAL_OVERRIDE_DISABLE=1` | Bypass the smudge/clean filters and pre-commit override handling — get the true original content (debugging) |
-| `GIT_LOCAL_OVERRIDE_TRACE=1` | Emit verbose timing/lifecycle trace to stderr from hooks, filters, and `apply` (includes `discover_config_files strategy=fd\|git` lines) |
+| `GIT_LOCAL_OVERRIDE_TRACE=1` | Emit verbose timing/lifecycle trace to stderr from hooks, filters, and `apply` (includes `discover_config_files strategy=hot\|full` lines) |
 | `GIT_LOCAL_OVERRIDE_DISABLE_WORKTREE_FALLBACK=1` | Disable a linked worktree inheriting the main worktree's config/overrides |
 
 **Tip:** to commit your local content intentionally, bypass the pre-commit hook
@@ -264,10 +265,15 @@ form. If failures happen specifically during rebase, make sure your install
 includes the `pre-rebase` hook (re-run install or `pre-commit install
 --hook-type pre-rebase`).
 
-**Slow in a large monorepo.** Install `fd` and rerun. Confirm the discovery
-strategy with `GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override apply` and look for
-the `discover_config_files strategy=` line: `strategy=fd` is the fast path,
-`strategy=git` is the slower fallback.
+**Slow in a large monorepo.** Discovery no longer walks gitignored trees
+(`node_modules/`, build dirs) or `.git/`, so hook cost scales with the
+non-ignored tree only. Hook checkouts use the `hot` strategy (one non-ignored
+walk); full-discovery commands (`apply`, `sync-filters`) use `full`. Confirm
+with `GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override apply` and look for the
+`discover_config_files strategy=hot|full` line. If a **newly created**
+gitignored config is not picked up on checkout, run
+`git-local-override sync-filters` once to register it (edits and deletions of
+already-registered configs are detected automatically).
 
 **New hooks not working after a project update (curl install).** The curl method
 writes hooks into `.git/hooks/` at install time, so re-run the install one-liner
@@ -304,7 +310,6 @@ and `VERSION` — to `~/.local/share/git-local-override`.
 - **Git** 2.0+
 - Standard Unix tools: `grep`, `cp`, `mv`, `mkdir`, `chmod`, `dirname`, `basename`
 - `curl` (for remote installation only)
-- Optional but strongly recommended for large monorepos: `fd` on `PATH`
 
 ## Development
 
