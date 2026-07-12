@@ -160,11 +160,15 @@ reapply_post_commit_state() {
 
         if [[ -f "$override" && -f "$repo_root/$target" ]]; then
             # $override is absolute (anchored at the resolution root by
-            # pre-commit); guard it via its own parent so the symlink gate
-            # still applies to the absolute path. The override side is a read
-            # and honors the local symlink opt-in; the target side never does.
+            # pre-commit). Recover the resolution root + relative override so the
+            # symlink containment check anchors on the TRUE root, never the
+            # override's own (possibly symlinked) parent dir.
+            local reapply_resolution_root reapply_override_rel
+            reapply_resolution_root="$(get_resolution_root "$repo_root")"
+            reapply_override_rel="${override#"$reapply_resolution_root"/}"
             if ! path_is_symlink_safe "$repo_root" "$target" \
-               || ! override_path_is_symlink_safe "$(dirname "$override")" "$(basename "$override")" "$repo_root"; then
+               || [[ "$reapply_override_rel" == "$override" ]] \
+               || ! override_path_is_symlink_safe "$reapply_resolution_root" "$reapply_override_rel" "$repo_root"; then
                 printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
                 continue
             fi

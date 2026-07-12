@@ -2452,6 +2452,178 @@ test_symlink_override_post_commit_reapply_with_optin() {
     fi
 }
 
+# SEC-01 regression: an override path traversing a repo-shipped SYMLINKED
+# PARENT dir (x -> outside) must be refused by the smudge core regardless of
+# the symlink opt-in — the final component is a regular file, so the opt-in
+# (which covers only the override file itself) never applies.
+test_smudge_refuses_parent_symlinked_override() {
+    info "Testing smudge refuses override behind a symlinked parent dir..."
+
+    cd "$TEST_REPO"
+
+    # Outside-repo directory holding the sentinel the attacker wants leaked.
+    local outside_dir="$CURRENT_TEST_ROOT/outside-dir"
+    mkdir -p "$outside_dir"
+    echo "OUTSIDE PARENT SECRET" > "$outside_dir/secret"
+
+    # Repo-shipped symlinked parent dir: the override path traverses it.
+    ln -s "$outside_dir" x
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: x/secret
+    replaces:
+      - CLAUDE.md
+EOF
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local artifacts="$CURRENT_TEST_ROOT/artifacts"
+    mkdir -p "$artifacts"
+    local original="$artifacts/original.txt"
+    local smudged_off="$artifacts/smudged-optin-off.txt"
+    local smudged_on="$artifacts/smudged-optin-on.txt"
+
+    git show HEAD:CLAUDE.md > "$original"
+
+    # Expected: passthrough (the tracked blob), with opt-in BOTH off and on.
+    "$smudge_script" CLAUDE.md < "$original" > "$smudged_off"
+    git config local-override.followSymlinkedOverrides true
+    "$smudge_script" CLAUDE.md < "$original" > "$smudged_on"
+
+    rm -f x
+
+    if cmp -s "$smudged_off" "$original" && cmp -s "$smudged_on" "$original"; then
+        pass "Parent-symlinked override refused by smudge with opt-in off and on"
+    else
+        fail "Smudge leaked content behind a symlinked parent dir (off: '$(cat "$smudged_off")', on: '$(cat "$smudged_on")')"
+    fi
+}
+
+# Clean-side counterpart of the SEC-01 regression: working-tree stdin equal to
+# the outside content must NOT be recognized as the override (which would
+# substitute index content) — it must pass through unchanged.
+test_clean_refuses_parent_symlinked_override() {
+    info "Testing clean refuses override behind a symlinked parent dir..."
+
+    cd "$TEST_REPO"
+
+    local outside_dir="$CURRENT_TEST_ROOT/outside-dir"
+    mkdir -p "$outside_dir"
+    echo "OUTSIDE PARENT SECRET" > "$outside_dir/secret"
+
+    ln -s "$outside_dir" x
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: x/secret
+    replaces:
+      - CLAUDE.md
+EOF
+
+    local clean_script=".git/hooks/local-override-filter-clean"
+    local artifacts="$CURRENT_TEST_ROOT/artifacts"
+    mkdir -p "$artifacts"
+    local sentinel_in="$artifacts/sentinel-in.txt"
+    local cleaned_off="$artifacts/cleaned-optin-off.txt"
+    local cleaned_on="$artifacts/cleaned-optin-on.txt"
+
+    cp "$outside_dir/secret" "$sentinel_in"
+
+    # Expected: output == sentinel input unchanged, opt-in BOTH off and on.
+    "$clean_script" CLAUDE.md < "$sentinel_in" > "$cleaned_off"
+    git config local-override.followSymlinkedOverrides true
+    "$clean_script" CLAUDE.md < "$sentinel_in" > "$cleaned_on"
+
+    rm -f x
+
+    if cmp -s "$cleaned_off" "$sentinel_in" && cmp -s "$cleaned_on" "$sentinel_in"; then
+        pass "Parent-symlinked override refused by clean with opt-in off and on"
+    else
+        fail "Clean substituted index content behind a symlinked parent dir"
+    fi
+}
+
+# Reapply-side SEC-01 regression: a state entry whose absolute override path
+# traverses a symlinked parent dir must be refused, leaving the target intact.
+test_post_commit_reapply_refuses_parent_symlinked_override() {
+    info "Testing reapply refuses override behind a symlinked parent dir..."
+
+    cd "$TEST_REPO"
+
+    local outside_dir="$CURRENT_TEST_ROOT/outside-dir"
+    mkdir -p "$outside_dir"
+    echo "OUTSIDE PARENT SECRET" > "$outside_dir/secret"
+    ln -s "$outside_dir" x
+
+    local artifacts="$CURRENT_TEST_ROOT/artifacts"
+    mkdir -p "$artifacts"
+    local target_before="$artifacts/target-before.txt"
+    cp CLAUDE.md "$target_before"
+
+    # Seed the reapply state file the way pre-commit would (absolute override
+    # anchored at the resolution root), traversing the symlinked parent dir.
+    local resolution_root state_file
+    resolution_root="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        get_resolution_root "$TEST_REPO"
+    )"
+    state_file="$(git rev-parse --absolute-git-dir)/local-override-post-commit-state"
+    printf 'CLAUDE.md|%s/x/secret\n' "$resolution_root" > "$state_file"
+
+    local output
+    output=$(.git/hooks/post-commit 2>&1) || true
+
+    rm -f x
+
+    if cmp -s CLAUDE.md "$target_before" \
+       && [[ "$output" == *"refusing symlinked path"* ]]; then
+        pass "Reapply refused the parent-symlinked override; target untouched"
+    else
+        fail "Reapply followed a symlinked parent dir (output: '$output', now: '$(cat CLAUDE.md)')"
+    fi
+}
+
+# GATE-01 positive: the post-checkout cp-apply loop now uses the opt-in-aware
+# override gate, so an untracked user-created symlinked override is applied
+# with the opt-in ON (matching the filters) and still refused with it OFF.
+test_post_checkout_applies_optin_symlinked_override() {
+    info "Testing post-checkout applies opt-in symlinked override..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    local artifacts="$CURRENT_TEST_ROOT/artifacts"
+    mkdir -p "$artifacts"
+    local original="$artifacts/claude-original.txt"
+    cp CLAUDE.md "$original"
+
+    # Opt-in OFF: the symlinked override must NOT be applied.
+    local output_off
+    output_off=$(.git/hooks/post-checkout "" "" "1" 2>&1) || true
+    local off_ok=""
+    if cmp -s CLAUDE.md "$original" \
+       && [[ "$output_off" == *"refusing symlinked path"* ]]; then
+        off_ok="yes"
+    fi
+
+    # Opt-in ON: post-checkout follows the untracked symlinked override.
+    git config local-override.followSymlinkedOverrides true
+    .git/hooks/post-checkout "" "" "1" > /dev/null 2>&1 || true
+
+    if [[ "$off_ok" == "yes" ]] && cmp -s CLAUDE.md "$outside_file"; then
+        pass "Post-checkout honors the symlink opt-in (refused off, applied on)"
+    else
+        fail "Post-checkout opt-in handling wrong (off_ok: '$off_ok', now: '$(cat CLAUDE.md)')"
+    fi
+}
+
 test_list_marks_symlinked_override() {
     info "Testing list marks symlinked overrides..."
 
@@ -3556,6 +3728,10 @@ main() {
         test_add_preserves_existing_symlink_override_with_optin \
         test_symlink_override_filter_roundtrip_with_optin \
         test_symlink_override_post_commit_reapply_with_optin \
+        test_smudge_refuses_parent_symlinked_override \
+        test_clean_refuses_parent_symlinked_override \
+        test_post_commit_reapply_refuses_parent_symlinked_override \
+        test_post_checkout_applies_optin_symlinked_override \
         test_list_marks_symlinked_override \
         test_doctor_warns_symlinked_override_without_optin \
         test_recursive_three_level_nearest_config_wins \

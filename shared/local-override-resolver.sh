@@ -1305,6 +1305,34 @@ get_override_for_file() {
     printf '%s/%s\n' "$resolution_root" "$override"
 }
 
+# Safe front door for the filter cores and reapply path. Given the checkout
+# repo root and a managed target path, prints the ABSOLUTE override path and
+# returns 0 only when a readable, symlink-safe override exists — otherwise
+# returns 1 with no output. Centralizes the "true resolution root + relative
+# override" containment convention so callers can never anchor the symlink
+# check on the override's own (possibly symlinked) parent directory (the
+# SEC-01 bypass). $1 = checkout repo root, $2 = target file path (%f).
+resolve_safe_override_for_file() {
+    local repo_root="$1"
+    local file_path="$2"
+    local resolution_root=""
+    local override_rel=""
+    local override_abs=""
+
+    resolution_root="$(get_resolution_root "$repo_root")"
+    override_rel="$(get_override_for_target "$file_path" "$resolution_root" 2>/dev/null || true)"
+    [[ -n "$override_rel" ]] || return 1
+
+    override_abs="$resolution_root/$override_rel"
+    [[ -f "$override_abs" ]] || return 1
+
+    # True resolution root as the containment anchor; relative override as the
+    # path. This is the same safe convention the CLI (apply/add) already uses.
+    override_path_is_symlink_safe "$resolution_root" "$override_rel" "$repo_root" || return 1
+
+    printf '%s\n' "$override_abs"
+}
+
 is_rebase_in_progress() {
     local repo_root="$1"
     local rebase_merge_path=""
@@ -1385,13 +1413,12 @@ run_local_override_smudge() {
     fi
 
     local override_file
-    override_file="$(get_override_for_file "$repo_root" "$file_path")"
+    override_file="$(resolve_safe_override_for_file "$repo_root" "$file_path")" || override_file=""
 
-    # A repo-shipped symlinked override would leak outside-repo content into
-    # the tree; refused links fall through to plain passthrough. User-created
-    # symlinks pass behind the local opt-in (read side only).
-    if [[ -n "$override_file" && -f "$override_file" ]] \
-       && override_path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")" "$repo_root"; then
+    # A repo-shipped or refused symlinked override yields no path here and falls
+    # through to plain passthrough. User-created symlinks pass only behind the
+    # local opt-in (read side only), enforced inside the helper.
+    if [[ -n "$override_file" ]]; then
         cat > /dev/null
         cat "$override_file"
         return 0
@@ -1441,13 +1468,12 @@ run_local_override_clean() {
         return 0
     fi
 
-    override_file="$(get_override_for_file "$repo_root" "$file_path")"
+    override_file="$(resolve_safe_override_for_file "$repo_root" "$file_path")" || override_file=""
     if [[ "$trace_on" == true ]]; then
         resolve_override_ms="$(resolver_elapsed_milliseconds "$total_start_ms")"
     fi
 
-    if [[ -n "$override_file" && -f "$override_file" ]] \
-       && override_path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")" "$repo_root"; then
+    if [[ -n "$override_file" ]]; then
         # Only transform when incoming content is exactly the local override.
         # If caller already provided original/tracked content (e.g., pre-commit
         # restored file), passthrough avoids clobbering intended staged content.

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Closed a repo-containment bypass in the override read gate**: a symlinked parent directory inside an override path could bypass the repo-containment check in the smudge/clean filters and the post-commit reapply, because those call sites anchored the check on the override's own parent directory instead of the true resolution root. All override-read sites now go through a single safe resolver front door (`resolve_safe_override_for_file`) that anchors containment on the resolution root — the same convention the CLI already used — so an override path traversing a repo-shipped symlinked directory is refused regardless of the `local-override.followSymlinkedOverrides` opt-in (the opt-in covers only the override file itself, never path components). The post-checkout apply loop was also aligned onto the opt-in-aware override gate, so a legitimate user-created untracked symlinked override is now applied there too, matching the filters (unit 113→117)
+
 ## [0.9.0] - 2026-07-12
 
 ### Added
