@@ -856,6 +856,13 @@ apply_to_checkout() {
     sync_attributes "$checkout_root" "$config_entries"
     log_step_duration "Synced attributes" "$step_start_ms"
 
+    # Register the resolved config set (incl. any newly created gitignored
+    # configs) in the config stamp so the post-checkout hot path can trust it —
+    # mirrors cmd_sync_filters. Cache here is full-mode, so the stamp captures
+    # the complete set. Without this, an apply-registered gitignored config is
+    # invisible to the stamp comparison and later edits to it are missed.
+    write_config_stamp "$checkout_root" "$repo_root"
+
     success "Applied $count override(s) in $(resolver_elapsed_milliseconds "$apply_start_ms")ms"
 }
 

@@ -1085,6 +1085,43 @@ test_readonly_cli_full_discovery_without_stamp() {
     fi
 }
 
+test_apply_writes_config_stamp() {
+    info "Testing apply writes the config stamp so the hot path can trust it..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+
+    # Start without a stamp so only apply itself can have written it.
+    local stamp_file
+    stamp_file="$(git rev-parse --absolute-git-dir)/local-override-config-stamp"
+    rm -f "$stamp_file"
+
+    git-local-override apply >/dev/null 2>&1
+
+    # apply's full discovery must register the resolved config set in the
+    # stamp — exactly the state sync-filters leaves — so the stamp must exist,
+    # be non-empty, and match the current on-disk config set.
+    local stamp_matches=false
+    if (
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        config_stamp_matches "$PWD" "$PWD"
+    ); then
+        stamp_matches=true
+    fi
+
+    if [[ -s "$stamp_file" ]] && [[ "$stamp_matches" == true ]]; then
+        pass "apply writes a config stamp matching the on-disk config set"
+    else
+        local stamp_state="missing-or-empty"
+        [[ -s "$stamp_file" ]] && stamp_state="present"
+        fail "Expected apply to write a matching config stamp (stamp=$stamp_state, matches=$stamp_matches)"
+    fi
+}
+
 test_status_command() {
     info "Testing status command..."
 
@@ -3695,6 +3732,7 @@ main() {
         test_readonly_cli_hot_discovery_on_matching_stamp \
         test_readonly_cli_falls_back_to_full_on_stamp_mismatch \
         test_readonly_cli_full_discovery_without_stamp \
+        test_apply_writes_config_stamp \
         test_status_command \
         test_status_recognizes_filter_process_mode \
         test_status_in_worktree \
