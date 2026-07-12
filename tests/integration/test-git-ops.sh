@@ -1259,37 +1259,46 @@ test_pull_with_overridden_file() {
     local default_branch
     default_branch=$(git rev-parse --abbrev-ref HEAD)
 
-    if git show-ref --verify --quiet "refs/heads/feature-pull"; then
-        git branch -D feature-pull 2>/dev/null || true
-    fi
-
-    git checkout -q -b feature-pull
-    echo "# Feature pull change" >> README.md
-    git add README.md
-    git commit -q -m "Remote-like change"
-    git checkout -q "$default_branch"
-
+    # A real pull needs a real remote. Clone this repo to a second checkout,
+    # add a commit there, then pull it back — exercising fetch (FETCH_HEAD) +
+    # merge, a genuinely different path from an in-repo branch merge (which is
+    # what test_merge_with_overridden_file already covers).
+    local pull_src="$TEST_ROOT/pull-src"
+    rm -rf "$pull_src"
+    git clone -q "$TEST_DIR" "$pull_src"
+    git -C "$pull_src" config user.name "Test User"
+    git -C "$pull_src" config user.email "test@test.com"
+    echo "# Feature pull change" >> "$pull_src/README.md"
+    git -C "$pull_src" add README.md
+    git -C "$pull_src" commit -q -m "Remote-like change"
 
     cp CLAUDE.local.md CLAUDE.md
 
-    if ! git merge -q --no-edit feature-pull 2>/dev/null; then
-        fail "Merge (simulating pull) failed"
-        git merge --abort 2>/dev/null || true
+    if ! git pull -q --no-edit "$pull_src" "$default_branch" 2>/dev/null; then
+        fail "git pull failed"
         return 1
     fi
 
     if grep -q "MY LOCAL CLAUDE.md" CLAUDE.md; then
-        pass "Local override preserved after merge (simulating pull)"
+        pass "Local override preserved after pull"
     else
-        fail "Local override lost after merge"
+        fail "Local override lost after pull"
+        return 1
+    fi
+
+    # Confirm the pull actually brought the remote commit in.
+    if git log --oneline -1 | grep -q "Remote-like change"; then
+        pass "Pulled commit is present in history"
+    else
+        fail "Pull did not bring in the remote commit"
         return 1
     fi
 
     local status_output
     status_output=$(git status --porcelain | grep -v "^??" || true)
-    
+
     if [[ -z "$status_output" ]]; then
-        pass "Git status is clean after merge"
+        pass "Git status is clean after pull"
     else
         fail "Git status shows changes"
         return 1
