@@ -564,6 +564,59 @@ path_is_symlink_safe() {
     return 0
 }
 
+# Memo for local_override_follow_symlinks_enabled, keyed by repo root. Filter
+# processes are short-lived, so a config change mid-process is not a real
+# scenario (tests reset by sourcing in a subshell).
+_LO_FOLLOW_SYMLINKS_ROOT=""
+_LO_FOLLOW_SYMLINKS_VALUE=""
+
+# True iff the user locally opted in to following symlinked override sources.
+# The key is read from git config (--local or global scope) — never from
+# .local-overrides.yaml — so repo-shipped content can never enable it.
+# $1 = repo root. Returns 0 when enabled.
+local_override_follow_symlinks_enabled() {
+    local repo_root="$1"
+
+    if [[ -z "$_LO_FOLLOW_SYMLINKS_ROOT" || "$repo_root" != "$_LO_FOLLOW_SYMLINKS_ROOT" ]]; then
+        _LO_FOLLOW_SYMLINKS_ROOT="$repo_root"
+        _LO_FOLLOW_SYMLINKS_VALUE="$(git -C "$repo_root" config --get --type=bool \
+            local-override.followSymlinkedOverrides 2>/dev/null || echo "false")"
+    fi
+
+    [[ "$_LO_FOLLOW_SYMLINKS_VALUE" == "true" ]]
+}
+
+# Override-source counterpart of path_is_symlink_safe. Overrides are only ever
+# READ (cp source, cat, cmp), so a symlink the USER created may be followed
+# once they opt in locally. The escape hatch never applies to a symlink git
+# tracks at that path: a hostile repo can commit a symlink, but it cannot set
+# the opt-in (git config is not repo-shippable content) and a committed link
+# is tracked — either condition alone keeps the read refused. Dangling links
+# are treated as a missing override, not followed.
+# $1 = anchor dir, $2 = path relative to anchor, $3 = repo root (opt-in scope).
+# Returns 0 when the override may be read.
+override_path_is_symlink_safe() {
+    local anchor_dir="$1"
+    local rel_path="$2"
+    local repo_root="$3"
+    local full_path="$anchor_dir/$rel_path"
+
+    if [[ ! -L "$full_path" ]]; then
+        path_is_symlink_safe "$anchor_dir" "$rel_path"
+        return
+    fi
+
+    local_override_follow_symlinks_enabled "$repo_root" || return 1
+
+    # A tracked symlink is repo-controlled content: always refused.
+    if git -C "$anchor_dir" ls-files --error-unmatch -- "$rel_path" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # -f follows the link: dangling symlinks are not followed.
+    [[ -f "$full_path" ]]
+}
+
 # Emit `git worktree list --porcelain` records NUL-terminated. `-z` (git >=
 # 2.36) is preferred: it is the only form that survives newlines in worktree
 # paths. Older gits fall back to converting the newline-terminated porcelain

@@ -2166,6 +2166,61 @@ test_symlink_guard_allows_regular_files() {
     fi
 }
 
+# Direct decision-table test for the resolver's override read-side predicate
+# (spec: docs/superpowers/specs/2026-07-12-symlinked-override-optin-design.md).
+# Each check sources the resolver in a subshell so the per-process memo in
+# local_override_follow_symlinks_enabled never sees two config states.
+test_override_symlink_helper_decision_table() {
+    info "Testing override_path_is_symlink_safe decision table..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local outside_file="$CURRENT_TEST_ROOT/outside-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    # Runs the predicate in a fresh subshell; exit status is the verdict.
+    check_override_safe() (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        override_path_is_symlink_safe "$TEST_REPO" "$1" "$TEST_REPO"
+    )
+
+    local failures=""
+
+    # Row 1: regular file -> current containment behavior (safe).
+    echo "# regular" > CLAUDE.local.md
+    check_override_safe "CLAUDE.local.md" || failures="$failures regular-file-refused"
+
+    # Row 2: symlink, opt-in off -> refused.
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+    check_override_safe "CLAUDE.local.md" && failures="$failures no-optin-followed"
+
+    # Row 4: symlink, opt-in on, untracked, resolves -> followed.
+    git config local-override.followSymlinkedOverrides true
+    check_override_safe "CLAUDE.local.md" || failures="$failures optin-refused"
+
+    # Row 3: symlink, opt-in on, TRACKED -> refused.
+    git add -f CLAUDE.local.md
+    check_override_safe "CLAUDE.local.md" && failures="$failures tracked-followed"
+    git rm -q --cached CLAUDE.local.md
+
+    # Row 5: symlink, opt-in on, untracked, dangling -> refused (missing).
+    rm -f CLAUDE.local.md
+    ln -s "$CURRENT_TEST_ROOT/does-not-exist.md" CLAUDE.local.md
+    check_override_safe "CLAUDE.local.md" && failures="$failures dangling-followed"
+
+    rm -f CLAUDE.local.md
+    git config --unset local-override.followSymlinkedOverrides || true
+
+    if [[ -z "$failures" ]]; then
+        pass "override_path_is_symlink_safe matches the decision table"
+    else
+        fail "Decision table violations:$failures"
+    fi
+}
+
 test_recursive_three_level_nearest_config_wins() {
     info "Testing three-level nearest config ownership..."
 
@@ -3204,6 +3259,7 @@ main() {
         test_symlink_target_refused_on_apply \
         test_symlink_override_refused_on_smudge \
         test_symlink_guard_allows_regular_files \
+        test_override_symlink_helper_decision_table \
         test_recursive_three_level_nearest_config_wins \
         test_recursive_three_level_add_uses_nearest_pattern \
         test_recursive_empty_child_blocks_parent_targets \
