@@ -983,6 +983,108 @@ EOF
     fi
 }
 
+test_readonly_cli_hot_discovery_on_matching_stamp() {
+    info "Testing a read-only CLI command uses hot discovery when the config stamp matches..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+
+    # sync-filters runs full discovery and records the config stamp the
+    # read-only fast path trusts.
+    git-local-override sync-filters >/dev/null 2>&1
+
+    local output
+    local discover_count
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override validate 2>&1)
+    discover_count="$(count_trace_matches "$output" 'discover_config_files strategy=')"
+
+    # A matching stamp means the hot cache is trusted: exactly one hot pass,
+    # no ignored-tree walk.
+    if [[ "$discover_count" -eq 1 ]] &&
+       [[ "$output" == *"strategy=hot"* ]] &&
+       [[ "$output" != *"strategy=full"* ]]; then
+        pass "Read-only validate performs a single hot discovery pass on a matching stamp"
+    else
+        fail "Expected exactly one hot discovery pass and no full walk (count=$discover_count, output: $output)"
+    fi
+}
+
+test_readonly_cli_falls_back_to_full_on_stamp_mismatch() {
+    info "Testing a read-only CLI command falls back to full discovery on stamp drift and sees a new gitignored config..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+
+    # Stamp records the config set as of this full discovery: {root config}.
+    git-local-override sync-filters >/dev/null 2>&1
+
+    # A brand-new gitignored config in a walked subdir, managing a tracked
+    # target. Full discovery finds it; hot discovery (stamped paths only) can't.
+    mkdir -p sub
+    echo "# original notes" > sub/notes.md
+    git add sub/notes.md
+    git commit -q -m "Add tracked subdir target"
+    cat > sub/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    echo "sub/.local-overrides.yaml" >> .gitignore
+    echo "# SUB LOCAL notes" > sub/notes.local.md
+
+    # Edit the tracked root config so its checksum no longer matches the stamp,
+    # forcing the fast path to fall back to a full walk. The entries are
+    # unchanged, so the only effect is the cksum-based stamp mismatch.
+    printf '\n# stamp-busting comment\n' >> .local-overrides.yaml
+
+    local output
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override list 2>&1)
+
+    if [[ "$output" == *"strategy=full"* ]] &&
+       [[ "$output" == *"sub/notes.md"* ]]; then
+        pass "Read-only list falls back to full discovery on stamp drift and finds the new gitignored config"
+    else
+        fail "Expected full-discovery fallback and visibility of the new gitignored config (output: $output)"
+    fi
+}
+
+test_readonly_cli_full_discovery_without_stamp() {
+    info "Testing a read-only CLI command uses full discovery without a stamp and never writes one..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+
+    # No sync-filters/post-checkout slow path has run, so there is no stamp.
+    local stamp_file
+    stamp_file="$(git rev-parse --absolute-git-dir)/local-override-config-stamp"
+    rm -f "$stamp_file"
+
+    local output
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override validate 2>&1)
+
+    # A missing stamp fails the match, so the read-only command must fall back
+    # to a full walk — and must not write the stamp (that stays sync-filters'
+    # and the post-checkout slow path's job).
+    if [[ "$output" == *"strategy=full"* ]] && [[ ! -f "$stamp_file" ]]; then
+        pass "Read-only validate falls back to full discovery without a stamp and writes no stamp"
+    else
+        local stamp_state="absent"
+        [[ -f "$stamp_file" ]] && stamp_state="present"
+        fail "Expected full discovery without a stamp and no stamp written (stamp=$stamp_state, output: $output)"
+    fi
+}
+
 test_status_command() {
     info "Testing status command..."
 
@@ -3075,6 +3177,9 @@ main() {
         test_discovery_hot_mode_unions_stamped_paths \
         test_discovery_never_reads_git_dir_configs \
         test_new_gitignored_config_registered_by_sync_filters \
+        test_readonly_cli_hot_discovery_on_matching_stamp \
+        test_readonly_cli_falls_back_to_full_on_stamp_mismatch \
+        test_readonly_cli_full_discovery_without_stamp \
         test_status_command \
         test_status_recognizes_filter_process_mode \
         test_status_in_worktree \

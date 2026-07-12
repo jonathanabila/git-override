@@ -344,6 +344,19 @@ get_cached_config_files() {
     fi
 }
 
+# True when the discovery cache is already populated for repo_root, regardless
+# of mode. A read-only consumer can reuse whatever is cached: a full cache is a
+# superset of hot, and a hot cache populated earlier in the same process was
+# stamp-validated before being cached. Lets a delegating read-only command
+# (e.g. status -> list) skip re-deriving hot/full and avoids thrashing the
+# mode key when the outer command settled on full. Callers that mutate config
+# files must still clear_config_files_cache first.
+config_files_cached_for() {
+    local repo_root="$1"
+    [[ -n "$_DISCOVER_CACHE_FILE" && -f "$_DISCOVER_CACHE_FILE" \
+        && "$_DISCOVER_CACHE_ROOT" == "$repo_root" ]]
+}
+
 # Keyed to the per-worktree git dir (like the post-commit state file) so
 # linked worktrees don't share a stale stamp.
 get_config_stamp_file() {

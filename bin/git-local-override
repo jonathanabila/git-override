@@ -237,6 +237,44 @@ source "$SHARED_RESOLVER_PATH"
 # paths. clear_config_files_cache is idempotent and no-ops when no cache exists.
 trap 'clear_config_files_cache 2>/dev/null || true' EXIT
 
+# Populate the discovery cache for a READ-ONLY command via stamp-gated hot
+# discovery, mirroring the post-checkout hot path (plan 043): one non-ignored
+# walk plus a free re-check of the gitignored configs recorded in the config
+# stamp, then fall back to a full walk only on drift. Args: checkout_root
+# (where the stamp lives) and resolution_root (what the config set resolves
+# against; equals checkout_root outside fallback worktrees).
+#
+# The stamp is compared against the hot cache, so a matching stamp means "no
+# config drift is visible without an ignored-tree walk" and the hot cache is
+# trusted. A mismatch — or no stamp yet (fresh clone before any
+# sync-filters/post-checkout slow path) — recaches full so a directly-ignored
+# config the hot walk cannot see is still found. Read-only commands never write
+# the stamp: sync-filters and the post-checkout slow path stay the only writing
+# authorities, so a stale-but-present stamp can only cost a fallback walk, never
+# hide a config from a mutating command. Callers keep their own
+# `trap 'clear_config_files_cache' RETURN`; a RETURN trap set here would fire
+# when this helper returns and clear the cache before the caller uses it.
+cache_config_files_readonly() {
+    local checkout_root="$1"
+    local resolution_root="$2"
+
+    # A read-only command that delegates to another (status -> list) has already
+    # populated and stamp-validated the cache; reuse it rather than re-deriving
+    # hot/full, which would thrash the mode key (an outer full cache vs an inner
+    # hot request forces two needless re-scans).
+    if config_files_cached_for "$resolution_root"; then
+        return 0
+    fi
+
+    # Hot first so config_stamp_matches's compute_config_stamp reads the hot
+    # cache (cache=hit) instead of triggering a throwaway uncached discovery.
+    cache_config_files "$resolution_root" hot "$(get_stamped_config_paths "$checkout_root")"
+    if ! config_stamp_matches "$checkout_root" "$resolution_root"; then
+        clear_config_files_cache
+        cache_config_files "$resolution_root"
+    fi
+}
+
 cmd_version() {
     get_version
 }
@@ -479,7 +517,7 @@ cmd_list() {
     checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
-    cache_config_files "$repo_root"
+    cache_config_files_readonly "$checkout_root" "$repo_root"
     trap 'clear_config_files_cache' RETURN
 
     if ! has_any_config "$repo_root"; then
@@ -569,7 +607,7 @@ cmd_status() {
     checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
-    cache_config_files "$repo_root"
+    cache_config_files_readonly "$checkout_root" "$repo_root"
     trap 'clear_config_files_cache' RETURN
 
     echo "Local Override Status"
@@ -1040,7 +1078,7 @@ cmd_validate() {
     # Cache discovery before has_any_config so the check hits the cache instead
     # of paying a throwaway walk first (matches cmd_sync_filters). Without this
     # ordering validate runs two full discovery walks per invocation.
-    cache_config_files "$repo_root"
+    cache_config_files_readonly "$checkout_root" "$repo_root"
     trap 'clear_config_files_cache' RETURN
 
     has_any_config "$repo_root" || die "No $CONFIG_FILE_NAME found"
@@ -1095,7 +1133,7 @@ cmd_doctor() {
     checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
-    cache_config_files "$repo_root"
+    cache_config_files_readonly "$checkout_root" "$repo_root"
     trap 'clear_config_files_cache' RETURN
 
     echo "Local Override Doctor"
@@ -1322,7 +1360,7 @@ cmd__get_active_targets() {
     checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
-    cache_config_files "$repo_root"
+    cache_config_files_readonly "$checkout_root" "$repo_root"
     trap 'clear_config_files_cache' RETURN
 
     has_any_config "$repo_root" || return 0

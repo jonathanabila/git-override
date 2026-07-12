@@ -574,6 +574,13 @@ test_status_caches_discovery() {
     info "Testing status runs config discovery at most once and hits the cache..."
 
     cd "$TEST_DIR"
+
+    # Record the config stamp so status (a read-only command) takes the
+    # stamp-gated hot path (plan 044). Without a stamp a read-only command
+    # correctly pays hot + a full fallback; here we assert the warm-stamp case
+    # where the whole status -> list delegation shares one hot discovery pass.
+    "$PROJECT_DIR/bin/git-local-override" sync-filters >/dev/null 2>&1
+
     local output
     output="$(GIT_LOCAL_OVERRIDE_TRACE=1 "$PROJECT_DIR/bin/git-local-override" status 2>&1 || true)"
 
