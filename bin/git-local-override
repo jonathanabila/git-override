@@ -956,13 +956,14 @@ cmd_sync_filters() {
     checkout_root="$(get_repo_root)" || die "Not in a git repository"
     repo_root="$(get_resolution_root "$checkout_root")"
 
+    # Cache config discovery for the duration of sync-filters and reuse it for
+    # the has_any_config check (which otherwise pays a throwaway walk first).
+    cache_config_files "$repo_root"
+    trap 'clear_config_files_cache' RETURN
+
     if ! has_any_config "$repo_root"; then
         die "No $CONFIG_FILE_NAME found"
     fi
-
-    # Cache config file discovery for the duration of sync-filters
-    cache_config_files "$repo_root"
-    trap 'clear_config_files_cache' RETURN
 
     info "Validating config..."
     if ! validate_config "$repo_root"; then
@@ -1018,6 +1019,11 @@ cmd_sync_filters() {
 
     attributes_file="$(get_attributes_file_path "$checkout_root")" || die "Unable to resolve git attributes path"
     filter_count="$(count_managed_attribute_lines "$attributes_file")"
+
+    # Register the resolved config set (including any newly created gitignored
+    # configs) so hook hot paths can trust the stamp. The stamp lives in the
+    # checkout's git dir; the config set resolves against the resolution root.
+    write_config_stamp "$checkout_root" "$repo_root"
 
     success "Synced $filter_count file(s) to filter driver"
 }
