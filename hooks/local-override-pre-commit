@@ -79,7 +79,7 @@ main() {
         config_path="$(find_nearest_config_for_path "$resolution_root" "$staged_file" 2>/dev/null || true)"
         [[ -n "$config_path" ]] || continue
 
-        if ! echo "$relevant_configs" | grep -qxF "$config_path"; then
+        if [[ $'\n'"$relevant_configs"$'\n' != *$'\n'"$config_path"$'\n'* ]]; then
             relevant_configs="$relevant_configs
 $config_path"
         fi
@@ -124,7 +124,7 @@ $config_entry"
             # Check if override file exists
             if [[ -f "$resolution_root/$override" ]]; then
                 # Add to list if not already present
-                if ! printf '%s\n' "$overrides_to_restore" | grep -qxF "$override"; then
+                if [[ $'\n'"$overrides_to_restore"$'\n' != *$'\n'"$override"$'\n'* ]]; then
                     overrides_to_restore="$overrides_to_restore
 $override"
                 fi
@@ -197,7 +197,7 @@ $override"
             override="${entry#*|}"
             if [[ "$override" == "$override_file" ]]; then
                 state_entry="$target|$resolution_root/$override"
-                if ! printf '%s\n' "$state_entries" | grep -qxF "$state_entry"; then
+                if [[ $'\n'"$state_entries"$'\n' != *$'\n'"$state_entry"$'\n'* ]]; then
                     state_entries="$state_entries
 $state_entry"
                 fi
