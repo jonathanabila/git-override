@@ -335,6 +335,85 @@ get_cached_config_files() {
     fi
 }
 
+# Keyed to the per-worktree git dir (like the post-commit state file) so
+# linked worktrees don't share a stale stamp.
+get_config_stamp_file() {
+    local repo_root="$1"
+    local worktree_git_dir=""
+
+    worktree_git_dir="$(git -C "$repo_root" rev-parse --absolute-git-dir 2>/dev/null || echo "")"
+    [[ -n "$worktree_git_dir" ]] || return 1
+
+    printf '%s\n' "$worktree_git_dir/local-override-config-stamp"
+}
+
+# Content stamp of the discovered config set: one "path|cksum size" line per
+# discovered config file. Captures adds/removes/edits of gitignored or
+# untracked configs, which a tracked HEAD diff cannot see. Content-based
+# (cksum) rather than mtime-based: `stat` flags differ between BSD and GNU,
+# mtime only has one-second granularity, and config files are small enough
+# that reading them is negligible next to the discovery walk itself.
+compute_config_stamp() {
+    local resolution_root="$1"
+    local config_path=""
+    local checksum=""
+
+    while IFS= read -r config_path || [[ -n "$config_path" ]]; do
+        [[ -n "$config_path" ]] || continue
+        checksum="$(cksum < "$resolution_root/$config_path" 2>/dev/null || printf 'unreadable\n')"
+        printf '%s|%s\n' "$config_path" "$checksum"
+    done < <(get_cached_config_files "$resolution_root")
+}
+
+# Record the config stamp after a successful full (slow-path) resolution,
+# which is the authority for what the synced attributes were built from.
+write_config_stamp() {
+    local repo_root="$1"
+    local resolution_root="$2"
+    local stamp_file=""
+
+    stamp_file="$(get_config_stamp_file "$repo_root" 2>/dev/null || true)"
+    [[ -n "$stamp_file" ]] || return 0
+
+    compute_config_stamp "$resolution_root" > "$stamp_file"
+}
+
+# Succeeds only when a recorded stamp exists and matches the current on-disk
+# config set. A missing stamp (fresh install, first checkout) fails the match
+# so callers fall back to the full slow path, which records it.
+config_stamp_matches() {
+    local repo_root="$1"
+    local resolution_root="$2"
+    local stamp_file=""
+    local stored_stamp=""
+    local current_stamp=""
+
+    stamp_file="$(get_config_stamp_file "$repo_root" 2>/dev/null || true)"
+    [[ -n "$stamp_file" && -f "$stamp_file" ]] || return 1
+
+    stored_stamp="$(cat "$stamp_file" 2>/dev/null || true)"
+    current_stamp="$(compute_config_stamp "$resolution_root")"
+
+    [[ "$stored_stamp" == "$current_stamp" ]]
+}
+
+# Paths recorded in the checkout's config stamp (first |-field per line).
+# Used by hot-mode discovery to re-check known gitignored configs without a
+# full ignored-tree walk. Missing stamp => empty output.
+get_stamped_config_paths() {
+    local repo_root="$1"
+    local stamp_file=""
+    local line=""
+
+    stamp_file="$(get_config_stamp_file "$repo_root" 2>/dev/null || true)"
+    [[ -n "$stamp_file" && -f "$stamp_file" ]] || return 0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -n "$line" ]] || continue
+        printf '%s\n' "${line%%|*}"
+    done < "$stamp_file"
+}
+
 trim_config_value() {
     local value="$1"
 
