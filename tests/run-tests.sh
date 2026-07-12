@@ -2221,6 +2221,171 @@ test_override_symlink_helper_decision_table() {
     fi
 }
 
+test_symlink_override_refused_without_optin_cli() {
+    info "Testing CLI apply refuses symlinked override without opt-in..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override apply 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 ]] \
+       && [[ "$output" == *"refusing symlinked path"* ]] \
+       && grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        pass "Symlinked override refused by apply without opt-in"
+    else
+        fail "Expected apply to die (exit: $exit_code, output: '$output')"
+    fi
+}
+
+test_symlink_override_followed_with_optin() {
+    info "Testing CLI apply follows symlinked override with opt-in..."
+
+    cd "$TEST_REPO"
+    create_config
+    git config local-override.followSymlinkedOverrides true
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override apply 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 ]] \
+       && grep -q "EXTERNAL CANONICAL" CLAUDE.md \
+       && [[ -L CLAUDE.local.md ]]; then
+        pass "Symlinked override applied; link preserved"
+    else
+        fail "Apply did not follow opt-in symlink (exit: $exit_code, output: '$output')"
+    fi
+}
+
+test_tracked_symlink_override_refused_with_optin() {
+    info "Testing tracked symlinked override refused even with opt-in..."
+
+    cd "$TEST_REPO"
+    create_config
+    git config local-override.followSymlinkedOverrides true
+
+    local outside_file="$CURRENT_TEST_ROOT/external-secret.md"
+    echo "OUTSIDE SECRET" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+    # Simulate a hostile repo shipping the symlink: track it.
+    git add -f CLAUDE.local.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override apply 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 ]] \
+       && [[ "$output" == *"refusing symlinked path"* ]] \
+       && grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        pass "Tracked symlinked override refused despite opt-in"
+    else
+        fail "Tracked symlink not refused (exit: $exit_code, output: '$output')"
+    fi
+}
+
+test_dangling_symlink_override_treated_missing() {
+    info "Testing dangling symlinked override treated as missing..."
+
+    cd "$TEST_REPO"
+    create_config
+    git config local-override.followSymlinkedOverrides true
+
+    rm -f CLAUDE.local.md
+    ln -s "$CURRENT_TEST_ROOT/does-not-exist.md" CLAUDE.local.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override apply 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 ]] \
+       && grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        pass "Dangling symlinked override skipped as missing"
+    else
+        fail "Dangling symlink mishandled (exit: $exit_code, output: '$output')"
+    fi
+}
+
+test_symlink_target_still_refused_with_optin() {
+    info "Testing symlinked TARGET still refused with opt-in set..."
+
+    cd "$TEST_REPO"
+
+    local outside_file="$CURRENT_TEST_ROOT/outside-write-target.txt"
+    echo "OUTSIDE SECRET" > "$outside_file"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: evil.local.md
+    replaces:
+      - evil-target.md
+EOF
+
+    git config local-override.followSymlinkedOverrides true
+    echo "PWNED" > evil.local.md
+    ln -s "$outside_file" evil-target.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override apply 2>&1) || exit_code=$?
+
+    local after
+    after="$(cat "$outside_file")"
+    rm -f evil-target.md evil.local.md
+
+    if [[ $exit_code -ne 0 ]] \
+       && [[ "$output" == *"refusing symlinked path"* ]] \
+       && [[ "$after" == "OUTSIDE SECRET" ]]; then
+        pass "Symlinked target still refused; opt-in is read-side only"
+    else
+        fail "Target write escape with opt-in (outside now: '$after', output: '$output')"
+    fi
+}
+
+test_add_preserves_existing_symlink_override_with_optin() {
+    info "Testing add keeps an existing symlinked override with opt-in..."
+
+    cd "$TEST_REPO"
+    create_config
+    git config local-override.followSymlinkedOverrides true
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override add CLAUDE.md 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 ]] \
+       && [[ "$output" == *"already exists"* ]] \
+       && [[ -L CLAUDE.local.md ]] \
+       && grep -q "EXTERNAL CANONICAL" CLAUDE.md; then
+        pass "add preserved the symlink and applied its content"
+    else
+        fail "add mishandled symlinked override (exit: $exit_code, output: '$output')"
+    fi
+}
+
 test_recursive_three_level_nearest_config_wins() {
     info "Testing three-level nearest config ownership..."
 
@@ -3260,6 +3425,12 @@ main() {
         test_symlink_override_refused_on_smudge \
         test_symlink_guard_allows_regular_files \
         test_override_symlink_helper_decision_table \
+        test_symlink_override_refused_without_optin_cli \
+        test_symlink_override_followed_with_optin \
+        test_tracked_symlink_override_refused_with_optin \
+        test_dangling_symlink_override_treated_missing \
+        test_symlink_target_still_refused_with_optin \
+        test_add_preserves_existing_symlink_override_with_optin \
         test_recursive_three_level_nearest_config_wins \
         test_recursive_three_level_add_uses_nearest_pattern \
         test_recursive_empty_child_blocks_parent_targets \

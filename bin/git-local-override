@@ -407,13 +407,14 @@ cmd_add() {
 
     local full_override_path="$repo_root/$override_path"
 
-    # Refuse symlinked target/override paths: cp follows symlinks, so a
-    # symlinked target would let a write escape the repo (and a symlinked
-    # override would read outside-repo content into a tracked file).
+    # Refuse symlinked target paths: cp follows symlinks, so a symlinked
+    # target would let a write escape the repo. Override paths are read-side:
+    # a user-created symlink is allowed behind the local opt-in
+    # (local-override.followSymlinkedOverrides).
     if ! path_is_symlink_safe "$repo_root" "$path"; then
         die "refusing symlinked path: $path"
     fi
-    if ! path_is_symlink_safe "$repo_root" "$override_path"; then
+    if ! override_path_is_symlink_safe "$repo_root" "$override_path" "$repo_root"; then
         die "refusing symlinked path: $override_path"
     fi
 
@@ -800,11 +801,13 @@ apply_to_checkout() {
 
             apply_target_start_ms="$(resolver_now_milliseconds)"
             copy_start_ms="$apply_target_start_ms"
-            # Refuse symlinked target/override before cp follows the link.
+            # Refuse symlinked targets before cp follows the link (write
+            # side). Overrides are read-side: user-created symlinks pass
+            # behind the local opt-in.
             if ! path_is_symlink_safe "$checkout_root" "$target"; then
                 die "refusing symlinked path: $target"
             fi
-            if ! path_is_symlink_safe "$repo_root" "$override"; then
+            if ! override_path_is_symlink_safe "$repo_root" "$override" "$repo_root"; then
                 die "refusing symlinked path: $override"
             fi
             # Explicit guard: inside `if (subshell)` errexit is suppressed, so
