@@ -631,6 +631,26 @@ override_path_is_symlink_safe() {
     [[ -f "$full_path" ]]
 }
 
+# Classify a symlinked override for display. $1=repo root, $2=repo-relative
+# override path (caller has confirmed it IS a symlink). Prints one of:
+#   followed       - opt-in on, untracked, resolves to a regular file
+#   ignored-optout - opt-in off
+#   tracked-refused- tracked by git (always refused)
+#   dangling       - resolves to nothing
+classify_symlinked_override() {
+    local repo_root="$1"
+    local rel_path="$2"
+    if override_path_is_symlink_safe "$repo_root" "$rel_path" "$repo_root"; then
+        printf 'followed\n'
+    elif ! local_override_follow_symlinks_enabled "$repo_root"; then
+        printf 'ignored-optout\n'
+    elif git -C "$repo_root" ls-files --error-unmatch -- "$rel_path" >/dev/null 2>&1; then
+        printf 'tracked-refused\n'
+    else
+        printf 'dangling\n'
+    fi
+}
+
 # Emit `git worktree list --porcelain` records NUL-terminated. `-z` (git >=
 # 2.36) is preferred: it is the only form that survives newlines in worktree
 # paths. Older gits fall back to converting the newline-terminated porcelain

@@ -2348,6 +2348,61 @@ test_override_symlink_helper_decision_table() {
     fi
 }
 
+# Direct test for the shared display classifier used by `list` and `doctor`.
+# Each check sources the resolver in a subshell so the per-process memo in
+# local_override_follow_symlinks_enabled never sees two config states.
+test_classify_symlinked_override() {
+    info "Testing classify_symlinked_override state tokens..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local outside_file="$CURRENT_TEST_ROOT/classifier-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    # Runs the classifier in a fresh subshell; prints the state token.
+    classify() (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        classify_symlinked_override "$TEST_REPO" "$1"
+    )
+
+    local failures=""
+    local token=""
+
+    # State 1: opt-in off -> ignored-optout.
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+    token="$(classify "CLAUDE.local.md")"
+    [[ "$token" == "ignored-optout" ]] || failures="$failures optout=$token"
+
+    # State 2: opt-in on, untracked, resolves -> followed.
+    git config local-override.followSymlinkedOverrides true
+    token="$(classify "CLAUDE.local.md")"
+    [[ "$token" == "followed" ]] || failures="$failures followed=$token"
+
+    # State 3: opt-in on, TRACKED -> tracked-refused.
+    git add -f CLAUDE.local.md
+    token="$(classify "CLAUDE.local.md")"
+    [[ "$token" == "tracked-refused" ]] || failures="$failures tracked=$token"
+    git rm -q --cached CLAUDE.local.md
+
+    # State 4: opt-in on, untracked, dangling -> dangling.
+    rm -f CLAUDE.local.md
+    ln -s "$CURRENT_TEST_ROOT/does-not-exist.md" CLAUDE.local.md
+    token="$(classify "CLAUDE.local.md")"
+    [[ "$token" == "dangling" ]] || failures="$failures dangling=$token"
+
+    rm -f CLAUDE.local.md
+    git config --unset local-override.followSymlinkedOverrides || true
+
+    if [[ -z "$failures" ]]; then
+        pass "classify_symlinked_override returns all four state tokens"
+    else
+        fail "Classifier token mismatches:$failures"
+    fi
+}
+
 test_symlink_override_refused_without_optin_cli() {
     info "Testing CLI apply skips symlinked override without opt-in..."
 
@@ -3908,6 +3963,7 @@ main() {
         test_symlink_override_refused_on_smudge \
         test_symlink_guard_allows_regular_files \
         test_override_symlink_helper_decision_table \
+        test_classify_symlinked_override \
         test_symlink_override_refused_without_optin_cli \
         test_symlink_override_followed_with_optin \
         test_tracked_symlink_override_refused_with_optin \

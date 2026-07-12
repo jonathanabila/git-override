@@ -552,14 +552,18 @@ cmd_list() {
             # Show the state the filters/apply will actually use, not what a
             # link-following -f suggests.
             symlink_note=" (symlink)"
-            if override_path_is_symlink_safe "$repo_root" "$override_file" "$repo_root"; then
-                status="${GREEN}[active]${NC}"
-                ((active_overrides++)) || true
-            elif [[ -f "$full_override_path" ]]; then
-                status="${YELLOW}[symlink ignored]${NC}"
-            else
-                status="${YELLOW}[no file]${NC}"
-            fi
+            case "$(classify_symlinked_override "$repo_root" "$override_file")" in
+                followed)
+                    status="${GREEN}[active]${NC}"
+                    ((active_overrides++)) || true
+                    ;;
+                ignored-optout|tracked-refused)
+                    status="${YELLOW}[symlink ignored]${NC}"
+                    ;;
+                dangling)
+                    status="${YELLOW}[no file]${NC}"
+                    ;;
+            esac
         elif [[ -f "$full_override_path" ]]; then
             status="${GREEN}[active]${NC}"
             ((active_overrides++)) || true
@@ -1326,21 +1330,26 @@ $target"
         sym_full_path="$repo_root/$sym_override"
         [[ -L "$sym_full_path" ]] || continue
 
-        if override_path_is_symlink_safe "$repo_root" "$sym_override" "$repo_root"; then
-            doctor_line pass "Symlinked override" "$sym_override -> $(readlink "$sym_full_path") (followed)"
-            ((pass_count++)) || true
-        elif ! local_override_follow_symlinks_enabled "$repo_root"; then
-            doctor_line warn "Symlinked override" "$sym_override is a symlink and is ignored"
-            echo "  -> To follow user-created symlinks: git config --local local-override.followSymlinkedOverrides true"
-            ((warn_count++)) || true
-        elif git -C "$repo_root" ls-files --error-unmatch -- "$sym_override" >/dev/null 2>&1; then
-            doctor_line warn "Symlinked override" "$sym_override is tracked by git — refused"
-            echo "  -> Only untracked, user-created symlinks are followed"
-            ((warn_count++)) || true
-        else
-            doctor_line warn "Symlinked override" "$sym_override is a dangling symlink — treated as missing"
-            ((warn_count++)) || true
-        fi
+        case "$(classify_symlinked_override "$repo_root" "$sym_override")" in
+            followed)
+                doctor_line pass "Symlinked override" "$sym_override -> $(readlink "$sym_full_path") (followed)"
+                ((pass_count++)) || true
+                ;;
+            ignored-optout)
+                doctor_line warn "Symlinked override" "$sym_override is a symlink and is ignored"
+                echo "  -> To follow user-created symlinks: git config --local local-override.followSymlinkedOverrides true"
+                ((warn_count++)) || true
+                ;;
+            tracked-refused)
+                doctor_line warn "Symlinked override" "$sym_override is tracked by git — refused"
+                echo "  -> Only untracked, user-created symlinks are followed"
+                ((warn_count++)) || true
+                ;;
+            dangling)
+                doctor_line warn "Symlinked override" "$sym_override is a dangling symlink — treated as missing"
+                ((warn_count++)) || true
+                ;;
+        esac
     done < <(get_override_files "$repo_root")
 
     echo ""
