@@ -2020,6 +2020,7 @@ main() {
     trap 'reset_git_config; finalize_current_test_root "${CURRENT_TEST_STATUS:-0}"' EXIT
 
     local test_fn
+    local test_exit
     for test_fn in \
         test_install_to_repo \
         test_install_with_existing_hooks \
@@ -2057,10 +2058,19 @@ main() {
         CURRENT_TEST_NAME="$test_fn"
         setup
 
+        CURRENT_TEST_STATUS=0
         set +e
         "$test_fn"
-        CURRENT_TEST_STATUS=$?
+        test_exit=$?
         set -e
+
+        # A test that returned nonzero WITHOUT recording a fail() is still a
+        # failure; and a test that called fail() without `return 1` must still
+        # trip fail-fast + artifact preservation. Key both off CURRENT_TEST_STATUS
+        # (fail() sets it to 1) instead of the test's raw return code.
+        if [[ $test_exit -ne 0 && $CURRENT_TEST_STATUS -eq 0 ]]; then
+            fail "${test_fn} exited with status $test_exit"
+        fi
 
         if [[ $CURRENT_TEST_STATUS -ne 0 ]]; then
             reset_git_config
