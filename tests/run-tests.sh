@@ -2386,6 +2386,72 @@ test_add_preserves_existing_symlink_override_with_optin() {
     fi
 }
 
+test_symlink_override_filter_roundtrip_with_optin() {
+    info "Testing smudge/clean roundtrip through symlinked override with opt-in..."
+
+    cd "$TEST_REPO"
+    create_config
+    git config local-override.followSymlinkedOverrides true
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    local smudge_script=".git/hooks/local-override-filter-smudge"
+    local clean_script=".git/hooks/local-override-filter-clean"
+
+    local original="$CURRENT_TEST_ROOT/artifacts/original.txt"
+    local smudged="$CURRENT_TEST_ROOT/artifacts/smudged.txt"
+    local cleaned="$CURRENT_TEST_ROOT/artifacts/cleaned.txt"
+    mkdir -p "$CURRENT_TEST_ROOT/artifacts"
+
+    git show HEAD:CLAUDE.md > "$original"
+    "$smudge_script" CLAUDE.md < "$original" > "$smudged"
+    "$clean_script" CLAUDE.md < "$smudged" > "$cleaned"
+
+    if cmp -s "$smudged" "$outside_file" && cmp -s "$cleaned" "$original"; then
+        pass "clean(smudge(original)) == original through symlinked override"
+    else
+        fail "Roundtrip broke (smudged: '$(cat "$smudged")', cleaned: '$(cat "$cleaned")')"
+    fi
+}
+
+test_symlink_override_post_commit_reapply_with_optin() {
+    info "Testing pre-commit restore + post-commit reapply through symlink..."
+
+    cd "$TEST_REPO"
+    create_config
+    git config local-override.followSymlinkedOverrides true
+
+    local outside_file="$CURRENT_TEST_ROOT/external-canonical.md"
+    echo "# EXTERNAL CANONICAL" > "$outside_file"
+
+    rm -f CLAUDE.local.md
+    ln -s "$outside_file" CLAUDE.local.md
+
+    git-local-override apply > /dev/null 2>&1
+
+    # Stage the overridden target, then drive the commit-time hook pair the
+    # way git would.
+    git add CLAUDE.md
+    .git/hooks/pre-commit > /dev/null 2>&1
+
+    local restored=""
+    if grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        restored="yes"
+    fi
+
+    .git/hooks/post-commit > /dev/null 2>&1
+
+    if [[ "$restored" == "yes" ]] && grep -q "EXTERNAL CANONICAL" CLAUDE.md; then
+        pass "Original restored at commit, symlinked override reapplied after"
+    else
+        fail "Commit flow broke (restored: '$restored', now: '$(cat CLAUDE.md)')"
+    fi
+}
+
 test_recursive_three_level_nearest_config_wins() {
     info "Testing three-level nearest config ownership..."
 
@@ -3431,6 +3497,8 @@ main() {
         test_dangling_symlink_override_treated_missing \
         test_symlink_target_still_refused_with_optin \
         test_add_preserves_existing_symlink_override_with_optin \
+        test_symlink_override_filter_roundtrip_with_optin \
+        test_symlink_override_post_commit_reapply_with_optin \
         test_recursive_three_level_nearest_config_wins \
         test_recursive_three_level_add_uses_nearest_pattern \
         test_recursive_empty_child_blocks_parent_targets \

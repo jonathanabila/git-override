@@ -161,9 +161,10 @@ reapply_post_commit_state() {
         if [[ -f "$override" && -f "$repo_root/$target" ]]; then
             # $override is absolute (anchored at the resolution root by
             # pre-commit); guard it via its own parent so the symlink gate
-            # still applies to the absolute path.
+            # still applies to the absolute path. The override side is a read
+            # and honors the local symlink opt-in; the target side never does.
             if ! path_is_symlink_safe "$repo_root" "$target" \
-               || ! path_is_symlink_safe "$(dirname "$override")" "$(basename "$override")"; then
+               || ! override_path_is_symlink_safe "$(dirname "$override")" "$(basename "$override")" "$repo_root"; then
                 printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
                 continue
             fi

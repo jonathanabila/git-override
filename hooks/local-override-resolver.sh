@@ -1387,10 +1387,11 @@ run_local_override_smudge() {
     local override_file
     override_file="$(get_override_for_file "$repo_root" "$file_path")"
 
-    # A symlinked override would leak outside-repo content into the tree; fall
-    # through to plain passthrough instead of emitting the link target.
+    # A repo-shipped symlinked override would leak outside-repo content into
+    # the tree; refused links fall through to plain passthrough. User-created
+    # symlinks pass behind the local opt-in (read side only).
     if [[ -n "$override_file" && -f "$override_file" ]] \
-       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
+       && override_path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")" "$repo_root"; then
         cat > /dev/null
         cat "$override_file"
         return 0
@@ -1446,7 +1447,7 @@ run_local_override_clean() {
     fi
 
     if [[ -n "$override_file" && -f "$override_file" ]] \
-       && path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")"; then
+       && override_path_is_symlink_safe "$(dirname "$override_file")" "$(basename "$override_file")" "$repo_root"; then
         # Only transform when incoming content is exactly the local override.
         # If caller already provided original/tracked content (e.g., pre-commit
         # restored file), passthrough avoids clobbering intended staged content.
