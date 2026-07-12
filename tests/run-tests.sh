@@ -661,6 +661,46 @@ EOF
     fi
 }
 
+test_sync_attributes_quotes_space_target() {
+    info "Testing attribute sync quotes a space-containing target and git wires the filter..."
+
+    cd "$TEST_REPO"
+
+    echo "# Original spaced content" > "my file.md"
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add -- "my file.md"
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git commit -q -m "Add space-name target"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: my file.local.md
+    replaces:
+      - my file.md
+EOF
+
+    echo "# LOCAL spaced content" > "my file.local.md"
+
+    local sync_exit=0
+    git-local-override sync-filters >/dev/null 2>&1 || sync_exit=$?
+
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+    if [[ "$attributes_file" != /* ]]; then
+        attributes_file="$TEST_REPO/$attributes_file"
+    fi
+
+    local attr_output
+    attr_output="$(git check-attr filter -- "my file.md")"
+
+    if [[ $sync_exit -eq 0 ]] &&
+       grep -qF '"my file.md" filter=local-override' "$attributes_file" &&
+       [[ "$attr_output" == *"filter: local-override"* ]]; then
+        pass "Space-containing target is quoted and git wires the filter"
+    else
+        fail "Space target not quoted or filter not wired (sync exit: $sync_exit, check-attr: $attr_output, attributes: $(cat "$attributes_file" 2>/dev/null))"
+    fi
+}
+
 test_post_checkout_trace_single_discovery_when_config_unchanged() {
     info "Testing post-checkout fast path runs one discovery pass and skips validation..."
 
@@ -1625,6 +1665,56 @@ EOF
     fi
 
     rm -f backend/.local-overrides.yaml
+    create_config
+}
+
+test_validate_rejects_attr_macro_target() {
+    info "Testing validate rejects an attribute-macro target..."
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: MACRO.local.md
+    replaces:
+      - "[attr]binary"
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override validate 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"glob/attribute metacharacter"* ]]; then
+        pass "validate rejects attribute-macro target"
+    else
+        fail "validate did not reject attribute-macro target (exit: $exit_code, output: $output)"
+    fi
+
+    create_config
+}
+
+test_validate_rejects_wildcard_target() {
+    info "Testing validate rejects a wildcard target..."
+    cd "$TEST_REPO"
+
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: WILD.local.md
+    replaces:
+      - "*"
+EOF
+
+    local output
+    local exit_code=0
+    output=$(git-local-override validate 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 && "$output" == *"glob/attribute metacharacter"* ]]; then
+        pass "validate rejects wildcard target"
+    else
+        fail "validate did not reject wildcard target (exit: $exit_code, output: $output)"
+    fi
+
     create_config
 }
 
@@ -3720,6 +3810,7 @@ main() {
         test_post_commit_hook_exits_without_state \
         test_pre_commit_trace_avoids_global_config_discovery \
         test_sync_attributes_entries_preserves_foreign_lines \
+        test_sync_attributes_quotes_space_target \
         test_post_checkout_trace_falls_back_when_attributes_missing \
         test_post_checkout_trace_single_discovery_when_config_unchanged \
         test_post_checkout_falls_back_and_refreshes_attributes_when_config_changes \
@@ -3785,6 +3876,8 @@ main() {
         test_validate_valid_config_passes \
         test_validate_duplicate_target_fails \
         test_validate_subtree_escape_rejected \
+        test_validate_rejects_attr_macro_target \
+        test_validate_rejects_wildcard_target \
         test_validate_no_config_dies \
         test_unknown_command_dies \
         test_outside_repo_dies \
