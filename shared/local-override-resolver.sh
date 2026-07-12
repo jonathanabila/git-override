@@ -1383,6 +1383,30 @@ is_rebase_in_progress() {
     return 1
 }
 
+# True while a merge or cherry-pick is in progress (MERGE_HEAD /
+# CHERRY_PICK_HEAD exists). At the concluding `git commit` of a conflicted
+# merge/cherry-pick — or a `merge --no-commit` — HEAD is still "ours", so a
+# pre-commit restore to HEAD:target would silently overwrite the genuine
+# resolution staged in the index. Hooks use this to skip that restore.
+# File checks (-f), not directory checks: both sentinels are plain ref files.
+is_merge_or_cherry_pick_in_progress() {
+    local repo_root="$1"
+    local merge_head_path=""
+    local cherry_pick_head_path=""
+
+    merge_head_path="$(git -C "$repo_root" rev-parse --git-path MERGE_HEAD 2>/dev/null || true)"
+    if [[ -n "$merge_head_path" && -f "$merge_head_path" ]]; then
+        return 0
+    fi
+
+    cherry_pick_head_path="$(git -C "$repo_root" rev-parse --git-path CHERRY_PICK_HEAD 2>/dev/null || true)"
+    if [[ -n "$cherry_pick_head_path" && -f "$cherry_pick_head_path" ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Smudge/clean filter cores.
 #

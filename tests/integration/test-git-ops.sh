@@ -1548,6 +1548,314 @@ test_cherry_pick_with_overridden_file() {
     git checkout -q "$default_branch" 2>/dev/null || true
 }
 
+# Shared setup for the conflicted-merge tests: commits divergent canonical
+# changes to the managed target on a branch and on the default branch, applies
+# the override, and starts a merge that must stop on a CLAUDE.md conflict with
+# MERGE_HEAD present. Returns 1 (after its own
+# fail()) if the conflict does not materialize.
+setup_conflicted_merge_on_managed_target() {
+    local branch_name="$1"
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    git branch -D "$branch_name" 2>/dev/null || true
+
+    # Branch commits one canonical change to the managed target. Setup commits
+    # bypass the filter (DISABLE on add) and the hook (--no-verify) so the two
+    # branches genuinely diverge on the managed file.
+    git checkout -q -b "$branch_name"
+    printf '# CLAUDE.md from feature\n' > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Feature change to CLAUDE.md"
+
+    # Default branch commits a different change so the merge conflicts.
+    git checkout -q "$default_branch"
+    printf '# CLAUDE.md from main\n' > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Main change to CLAUDE.md"
+
+    # Model the real state at merge time: the override is applied.
+    git-local-override apply 2>/dev/null || true
+
+    local merge_status
+    set +e
+    git merge -q --no-edit "$branch_name" >/dev/null 2>&1
+    merge_status=$?
+    set -e
+    if [[ $merge_status -eq 0 ]]; then
+        fail "Expected the merge to conflict on CLAUDE.md"
+        return 1
+    fi
+
+    local merge_head_path
+    merge_head_path="$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || true)"
+    if [[ -z "$merge_head_path" || ! -f "$merge_head_path" ]]; then
+        fail "Expected MERGE_HEAD after the conflicted merge"
+        git merge --abort 2>/dev/null || true
+        return 1
+    fi
+
+    return 0
+}
+
+test_conflicted_merge_resolution_survives_commit() {
+    info "Testing conflicted merge resolution of a managed file survives the commit..."
+
+    cd "$TEST_DIR"
+
+    setup_conflicted_merge_on_managed_target "merge-conflict-branch" || return 1
+    pass "Merge stopped on the managed-file conflict with MERGE_HEAD present"
+
+    # Resolve with content distinct from ours, theirs, and the override, then
+    # conclude the merge. The path is unmerged at add time, so the clean
+    # filter passes the resolution bytes through into the index.
+    printf '# CLAUDE.md merge resolution\n' > CLAUDE.md
+    git add CLAUDE.md
+
+    if ! git commit -q --no-edit 2>/dev/null; then
+        fail "Concluding merge commit was refused"
+        git merge --abort 2>/dev/null || true
+        return 1
+    fi
+
+    local committed_content
+    committed_content=$(git show HEAD:CLAUDE.md)
+    if echo "$committed_content" | grep -q "CLAUDE.md merge resolution"; then
+        pass "Merge commit carries the conflict resolution"
+    else
+        fail "Merge commit lost the resolution (silently reverted to ours)"
+        echo "Committed content: $committed_content"
+        return 1
+    fi
+
+    if echo "$committed_content" | grep -q "MY LOCAL"; then
+        fail "Merge commit leaked override content"
+        return 1
+    else
+        pass "Merge commit holds no override content"
+    fi
+}
+
+test_conflicted_cherry_pick_resolution_survives_commit() {
+    info "Testing conflicted cherry-pick resolution of a managed file survives the commit..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    git branch -D cherry-conflict-branch 2>/dev/null || true
+
+    # Source commit changes the managed target from the common base.
+    git checkout -q -b cherry-conflict-branch
+    printf '# CLAUDE.md from cherry source\n' > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Cherry source change to CLAUDE.md"
+
+    local source_commit
+    source_commit=$(git rev-parse HEAD)
+
+    # Default branch changes the same file differently so the pick conflicts.
+    git checkout -q "$default_branch"
+    printf '# CLAUDE.md from main side\n' > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Main-side change to CLAUDE.md"
+
+    git-local-override apply 2>/dev/null || true
+
+    local pick_status
+    set +e
+    git cherry-pick "$source_commit" >/dev/null 2>&1
+    pick_status=$?
+    set -e
+    if [[ $pick_status -eq 0 ]]; then
+        fail "Expected the cherry-pick to conflict on CLAUDE.md"
+        return 1
+    fi
+
+    local cherry_head_path
+    cherry_head_path="$(git rev-parse --git-path CHERRY_PICK_HEAD 2>/dev/null || true)"
+    if [[ -n "$cherry_head_path" && -f "$cherry_head_path" ]]; then
+        pass "Cherry-pick stopped on the managed-file conflict with CHERRY_PICK_HEAD present"
+    else
+        fail "Expected CHERRY_PICK_HEAD after the conflicted cherry-pick"
+        git cherry-pick --abort 2>/dev/null || true
+        return 1
+    fi
+
+    printf '# CLAUDE.md cherry-pick resolution\n' > CLAUDE.md
+    git add CLAUDE.md
+
+    if ! git commit -q --no-edit 2>/dev/null; then
+        fail "Concluding cherry-pick commit was refused"
+        git cherry-pick --abort 2>/dev/null || true
+        return 1
+    fi
+
+    local committed_content
+    committed_content=$(git show HEAD:CLAUDE.md)
+    if echo "$committed_content" | grep -q "CLAUDE.md cherry-pick resolution"; then
+        pass "Cherry-pick commit carries the conflict resolution"
+    else
+        fail "Cherry-pick commit lost the resolution (silently reverted to ours)"
+        echo "Committed content: $committed_content"
+        return 1
+    fi
+}
+
+test_merge_no_commit_change_survives_commit() {
+    info "Testing merge --no-commit change to a managed file survives the commit..."
+
+    cd "$TEST_DIR"
+
+    local default_branch
+    default_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    git branch -D no-commit-merge-branch 2>/dev/null || true
+
+    # Only the branch changes the managed target, so the merge auto-resolves;
+    # --no-ff --no-commit stops before committing with MERGE_HEAD present.
+    git checkout -q -b no-commit-merge-branch
+    printf '# CLAUDE.md updated by feature\n' > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    git commit -q --no-verify -m "Feature-only CLAUDE.md change"
+
+    git checkout -q "$default_branch"
+    git-local-override apply 2>/dev/null || true
+
+    if ! git merge --no-ff --no-commit no-commit-merge-branch >/dev/null 2>&1; then
+        fail "git merge --no-commit failed"
+        git merge --abort 2>/dev/null || true
+        return 1
+    fi
+
+    local merge_head_path
+    merge_head_path="$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || true)"
+    if [[ -n "$merge_head_path" && -f "$merge_head_path" ]]; then
+        pass "merge --no-commit stopped with MERGE_HEAD present"
+    else
+        fail "Expected MERGE_HEAD after merge --no-commit"
+        git merge --abort 2>/dev/null || true
+        return 1
+    fi
+
+    if ! git commit -q --no-edit 2>/dev/null; then
+        fail "Concluding merge commit was refused"
+        git merge --abort 2>/dev/null || true
+        return 1
+    fi
+
+    local committed_content
+    committed_content=$(git show HEAD:CLAUDE.md)
+    if echo "$committed_content" | grep -q "updated by feature"; then
+        pass "merge --no-commit change to the managed file survives the commit"
+    else
+        fail "merge --no-commit change was silently reverted to ours"
+        echo "Committed content: $committed_content"
+        return 1
+    fi
+}
+
+test_normal_commit_restore_unchanged_by_merge_guard() {
+    info "Testing normal commit (no merge in progress) still restores the managed target..."
+
+    cd "$TEST_DIR"
+
+    # Guard regression: no merge or cherry-pick is in progress.
+    local merge_head_path cherry_head_path
+    merge_head_path="$(git rev-parse --git-path MERGE_HEAD 2>/dev/null || true)"
+    cherry_head_path="$(git rev-parse --git-path CHERRY_PICK_HEAD 2>/dev/null || true)"
+    if [[ -f "$merge_head_path" || -f "$cherry_head_path" ]]; then
+        fail "Pre-condition: unexpected merge/cherry-pick in progress"
+        return 1
+    fi
+
+    # Stage a managed-target edit distinct from HEAD and the override, plus an
+    # unrelated change so the commit is nonempty after the restore.
+    printf '# direct edit distinct from override and HEAD\n' > CLAUDE.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add CLAUDE.md
+    echo "guard regression marker" >> README.md
+    git add README.md
+
+    git commit -q -m "Normal commit with staged managed edit"
+
+    local committed_content
+    committed_content=$(git show HEAD:CLAUDE.md)
+    if echo "$committed_content" | grep -q "Original CLAUDE.md content"; then
+        pass "Normal commit still restores the managed target to HEAD"
+    else
+        fail "Normal commit no longer restores the managed target"
+        echo "Committed content: $committed_content"
+        return 1
+    fi
+
+    if grep -q "MY LOCAL" CLAUDE.md; then
+        pass "post-commit reapplied the override after the normal commit"
+    else
+        fail "Override not reapplied after the normal commit"
+        return 1
+    fi
+}
+
+test_merge_blind_add_of_override_content_refused() {
+    info "Testing blind git add of override content during a conflicted merge is refused..."
+
+    cd "$TEST_DIR"
+
+    setup_conflicted_merge_on_managed_target "blind-add-merge-branch" || return 1
+    pass "Merge stopped on the managed-file conflict with MERGE_HEAD present"
+
+    # At the conflict stop the smudge filter served override content into the
+    # conflicted working file (it hides the conflict markers — recorded
+    # follow-up), so the "unedited" file looks fine. Model the blind add
+    # deterministically: the working file holds override bytes. The path is
+    # unmerged, so `git show :path` fails and the clean filter passes the
+    # override bytes straight into the index.
+    cp CLAUDE.local.md CLAUDE.md
+    git add CLAUDE.md
+
+    local staged_out="$TEST_ROOT/blind-add-staged.out"
+    git show :CLAUDE.md > "$staged_out"
+    if cmp -s "$staged_out" CLAUDE.local.md; then
+        pass "Pre-condition: blind add staged override bytes (unmerged-path clean passthrough)"
+    else
+        fail "Pre-condition: expected override bytes in the index after blind add"
+        git merge --abort 2>/dev/null || true
+        return 1
+    fi
+
+    local pre_head commit_status
+    pre_head=$(git rev-parse HEAD)
+
+    set +e
+    git commit -q --no-edit >/dev/null 2>&1
+    commit_status=$?
+    set -e
+
+    if [[ $commit_status -ne 0 ]]; then
+        pass "Commit of staged override content was refused during the merge"
+    else
+        fail "Commit was not refused (override content or ours committed silently)"
+        return 1
+    fi
+
+    if [[ "$(git rev-parse HEAD)" == "$pre_head" ]]; then
+        pass "No commit was created by the refused attempt"
+    else
+        fail "A commit was created despite the refusal"
+        return 1
+    fi
+
+    if git show HEAD:CLAUDE.md | grep -q "MY LOCAL"; then
+        fail "Override content reached a commit"
+        return 1
+    else
+        pass "No override content reached any commit"
+    fi
+
+    git merge --abort 2>/dev/null || true
+}
+
 test_aborted_commit_recovers_override_on_checkout() {
     info "Testing aborted commit recovery re-applies override on next checkout..."
 
@@ -2123,6 +2431,11 @@ main() {
         test_rebase_with_overridden_file \
         test_stash_with_overridden_file \
         test_cherry_pick_with_overridden_file \
+        test_conflicted_merge_resolution_survives_commit \
+        test_conflicted_cherry_pick_resolution_survives_commit \
+        test_merge_no_commit_change_survives_commit \
+        test_normal_commit_restore_unchanged_by_merge_guard \
+        test_merge_blind_add_of_override_content_refused \
         test_special_character_filename_roundtrip \
         test_aborted_commit_recovers_override_on_checkout \
         test_precommit_during_rebase_is_noop \

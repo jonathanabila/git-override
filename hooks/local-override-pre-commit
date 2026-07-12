@@ -116,6 +116,46 @@ $config_entry"
         printf 'git-local-override: cleared legacy skip-worktree on %s managed file(s)\n' "$repaired_count" >&2
     fi
 
+    # During an in-progress merge or cherry-pick, HEAD is still "ours" (the
+    # pre-merge tip), so the HEAD-restore below would silently overwrite a
+    # genuine merge/cherry-pick resolution (or a --no-commit change) staged in
+    # the index. Skip the restore so the resolution survives into the commit —
+    # BUT backstop the unmerged-index leak first: while a path is unmerged,
+    # `git show :path` fails, so the clean filter passes working-tree bytes
+    # through during `git add`. The smudge filter also serves override content
+    # for the conflicted file, so a blind `git add` of the unedited file stages
+    # override bytes verbatim. Refuse to commit any staged managed target whose
+    # staged blob is byte-identical to its override (file-based cmp, never
+    # $(...) — command substitution strips trailing newlines / cannot carry
+    # NUL). A genuine resolution differs from the override and passes through.
+    # No reapply state is written: nothing was restored, so there is nothing
+    # for post-commit to undo (same shape as the rebase bail above); the
+    # override remains a .local file and post-checkout/apply/smudge re-serve it.
+    if is_merge_or_cherry_pick_in_progress "$repo_root"; then
+        local mcp_entry mcp_target mcp_override mcp_override_abs mcp_staged_tmp
+        while IFS= read -r mcp_entry || [[ -n "$mcp_entry" ]]; do
+            [[ -z "$mcp_entry" ]] && continue
+            mcp_target="${mcp_entry%%|*}"
+            mcp_override="${mcp_entry#*|}"
+
+            staged_contains "$mcp_target" "${staged_files[@]}" || continue
+
+            mcp_override_abs="$resolution_root/$mcp_override"
+            [[ -f "$mcp_override_abs" ]] || continue
+
+            mcp_staged_tmp="$(mktemp)"
+            GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" show ":$mcp_target" > "$mcp_staged_tmp" 2>/dev/null || true
+            if cmp -s "$mcp_staged_tmp" "$mcp_override_abs"; then
+                rm -f "$mcp_staged_tmp"
+                printf 'git-local-override: refusing to commit managed target %s during a merge/cherry-pick: its staged content is byte-identical to the local override %s. The conflicted file likely still held override content when it was added. Write the intended resolution into %s, `git add` it, then retry the commit.\n' "$mcp_target" "$mcp_override" "$mcp_target" >&2
+                return 1
+            fi
+            rm -f "$mcp_staged_tmp"
+        done <<< "$relevant_entries"
+
+        return 0
+    fi
+
     # First pass: find which override files have staged targets
     # We need to restore ALL targets for each such override file
     local entry override
