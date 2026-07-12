@@ -216,19 +216,37 @@ test_precommit_run_pre_commit() {
 
     cd "$TEST_DIR"
 
-    # Apply local content first
+    # Self-contained override content, applied to the managed target.
+    echo "# MY LOCAL CLAUDE.md - pre-commit run test" > CLAUDE.local.md
     cp CLAUDE.local.md CLAUDE.md
 
-    # Stage a file
+    # Stage both the incidental file and the managed target — the grouped
+    # restore only fires for staged targets.
     echo "test" >> README.md
-    git add README.md
+    git add README.md CLAUDE.md
 
-    # Run pre-commit manually
-    if pre-commit run local-override-pre-commit --hook-stage pre-commit; then
-        pass "pre-commit hook ran successfully"
+    # Run the hook. pre-commit's framework marks a hook that modifies files as
+    # "Failed" by design, so the exit code is intentionally NOT asserted; the
+    # restore *effect* is what we check.
+    pre-commit run local-override-pre-commit --hook-stage pre-commit || true
+
+    # The pre-commit hook restores the original tracked content into the index.
+    if git show :CLAUDE.md 2>/dev/null | grep -q "Original CLAUDE.md content"; then
+        pass "pre-commit hook restored original content to the index"
     else
-        # Hook might "fail" because it modified files - that's OK
-        pass "pre-commit hook ran (may have modified files)"
+        fail "pre-commit hook did not restore original content to the index"
+        git show :CLAUDE.md 2>/dev/null || true
+        return 1
+    fi
+
+    # It restores the working tree too (no commit ran, so post-commit has not
+    # re-applied the override).
+    if grep -q "Original CLAUDE.md content" CLAUDE.md; then
+        pass "pre-commit hook restored original content in the working tree"
+    else
+        fail "pre-commit hook did not restore original content in the working tree"
+        cat CLAUDE.md
+        return 1
     fi
 }
 
@@ -289,12 +307,19 @@ test_precommit_checkout_flow() {
 
     cd "$TEST_DIR"
 
-    # Clean up any unstaged changes before checkout
-    # (pre-commit stashing can cause issues with our hooks)
-    git checkout -- . 2>/dev/null || true
-    git clean -fd 2>/dev/null || true
+    # setup_repo re-clones a fresh seed repo per test, so the post-checkout
+    # hook is not wired yet — install it here so the checkout actually fires it.
+    pre-commit install \
+        --hook-type pre-commit \
+        --hook-type post-commit \
+        --hook-type post-checkout \
+        --hook-type pre-rebase 2>/dev/null || true
 
-    # Create the local file again after cleanup
+    # Fresh clone => clean tracked tree. Create the override file only; do NOT
+    # pre-dirty the target. If the target is modified at checkout time,
+    # pre-commit stashes the change, runs the hook, then rolls back the hook's
+    # write on a stash conflict — which would defeat this assertion. A clean
+    # branch switch (the realistic case) applies the override with no stash.
     echo "# MY LOCAL CLAUDE.md - checkout test" > CLAUDE.local.md
 
     # Create a new branch (may return non-zero due to pre-commit hook conflicts)
@@ -305,6 +330,15 @@ test_precommit_checkout_flow() {
         pass "Branch checkout completed"
     else
         fail "Branch checkout failed"
+        return 1
+    fi
+
+    # The post-checkout hook must have applied the override on branch checkout.
+    if grep -q "MY LOCAL CLAUDE.md - checkout test" CLAUDE.md; then
+        pass "post-checkout hook applied the override on branch checkout"
+    else
+        fail "post-checkout hook did not apply the override on branch checkout"
+        cat CLAUDE.md 2>/dev/null || true
         return 1
     fi
 }
@@ -349,8 +383,9 @@ EOF
     # Reinstall hooks
     pre-commit install --hook-type pre-commit --hook-type post-commit 2>/dev/null || true
 
-    # Apply local content
-    echo "# LOCAL CONTENT" > CLAUDE.md
+    # Self-contained override content, then apply it to the managed target.
+    echo "# MY LOCAL for other-hooks test" > CLAUDE.local.md
+    echo "# MY LOCAL for other-hooks test" > CLAUDE.md
 
     # Make a commit
     echo "Multiple hooks test" >> README.md
@@ -362,6 +397,25 @@ EOF
         pass "Commit succeeded with multiple hooks"
     else
         fail "Commit failed with multiple hooks"
+        return 1
+    fi
+
+    # The pre-commit hook restored the original tracked content into the commit,
+    # even alongside the check-readme hook.
+    if git show HEAD:CLAUDE.md | grep -q "Original CLAUDE.md content"; then
+        pass "Committed content is the original, not the override (with other hooks)"
+    else
+        fail "Override content leaked into the commit (with other hooks)"
+        git show HEAD:CLAUDE.md
+        return 1
+    fi
+
+    # The post-commit hook re-applied the override to the working tree.
+    if grep -q "MY LOCAL for other-hooks test" CLAUDE.md; then
+        pass "post-commit re-applied the override to the working tree (with other hooks)"
+    else
+        fail "post-commit did not re-apply the override (with other hooks)"
+        cat CLAUDE.md
         return 1
     fi
 }
