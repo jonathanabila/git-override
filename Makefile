@@ -8,7 +8,7 @@
 #   make help       - Show this help
 
 .PHONY: install uninstall test clean help check-bash lint fmt fmt-check \
-       check-resolver-sync ci coverage \
+       ci coverage \
        test-docker test-docker-bash3 test-docker-unit test-docker-install \
        test-docker-gitops test-docker-worktree test-docker-precommit \
        test-docker-filter-process \
@@ -151,6 +151,8 @@ check-bash: ## Verify bash is available
 	@echo "Bash version: $$(bash --version | head -1)"
 
 lint: ## Check scripts for common issues (requires shellcheck)
+	@test ! -f $(SRC_HOOKS)/local-override-resolver.sh \
+		|| { echo "ERROR: hooks/local-override-resolver.sh must not exist; $(RESOLVER) is the only copy (installers place the runtime copy)"; exit 1; }
 	@command -v shellcheck >/dev/null 2>&1 || { echo "Warning: shellcheck not installed, skipping lint"; exit 0; }
 	@echo "Linting scripts..."
 	@shellcheck -S warning -s bash $(LINT_FILES)
@@ -168,18 +170,13 @@ fmt-check: ## Check shell script formatting (requires shfmt)
 	@shfmt -i 4 -d $(CLI_TOOL) $(HOOK_SCRIPTS) $(INSTALL_SCRIPT) $(UNINSTALL_SCRIPT)
 	@echo "Format check complete."
 
-check-resolver-sync: ## Verify shared/ and hooks/ resolver copies are identical
-	@diff -q $(RESOLVER) $(SRC_HOOKS)/local-override-resolver.sh \
-		&& echo "resolver copies in sync" \
-		|| { echo "ERROR: shared/ and hooks/ resolver copies differ"; exit 1; }
-
 check-docs-sync: ## Verify doc version pins and CLI command coverage match the code
 	@$(SRC_TESTS)/check-docs-sync.sh
 
 # NOTE: fmt-check is not part of `ci` yet — the tree predates shfmt and is not
 # formatted under any shfmt flag combination (see plan 005); adding the gate
 # requires a maintainer decision (mass-reformat vs. dropping the gate).
-ci: lint check-resolver-sync check-docs-sync test-docker test-docker-bash3 ## Run the full CI-equivalent suite (requires Docker)
+ci: lint check-docs-sync test-docker test-docker-bash3 ## Run the full CI-equivalent suite (requires Docker)
 
 #------------------------------------------------------------------------------
 # Manual Installation (alternative to install script)
@@ -197,6 +194,7 @@ install-manual: check-bash ## Install manually without running install script
 	@echo "Installing hook scripts to git template directory..."
 	@cp $(HOOK_SCRIPTS) $(TEMPLATE_HOOKS_DIR)/
 	@cp $(SRC_HOOKS)/local-override-lib.sh $(TEMPLATE_HOOKS_DIR)/
+	@cp $(RESOLVER) $(TEMPLATE_HOOKS_DIR)/
 	@chmod +x $(TEMPLATE_HOOKS_DIR)/local-override-*
 
 	@echo "Configuring git template directory..."

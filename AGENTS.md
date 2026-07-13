@@ -14,7 +14,6 @@ git-local-override/
 │   └── git-local-override        # Main command-line interface
 ├── hooks/                        # Git hook scripts
 │   ├── local-override-lib.sh     # Shared library functions
-│   ├── local-override-resolver.sh # Installed shared resolver runtime copy
 │   ├── local-override-filter-smudge   # Smudge filter (checkout)
 │   ├── local-override-filter-clean    # Clean filter (staging)
 │   ├── local-override-post-checkout
@@ -224,8 +223,9 @@ tests/integration/test-install.sh && tests/integration/test-git-ops.sh && tests/
 ```
 
 The single command that mirrors the full CI matrix is `make ci`, which runs
-`lint check-resolver-sync test-docker test-docker-bash3` (see `Makefile:174`).
-Run it before committing; the individual targets above are for selective runs.
+`lint check-docs-sync test-docker test-docker-bash3` (see the `ci` target in
+the `Makefile`). Run it before committing; the individual targets above are
+for selective runs.
 
 ```bash
 # Full CI-equivalent suite (requires Docker) — run this before committing
@@ -252,7 +252,7 @@ make clean
 Before creating any commit, run the full local CI-equivalent suite and ensure all pass:
 
 - `make ci` — the authoritative single command
-  (`lint check-resolver-sync test-docker test-docker-bash3`)
+  (`lint check-docs-sync test-docker test-docker-bash3`)
 - On macOS: `make test` plus all integration scripts in `tests/integration/`
 
 ### Writing Tests
@@ -302,10 +302,12 @@ leave that flag off.
 
 ## Key Files to Understand
 
-**Resolver mirror rule**: `shared/local-override-resolver.sh` is the canonical
-recursive config resolver. Any edit to it must be mirrored byte-identically to
-`hooks/local-override-resolver.sh` (the installed runtime copy). `make
-check-resolver-sync` (part of `make ci`) fails if the two copies differ.
+**Single-resolver rule**: `shared/local-override-resolver.sh` is the one and
+only copy of the recursive config resolver. Do NOT create a copy under
+`hooks/` — installers place the runtime copy into `.git/hooks/` (or the
+template dir) at install time, and source-tree hooks fall back to
+`../shared/` via `local-override-lib.sh`. `make lint` (part of `make ci`)
+fails if a `hooks/local-override-resolver.sh` reappears.
 
 ### `hooks/local-override-lib.sh`
 

@@ -3,8 +3,7 @@
 # check-docs-sync.sh — guard against recurring documentation drift.
 #
 # This is a CI gate (invoked via `make check-docs-sync`, part of `make ci`),
-# NOT a member of the unit suite — mirroring how `make check-resolver-sync`
-# is run. It performs two checks:
+# NOT a member of the unit suite. It performs two checks:
 #
 #   (a) Pin check: every hardcoded documentation version pin (the pre-commit
 #       `rev: vX.Y.Z` snippets and the pinned `/vX.Y.Z/scripts/install.sh`

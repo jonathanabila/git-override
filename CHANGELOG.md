@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The `hooks/local-override-resolver.sh` byte-identical mirror is gone**: the source tree carried a second 1592-line copy of the shared resolver, held in sync by hand under a `make check-resolver-sync` CI diff gate. Almost nothing consumed it — every install path (`install.sh` repo/global, the CLI, tests) copies or sources `shared/local-override-resolver.sh`, and the pre-commit-framework channel runs hooks from a full clone where `local-override-lib.sh`'s `../shared/` fallback resolves. Its two real consumers are rewired: `make install-manual` now copies the shared resolver into the template hooks dir explicitly (it used to ride along via the `hooks/local-override-*` wildcard), and the filter-driver self-heal (plan 050) — which required the resolver to sit *next to* the hook entry points and so depended on the mirror inside the framework's cache clone — now copies the resolver from the lib's already-resolved `$SHARED_RESOLVER_PATH`, which handles both the hooks-sibling and `../shared` layouts. The mirror and the sync gate are deleted; `make lint` (and CI) now instead fail if a resolver copy ever reappears under `hooks/`
+
 ### Added
 
 - **End-to-end test for the `install.sh --global` value proposition**: the existing global-install test asserted only that the template dir, hooks, and `init.templateDir` exist — a broken global filter-config line would have shipped silently. A new install integration test runs the global install inside the sandboxed `HOME`/`XDG_CONFIG_HOME`, `git init`s a brand-new repo, and proves the whole inherited chain fires: the filter driver resolves from global config only (no local entries), a real branch switch makes the template post-checkout hook arm `.git/info/attributes`, a file checkout smudges the override content in, staging puts the original tracked bytes back in the index (file-based `cmp`), and no local driver was self-healed into place — so the work provably ran on the inherited global driver (install 33→34)

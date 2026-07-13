@@ -93,8 +93,8 @@ jobs:
           scandir: './bin ./hooks ./scripts ./shared ./tests'
           severity: warning
 
-      - name: Check resolver copies are in sync
-        run: make check-resolver-sync
+      - name: Check no resolver mirror exists under hooks/
+        run: test ! -f hooks/local-override-resolver.sh
 
       - name: Check docs are in sync (version pins + CLI command coverage)
         run: make check-docs-sync

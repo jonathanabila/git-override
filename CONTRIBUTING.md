@@ -358,8 +358,9 @@ git pull --ff-only origin main
 make ci
 ```
 
-`make ci` is the single CI-parity command: it runs shellcheck (`lint`), the
-resolver-copy sync guard (`check-resolver-sync`), and both Docker test suites.
+`make ci` is the single CI-parity command: it runs shellcheck (`lint`,
+which also guards against a resolver copy reappearing under `hooks/`), the
+docs sync check (`check-docs-sync`), and both Docker test suites.
 Docker is required.
 
 If developing on macOS, also mirror the native macOS CI job:

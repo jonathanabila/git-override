@@ -228,20 +228,27 @@ maybe_self_heal_filter_driver() {
     local dest_dir="$common_git_dir/hooks"
 
     # The filter entry points source local-override-lib.sh, which sources
-    # local-override-resolver.sh from its own directory: all four files must
-    # travel together or the copied driver cannot run.
+    # local-override-resolver.sh: all four files must travel together into
+    # $dest_dir or the copied driver cannot run. The filter scripts and lib
+    # ship next to the hook entry points; the resolver's true location is
+    # $SHARED_RESOLVER_PATH (a hooks-dir sibling on direct installs, ../shared
+    # in a source checkout such as the pre-commit framework's cache clone).
     local required_file
     for required_file in \
         local-override-filter-smudge \
         local-override-filter-clean \
-        local-override-lib.sh \
-        local-override-resolver.sh; do
+        local-override-lib.sh; do
         if [[ ! -f "$HOOK_LIB_DIR/$required_file" ]]; then
             local_override_trace_log "self-heal" \
                 "filter driver unconfigured but $required_file is not next to the hooks; skipping"
             return 0
         fi
     done
+    if [[ -z "$SHARED_RESOLVER_PATH" || ! -f "$SHARED_RESOLVER_PATH" ]]; then
+        local_override_trace_log "self-heal" \
+            "filter driver unconfigured but the shared resolver cannot be located; skipping"
+        return 0
+    fi
 
     if ! mkdir -p "$dest_dir" 2>/dev/null; then
         local_override_trace_log "self-heal" "cannot create $dest_dir; skipping"
@@ -250,18 +257,22 @@ maybe_self_heal_filter_driver() {
 
     # local-override-filter-process is part of the install.sh hooks layout but
     # not needed by the default smudge/clean driver; copy it when present.
-    local heal_file
+    # The resolver copies from $SHARED_RESOLVER_PATH rather than $HOOK_LIB_DIR
+    # (see the required-files note above).
+    local heal_file heal_source
     for heal_file in \
         local-override-filter-smudge \
         local-override-filter-clean \
         local-override-filter-process \
         local-override-lib.sh \
         local-override-resolver.sh; do
-        [[ -f "$HOOK_LIB_DIR/$heal_file" ]] || continue
+        heal_source="$HOOK_LIB_DIR/$heal_file"
+        [[ "$heal_file" == local-override-resolver.sh ]] && heal_source="$SHARED_RESOLVER_PATH"
+        [[ -f "$heal_source" ]] || continue
         # Direct installs run the hooks from $dest_dir itself; never copy a
         # file onto itself.
-        if [[ ! "$HOOK_LIB_DIR/$heal_file" -ef "$dest_dir/$heal_file" ]]; then
-            if ! cp "$HOOK_LIB_DIR/$heal_file" "$dest_dir/$heal_file" 2>/dev/null; then
+        if [[ ! "$heal_source" -ef "$dest_dir/$heal_file" ]]; then
+            if ! cp "$heal_source" "$dest_dir/$heal_file" 2>/dev/null; then
                 local_override_trace_log "self-heal" \
                     "cannot copy $heal_file into $dest_dir; skipping"
                 return 0
