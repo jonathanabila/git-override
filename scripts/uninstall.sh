@@ -88,6 +88,32 @@ for resolver_candidate in \
     break
 done
 
+# Older INSTALLED resolvers predate the runtime manifest: sourcing one sets
+# RESOLVER_AVAILABLE but leaves the manifest functions undefined, and the
+# artifact/hook loops below would silently iterate nothing (command-not-found
+# in a $(...) loop word does not trip set -e) — a half-uninstall that reports
+# success. Fall back to the historical file set so a curl-pipe uninstall
+# against an old install still cleans everything.
+if ! declare -F managed_hook_types > /dev/null 2>&1; then
+    managed_hook_types() {
+        printf '%s\n' post-checkout pre-commit post-commit pre-rebase
+    }
+fi
+if ! declare -F managed_filter_scripts > /dev/null 2>&1; then
+    managed_filter_scripts() {
+        printf '%s\n' \
+            local-override-filter-smudge \
+            local-override-filter-clean \
+            local-override-filter-process
+    }
+fi
+if ! declare -F managed_runtime_files > /dev/null 2>&1; then
+    managed_runtime_files() {
+        managed_filter_scripts
+        printf '%s\n' local-override-lib.sh local-override-resolver.sh
+    }
+fi
+
 reconcile_wrapper_hook_on_uninstall() {
     local hooks_dir="$1"
     local hook_type="$2"

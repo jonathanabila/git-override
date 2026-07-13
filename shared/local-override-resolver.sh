@@ -957,13 +957,13 @@ restore_target_to_head() {
         return 2
     fi
 
+    # Never create parent directories here: mkdir -p follows a symlinked
+    # directory component, and path_is_symlink_safe is lenient when the
+    # resolved parent does not exist yet — together those would let a
+    # symlinked dir smuggle the redirect outside the repo. A missing parent
+    # simply fails the redirect (rc 3, fail closed); a symlinked parent that
+    # resolves to an EXISTING outside dir is refused by the gate above.
     local full_target="$checkout_root/$target"
-    local parent_dir=""
-    parent_dir="$(dirname "$full_target")"
-    if [[ ! -d "$parent_dir" ]]; then
-        mkdir -p "$parent_dir" 2>/dev/null || return 3
-    fi
-
     git -C "$checkout_root" show "HEAD:$target" > "$full_target" 2>/dev/null || return 3
 
     if [[ "$mode" == "full" ]]; then

@@ -1493,6 +1493,63 @@ EOF
     fi
 }
 
+# Regression (review finding): an OLD installed resolver (predating the
+# runtime manifest) lacks managed_hook_types/managed_runtime_files; without
+# the uninstaller's fallback definitions, its cleanup loops iterated nothing
+# (command-not-found inside a $(...) loop word does not trip set -e) and the
+# run reported success while leaving every managed hook artifact installed.
+test_uninstall_with_pre_manifest_resolver_still_cleans() {
+    info "Testing uninstall falls back when the installed resolver predates the manifest..."
+
+    reset_git_config
+
+    local repo_dir="$TEST_DIR/repo-uninstall-old-resolver"
+    create_test_repo "$repo_dir"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo
+
+    local hooks_dir
+    hooks_dir="$(get_common_hooks_dir_for_repo "$repo_dir")" || {
+        fail "Pre-condition: could not resolve hooks dir"
+        return 1
+    }
+
+    # Simulate the old install: strip the manifest functions from the
+    # resolver copy the uninstaller will source, and make sure no CURRENT
+    # data-dir copy (from an earlier --cli test) can mask the repo copy.
+    rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override/local-override-resolver.sh"
+    sed -i.bak \
+        -e '/^managed_hook_types()/,/^}/d' \
+        -e '/^managed_filter_scripts()/,/^}/d' \
+        -e '/^managed_runtime_files()/,/^}/d' \
+        -e '/^managed_runtime_source_path()/,/^}/d' \
+        -e '/^install_managed_runtime_from_checkout()/,/^}/d' \
+        "$hooks_dir/local-override-resolver.sh"
+    rm -f "$hooks_dir/local-override-resolver.sh.bak"
+
+    local standalone_dir="$TEST_DIR/standalone-uninstall-old"
+    mkdir -p "$standalone_dir"
+    cp "$PROJECT_DIR/scripts/uninstall.sh" "$standalone_dir/uninstall.sh"
+    chmod +x "$standalone_dir/uninstall.sh"
+
+    local output_file="$TEST_DIR/uninstall-old-resolver.out"
+    (cd "$repo_dir" && printf 'n\nn\nn\nn\n' | "$standalone_dir/uninstall.sh" > "$output_file" 2>&1) || true
+
+    if grep -q "command not found" "$output_file"; then
+        fail "Uninstall hit missing manifest functions: $(grep 'command not found' "$output_file" | head -2)"
+        return 1
+    fi
+
+    if [[ ! -f "$hooks_dir/local-override-lib.sh" \
+       && ! -f "$hooks_dir/local-override-resolver.sh" \
+       && ! -f "$hooks_dir/local-override-filter-smudge" ]]; then
+        pass "Old-resolver uninstall still removed all managed artifacts"
+    else
+        fail "Managed artifacts survive uninstall with a pre-manifest resolver: $(ls "$hooks_dir" 2>/dev/null | tr '\n' ' ')"
+        return 1
+    fi
+}
+
 test_uninstall_restores_chained_hook_when_wrapper_is_managed() {
     info "Testing uninstall restores chained hook for managed wrapper..."
 
@@ -2213,6 +2270,7 @@ main() {
         test_uninstall_from_repo \
         test_uninstall_removes_all_installed_artifacts \
         test_uninstall_standalone_copy_uses_installed_resolver \
+        test_uninstall_with_pre_manifest_resolver_still_cleans \
         test_uninstall_restores_chained_hook_when_wrapper_is_managed \
         test_uninstall_does_not_overwrite_newer_user_hook \
         test_new_repo_gets_hooks_after_global_install \

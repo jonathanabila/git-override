@@ -4355,6 +4355,60 @@ test_restore_front_door_statuses() {
     fi
 }
 
+# Regression (review finding): a symlinked directory component used to
+# smuggle the restore redirect outside the repo when the resolved parent did
+# not exist yet — mkdir -p followed the link, and path_is_symlink_safe is
+# lenient for a not-yet-existing parent. The front door must never create
+# parent directories: a missing resolved parent fails closed (rc 3, no
+# write), and an existing resolved-outside parent is refused by the gate
+# (rc 2).
+test_restore_refuses_symlinked_dir_escape() {
+    info "Testing restore never writes through a symlinked directory..."
+
+    cd "$TEST_REPO"
+
+    local root outside_missing outside_existing
+    root="$(git rev-parse --show-toplevel)"
+    outside_missing="$CURRENT_TEST_ROOT/artifacts/outside-missing"
+    outside_existing="$CURRENT_TEST_ROOT/artifacts/outside-existing"
+    mkdir -p "$outside_missing" "$outside_existing/services/foo"
+
+    # backend/services/foo/AGENTS.md is tracked in HEAD. Case 1: ancestor dir
+    # replaced by a symlink whose resolved subpath does NOT exist.
+    rm -rf backend
+    ln -s "$outside_missing" backend
+    local missing_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        restore_target_to_head "$root" "backend/services/foo/AGENTS.md" full loud
+    ) 2>/dev/null || missing_status=$?
+    local leaked_missing=""
+    leaked_missing="$(find "$outside_missing" -type f 2>/dev/null)"
+
+    # Case 2: the resolved subpath DOES exist outside the repo.
+    rm -f backend
+    ln -s "$outside_existing" backend
+    local existing_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        restore_target_to_head "$root" "backend/services/foo/AGENTS.md" full loud
+    ) 2>/dev/null || existing_status=$?
+    local leaked_existing=""
+    leaked_existing="$(find "$outside_existing" -type f 2>/dev/null)"
+
+    rm -f backend
+    git checkout -q HEAD -- backend 2>/dev/null || true
+
+    if [[ "$missing_status" -eq 3 && -z "$leaked_missing" \
+       && "$existing_status" -eq 2 && -z "$leaked_existing" ]]; then
+        pass "Symlinked-dir restores fail closed with no outside writes"
+    else
+        fail "Restore escaped the repo (missing: rc $missing_status '$leaked_missing'; existing: rc $existing_status '$leaked_existing')"
+    fi
+}
+
 # Regression: remove used `git checkout HEAD --` with no filter suppression,
 # so with an active filter driver the smudge filter served the override right
 # back into the "restored" file — remove printed "Restored original content"
