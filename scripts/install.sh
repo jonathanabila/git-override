@@ -38,10 +38,6 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Exact marker used to identify installer-managed wrapper hooks.
-# Ownership checks MUST use this marker (not fuzzy matching).
-MANAGED_HOOK_MARKER_PREFIX="# git-local-override-managed-hook:"
-
 info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 success() { echo -e "${GREEN}[OK]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -95,20 +91,13 @@ get_resolver_lib_file() {
 }
 trap '[[ -n "$RESOLVER_LIB_TEMP" ]] && rm -f "$RESOLVER_LIB_TEMP"' EXIT
 
-managed_hook_marker_line() {
-    local hook_type="$1"
-    printf '%s %s' "$MANAGED_HOOK_MARKER_PREFIX" "$hook_type"
-}
-
-is_managed_wrapper_hook() {
-    local hook_file="$1"
-    local hook_type="$2"
-    local marker
-
-    [[ -f "$hook_file" ]] || return 1
-    marker="$(managed_hook_marker_line "$hook_type")"
-    grep -qxF "$marker" "$hook_file" 2>/dev/null
-}
+# Shared primitives — the managed-hook marker predicate
+# (is_managed_wrapper_hook), the attributes-rewrite core, and the recursive
+# config resolver — come from the shared resolver, sourced once at startup.
+# Definitions below this line intentionally override same-named resolver
+# functions where the installer wants fatal error handling.
+# shellcheck disable=SC1090
+source "$(get_resolver_lib_file)"
 
 is_legacy_managed_hook() {
     local hook_file="$1"
@@ -333,19 +322,6 @@ get_common_git_dir() {
     echo "$common_git_dir"
 }
 
-# Read config file and output list of target|override pairs
-# Output format: target|override (one line per target file)
-read_config_pairs() {
-    local repo_root="$1"
-    local lib_file=""
-
-    lib_file="$(get_resolver_lib_file)"
-
-    # shellcheck disable=SC1090
-    source "$lib_file"
-    read_config "$repo_root"
-}
-
 install_filter_scripts_to_dir() {
     local hooks_dir="$1"
 
@@ -369,26 +345,21 @@ install_shared_resolver_to_dir() {
 }
 
 # Delegates the attributes rewrite to the shared resolver's canonical
-# sync_attributes_entries core (sourced at run time; the installer is a
-# standalone curl-pipeable script, so it locates the resolver the same way
-# read_config_pairs does). Preserves foreign lines, regenerates the managed
-# block from the effective config. With no config discoverable, empty entries
-# yield the same net result: foreign lines kept, no managed block.
+# sync_attributes_entries core (sourced at startup). Preserves foreign lines,
+# regenerates the managed block from the effective config. With no config
+# discoverable, empty entries yield the same net result: foreign lines kept,
+# no managed block.
 sync_attributes() {
     local repo_root="$1"
-    local lib_file=""
+    local entries=""
 
-    lib_file="$(get_resolver_lib_file)"
-
-    (
-        # shellcheck disable=SC1090
-        source "$lib_file"
-        entries=""
-        if has_any_config "$repo_root"; then
-            entries="$(read_config "$repo_root")"
-        fi
-        sync_attributes_entries "$repo_root" "$entries"
-    ) || { error "Unable to sync git attributes"; exit 1; }
+    if has_any_config "$repo_root"; then
+        entries="$(read_config "$repo_root")"
+    fi
+    if ! sync_attributes_entries "$repo_root" "$entries"; then
+        error "Unable to sync git attributes"
+        exit 1
+    fi
 
     success "Synced git attributes: $repo_root"
 }

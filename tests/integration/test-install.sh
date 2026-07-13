@@ -1420,6 +1420,79 @@ test_uninstall_removes_all_installed_artifacts() {
     fi
 }
 
+# The uninstaller keeps no hand-rolled resolver primitives: it sources the
+# shared resolver via an offline ladder (source checkout → CLI data dir →
+# repo hooks copy → template hooks). Run a COPY of uninstall.sh from outside
+# the checkout (no ../shared sibling), so cleanup must come from an installed
+# resolver copy — proving the ladder's installed rungs, not just the
+# checkout rung every other uninstall test exercises.
+test_uninstall_standalone_copy_uses_installed_resolver() {
+    info "Testing standalone uninstall copy sources an installed resolver..."
+
+    reset_git_config
+
+    local repo_dir="$TEST_DIR/repo-uninstall-standalone"
+    create_test_repo "$repo_dir"
+
+    cat > "$repo_dir/.local-overrides.yaml" << 'EOF'
+pattern: ".local"
+files:
+  - override: README.local.md
+    replaces:
+      - README.md
+EOF
+    git -C "$repo_dir" add .local-overrides.yaml
+    git -C "$repo_dir" commit -q -m "Add managed target"
+
+    "$PROJECT_DIR/scripts/install.sh" --repo --cli
+
+    local hooks_dir attributes_file
+    hooks_dir="$(get_common_hooks_dir_for_repo "$repo_dir")" || {
+        fail "Pre-condition: could not resolve hooks dir"
+        return 1
+    }
+    attributes_file="${hooks_dir%/hooks}/info/attributes"
+
+    if grep -q "filter=local-override" "$attributes_file" 2>/dev/null; then
+        pass "Pre-condition: managed attributes lines present"
+    else
+        fail "Pre-condition: no managed attributes lines after install"
+        return 1
+    fi
+
+    # A foreign line must survive the managed-block removal.
+    echo "*.bin binary" >> "$attributes_file"
+
+    local standalone_dir="$TEST_DIR/standalone-uninstall"
+    mkdir -p "$standalone_dir"
+    cp "$PROJECT_DIR/scripts/uninstall.sh" "$standalone_dir/uninstall.sh"
+    chmod +x "$standalone_dir/uninstall.sh"
+
+    local output_file="$TEST_DIR/uninstall-standalone.out"
+    (cd "$repo_dir" && printf 'n\nn\nn\nn\n' | "$standalone_dir/uninstall.sh" > "$output_file" 2>&1) || true
+
+    if grep -q "Shared resolver not found" "$output_file"; then
+        fail "Standalone uninstall could not source an installed resolver: $(cat "$output_file")"
+        return 1
+    fi
+    pass "Standalone uninstall sourced an installed resolver copy"
+
+    if [[ ! -f "$hooks_dir/local-override-lib.sh" && ! -f "$hooks_dir/local-override-resolver.sh" ]]; then
+        pass "Managed hook artifacts removed by standalone uninstall"
+    else
+        fail "Managed hook artifacts survive standalone uninstall"
+        return 1
+    fi
+
+    if ! grep -q "filter=local-override" "$attributes_file" 2>/dev/null \
+       && grep -q '\*\.bin binary' "$attributes_file" 2>/dev/null; then
+        pass "Managed attributes lines removed; foreign line preserved"
+    else
+        fail "Attributes cleanup wrong after standalone uninstall: $(cat "$attributes_file" 2>/dev/null)"
+        return 1
+    fi
+}
+
 test_uninstall_restores_chained_hook_when_wrapper_is_managed() {
     info "Testing uninstall restores chained hook for managed wrapper..."
 
@@ -2139,6 +2212,7 @@ main() {
         test_install_gitignore \
         test_uninstall_from_repo \
         test_uninstall_removes_all_installed_artifacts \
+        test_uninstall_standalone_copy_uses_installed_resolver \
         test_uninstall_restores_chained_hook_when_wrapper_is_managed \
         test_uninstall_does_not_overwrite_newer_user_hook \
         test_new_repo_gets_hooks_after_global_install \

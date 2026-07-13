@@ -183,6 +183,31 @@ get_attributes_file_path() {
     printf '%s\n' "$attributes_path"
 }
 
+# Exact marker line identifying installer-managed wrapper hooks. This is the
+# single definition of "a hook we own": the installer writes it into every
+# generated wrapper, and installer/uninstaller test for it with
+# is_managed_wrapper_hook before rewriting or removing a hook. Ownership
+# checks MUST use this exact marker (never fuzzy matching) so user-authored
+# hooks are never touched. (The CLI's detect_hooks_installed deliberately
+# keeps a looser heuristic — it answers "is something of ours here?" for
+# status display, not "is this file ours to modify?")
+MANAGED_HOOK_MARKER_PREFIX="# git-local-override-managed-hook:"
+
+managed_hook_marker_line() {
+    local hook_type="$1"
+    printf '%s %s' "$MANAGED_HOOK_MARKER_PREFIX" "$hook_type"
+}
+
+is_managed_wrapper_hook() {
+    local hook_file="$1"
+    local hook_type="$2"
+    local marker=""
+
+    [[ -f "$hook_file" ]] || return 1
+    marker="$(managed_hook_marker_line "$hook_type")"
+    grep -qxF "$marker" "$hook_file" 2>/dev/null
+}
+
 # Canonical attributes-rewrite core. Preserves foreign lines in
 # .git/info/attributes, drops the managed `filter=local-override` block, and
 # regenerates it from the given `target|override` config entries (deduped).
