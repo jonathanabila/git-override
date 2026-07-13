@@ -1140,6 +1140,101 @@ test_install_global() {
     fi
 }
 
+test_install_global_filter_inherited_in_new_repo() {
+    info "Testing install.sh --global filter driver works end-to-end in a fresh repo..."
+
+    # Sandbox guard: global-config writes must land inside the per-test root,
+    # never in the developer's real ~/.gitconfig.
+    if [[ "$HOME" == "$CURRENT_TEST_ROOT"/* && "$XDG_CONFIG_HOME" == "$CURRENT_TEST_ROOT"/* ]]; then
+        pass "Sandboxed HOME/XDG_CONFIG_HOME in effect"
+    else
+        fail "Global-config sandbox not in effect (HOME=$HOME, XDG_CONFIG_HOME=$XDG_CONFIG_HOME)"
+        return 1
+    fi
+
+    "$PROJECT_DIR/scripts/install.sh" --global >/dev/null
+
+    # A brand-new repo created AFTER the global install inherits the template
+    # hooks (init.templateDir) and the global filter driver.
+    local repo_dir="$TEST_DIR/repo-global-inherit"
+    mkdir -p "$repo_dir"
+    cd "$repo_dir"
+    git init -q
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+
+    local global_clean local_clean
+    global_clean=$(git config --get filter.local-override.clean 2>/dev/null || echo "")
+    local_clean=$(git config --local --get filter.local-override.clean 2>/dev/null || echo "")
+    if [[ -n "$global_clean" && -z "$local_clean" ]]; then
+        pass "Filter driver resolves from the inherited global config only"
+    else
+        fail "Filter driver not inherited from global config (effective: '$global_clean', local: '$local_clean')"
+        return 1
+    fi
+
+    # Managed target: original committed first, override created after, so the
+    # initial commit is clean of override content.
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    printf 'original tracked notes\n' > notes.md
+    git add .local-overrides.yaml notes.md
+    git commit -q -m "Add managed target"
+    printf 'LOCAL OVERRIDE notes\n' > notes.local.md
+
+    # A real branch switch fires the template-installed post-checkout hook,
+    # which syncs .git/info/attributes and arms the inherited filter driver.
+    git checkout -q -b feature
+    git checkout -q -
+
+    if grep -q "notes.md filter=local-override" .git/info/attributes 2>/dev/null; then
+        pass "Template post-checkout hook armed the attributes in the fresh repo"
+    else
+        fail "Attributes not armed after branch switch: $(cat .git/info/attributes 2>/dev/null || echo '<missing>')"
+        return 1
+    fi
+
+    # End-to-end smudge through the inherited global driver: a file checkout
+    # must serve the override content.
+    rm -f notes.md
+    git checkout -- notes.md
+    printf 'LOCAL OVERRIDE notes\n' > .expected-override.md
+    if cmp -s notes.md .expected-override.md; then
+        pass "Inherited smudge filter served override content on checkout"
+    else
+        fail "Inherited smudge did not serve override (got: '$(cat notes.md)')"
+        return 1
+    fi
+
+    # End-to-end clean: staging the override-bearing worktree file must put the
+    # original tracked bytes in the index (file-based cmp, no $(...)).
+    git add notes.md
+    git show :notes.md > .staged-notes.md
+    printf 'original tracked notes\n' > .expected-original.md
+    if cmp -s .staged-notes.md .expected-original.md; then
+        pass "Inherited clean filter staged the original tracked content"
+    else
+        fail "Inherited clean did not restore original in index"
+        return 1
+    fi
+
+    # The filters that just fired must be the INHERITED ones: if the plan-050
+    # self-heal had kicked in (i.e. the global config were broken), it would
+    # have written a local driver and masked the inheritance bug.
+    local_clean=$(git config --local --get filter.local-override.clean 2>/dev/null || echo "")
+    if [[ -z "$local_clean" ]]; then
+        pass "No local driver was self-healed — the global driver did the work"
+    else
+        fail "Local driver appeared ('$local_clean') — global inheritance did not carry the flow"
+        return 1
+    fi
+}
+
 test_install_cli() {
     info "Testing install.sh --cli..."
 
@@ -2039,6 +2134,7 @@ main() {
         test_reinstall_prunes_stale_managed_artifacts \
         test_reinstall_clears_legacy_skip_worktree_and_preserves_foreign_attributes \
         test_install_global \
+        test_install_global_filter_inherited_in_new_repo \
         test_install_cli \
         test_install_gitignore \
         test_uninstall_from_repo \
