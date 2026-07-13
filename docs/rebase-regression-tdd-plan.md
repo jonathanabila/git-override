@@ -1,5 +1,7 @@
 # Rebase Regression TDD Plan
 
+> **Status: Implemented and shipped (pre-rebase hook). Retained for historical reference.**
+
 ## Goal
 
 Reproduce and fix a `git rebase` failure caused by `git-local-override` when a local override file remains present for a tracked target like `AGENTS.md`.

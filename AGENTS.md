@@ -51,7 +51,7 @@ git-local-override/
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   ├── CODEOWNERS
 │   └── dependabot.yml
-├── docs/                         # Additional documentation (DESIGN.md + design notes/)
+├── docs/                         # Additional documentation (DESIGN.md, rebase-regression-tdd-plan.md)
 ├── plans/                        # Implementation plans + index (plans/README.md)
 ├── Formula/                      # Draft Homebrew formula (unpublished)
 │   └── git-local-override.rb
