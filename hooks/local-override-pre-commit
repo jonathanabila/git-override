@@ -28,8 +28,6 @@ main() {
     local relevant_configs=""
     local relevant_entries=""
     local overrides_to_restore=""
-    local state_file=""
-    local state_entries=""
     repo_root="$(get_repo_root)" || return 0
 
     # Do not restore/re-apply during rebase-internal commits; the rebase
@@ -134,22 +132,18 @@ $config_entry"
 
     # First pass: the resolver's grouped-restore decider picks which override
     # files have staged targets; ALL targets of each are restored below.
-    local entry override
     overrides_to_restore="$(precommit_plan_restores "$resolution_root" \
         "$relevant_entries" "${staged_files[@]}")"
 
     # Quick exit if no overrides need restoring
     [[ -z "$overrides_to_restore" ]] && return 0
 
-    state_file="$(get_post_commit_state_file "$repo_root")"
-    : > "$state_file"
-
     # Second pass: for each override file to restore, restore ALL its targets
+    # (the Group expansion is the resolver's targets_for_override_in_entries).
     local override_file
     while IFS= read -r override_file || [[ -n "$override_file" ]]; do
         [[ -z "$override_file" ]] && continue
 
-        # Get all targets for this override file
         local target_file restore_status
         while IFS= read -r target_file || [[ -n "$target_file" ]]; do
             [[ -z "$target_file" ]] && continue
@@ -167,19 +161,15 @@ $config_entry"
                     # (the refused target is skipped, matching the old gate).
                     ;;
                 1)
-                    # Absent from HEAD: a new target with no canonical content
-                    # to restore. If what's staged is the local override,
-                    # committing it would leak local content into history —
-                    # refuse. (git add always creates a stage-0 index blob, so
-                    # the leak is detected by comparing that blob to the
-                    # override, not by the index being absent.)
-                    if git -C "$repo_root" cat-file -e ":$target_file" 2>/dev/null \
-                        && staged_blob_matches_override "$repo_root" "$target_file" "$resolution_root/$override_file"; then
+                    # Absent from HEAD: nothing to restore from. The resolver
+                    # decider refuses the commit when the staged blob of the
+                    # new target is byte-identical to its override; genuine
+                    # canonical content is committed as-is.
+                    if precommit_new_target_leaks "$repo_root" "$target_file" \
+                        "$resolution_root/$override_file"; then
                         printf 'git-local-override: refusing to commit new managed target %s: it holds local override content and has no tracked canonical version. Provide canonical content (git add the intended tracked file) before committing, or remove it from .local-overrides.yaml.\n' "$target_file" >&2
                         return 1
                     fi
-                    # A new target's genuine canonical content is committed
-                    # as-is.
                     ;;
                 *)
                     # Restore failed mid-commit: fail closed. Continuing would
@@ -188,35 +178,14 @@ $config_entry"
                     return 1
                     ;;
             esac
-        done < <(while IFS= read -r entry || [[ -n "$entry" ]]; do
-            [[ -z "$entry" ]] && continue
-            target="${entry%%|*}"
-            override="${entry#*|}"
-            if [[ "$override" == "$override_file" ]]; then
-                printf '%s\n' "$target"
-            fi
-        done <<< "$relevant_entries")
-
-        # Overrides are recorded as absolute paths so post-commit re-applies
-        # from the resolution root, not the (possibly fallback) checkout.
-        local state_entry
-        while IFS= read -r entry || [[ -n "$entry" ]]; do
-            [[ -z "$entry" ]] && continue
-            target="${entry%%|*}"
-            override="${entry#*|}"
-            if [[ "$override" == "$override_file" ]]; then
-                state_entry="$target|$resolution_root/$override"
-                if [[ $'\n'"$state_entries"$'\n' != *$'\n'"$state_entry"$'\n'* ]]; then
-                    state_entries="$state_entries
-$state_entry"
-                fi
-            fi
-        done <<< "$relevant_entries"
+        done < <(targets_for_override_in_entries "$override_file" "$relevant_entries")
     done <<< "$overrides_to_restore"
 
-    printf '%s\n' "$state_entries" > "$state_file"
-
-    # The post-commit hook will re-apply overrides after commit completes
+    # Record what was restored so post-commit (or a post-checkout heal after
+    # an aborted commit) re-applies the overrides. The writer owns the record
+    # format and the resolution-root anchoring.
+    record_reapply_state "$repo_root" "$resolution_root" \
+        "$overrides_to_restore" "$relevant_entries"
 
     return 0
 }

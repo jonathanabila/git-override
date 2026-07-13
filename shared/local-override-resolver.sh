@@ -1760,6 +1760,43 @@ precommit_find_merge_leak() {
     return 1
 }
 
+# Entries-scoped sibling of get_targets_for_override: expand one override
+# file back to its targets WITHIN an already-computed entries list — the
+# Group concept (all targets sharing one override) as a callable function.
+# Pre-commit's grouped restore iterates this instead of re-filtering the
+# entries inline. $1 = override path (as it appears in the entries),
+# $2 = newline-delimited `target|override` entries.
+targets_for_override_in_entries() {
+    local override_file="$1"
+    local entries="$2"
+
+    local entry target override
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+        target="${entry%%|*}"
+        override="${entry#*|}"
+        if [[ "$override" == "$override_file" ]]; then
+            printf '%s\n' "$target"
+        fi
+    done <<< "$entries"
+}
+
+# New-target leak decider — the named sibling of precommit_find_merge_leak.
+# A target absent from HEAD has no canonical content to restore; committing
+# it would leak local content into history if what's staged is the override.
+# git add always creates a stage-0 index blob, so the leak is detected by
+# comparing that blob to the override, not by the index being absent.
+# $1 = checkout root, $2 = target, $3 = absolute override path.
+# Returns 0 when the commit must be refused; the caller owns the message.
+precommit_new_target_leaks() {
+    local repo_root="$1"
+    local target="$2"
+    local override_abs="$3"
+
+    git -C "$repo_root" cat-file -e ":$target" 2>/dev/null || return 1
+    staged_blob_matches_override "$repo_root" "$target" "$override_abs"
+}
+
 # ---------------------------------------------------------------------------
 # Smudge/clean filter cores.
 #

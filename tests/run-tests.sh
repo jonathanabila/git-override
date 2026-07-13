@@ -4398,6 +4398,126 @@ test_remove_restores_staged_deletion() {
     fi
 }
 
+# targets_for_override_in_entries is the Group concept as a callable
+# function: expand one override back to all its targets within an
+# already-computed entries list.
+test_targets_for_override_in_entries() {
+    info "Testing targets_for_override_in_entries group expansion..."
+
+    local entries="a.md|a.local.md
+b.md|shared.local.md
+c.md|shared.local.md"
+
+    local grouped="" empty=""
+    grouped="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        targets_for_override_in_entries "shared.local.md" "$entries"
+    )"
+    empty="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        targets_for_override_in_entries "no-such.local.md" "$entries"
+    )"
+
+    if [[ "$grouped" == "b.md
+c.md" && -z "$empty" ]]; then
+        pass "Group expansion returns exactly the override's targets"
+    else
+        fail "Group expansion wrong (grouped: '$grouped', empty: '$empty')"
+    fi
+}
+
+# precommit_new_target_leaks refuses a commit only when a target with no
+# HEAD blob has a staged blob byte-identical to its override.
+test_precommit_new_target_leaks() {
+    info "Testing precommit_new_target_leaks decider..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local root
+    root="$(git rev-parse --show-toplevel)"
+
+    printf '# NEW TARGET OVERRIDE\n' > new-target.local.md
+
+    # Leak: staged blob identical to the override.
+    printf '# NEW TARGET OVERRIDE\n' > new-target.md
+    git add new-target.md
+    local leak_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        precommit_new_target_leaks "$root" new-target.md "$root/new-target.local.md"
+    ) || leak_status=$?
+
+    # Genuine canonical content differs from the override: no leak.
+    printf '# GENUINE CANONICAL CONTENT\n' > new-target.md
+    git add new-target.md
+    local genuine_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        precommit_new_target_leaks "$root" new-target.md "$root/new-target.local.md"
+    ) || genuine_status=$?
+
+    # Not staged at all: no index blob, no leak.
+    git rm -q --cached new-target.md
+    local unstaged_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        precommit_new_target_leaks "$root" new-target.md "$root/new-target.local.md"
+    ) || unstaged_status=$?
+
+    rm -f new-target.md new-target.local.md
+
+    if [[ "$leak_status" -eq 0 && "$genuine_status" -ne 0 && "$unstaged_status" -ne 0 ]]; then
+        pass "New-target leak decider refuses identical staged bytes only"
+    else
+        fail "New-target decider wrong (leak: $leak_status, genuine: $genuine_status, unstaged: $unstaged_status)"
+    fi
+}
+
+# record_reapply_state is the writer counterpart of reapply_post_commit_state:
+# the record format (absolute overrides anchored at the resolution root,
+# deduped, grouped) round-trips through the reader, which re-applies the
+# override and clears the state file.
+test_record_reapply_state_roundtrip() {
+    info "Testing record/reapply state round-trip..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local root
+    root="$(git rev-parse --show-toplevel)"
+
+    echo "# ROUNDTRIP OVERRIDE" > CLAUDE.local.md
+
+    local roundtrip_status=0 state_file=""
+    state_file="$(git rev-parse --absolute-git-dir)/local-override-post-commit-state"
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/hooks/local-override-lib.sh"
+        record_reapply_state "$root" "$root" "CLAUDE.local.md" \
+            "CLAUDE.md|CLAUDE.local.md"
+        reapply_post_commit_state "$root"
+    ) || roundtrip_status=$?
+
+    local reapplied=1
+    grep -q "ROUNDTRIP OVERRIDE" CLAUDE.md || reapplied=0
+
+    # Clean up for later assertions.
+    rm -f CLAUDE.local.md
+    git checkout -q HEAD -- CLAUDE.md 2>/dev/null || true
+
+    if [[ "$roundtrip_status" -eq 0 && "$reapplied" -eq 1 && ! -f "$state_file" ]]; then
+        pass "Recorded state re-applies the override and clears itself"
+    else
+        fail "Round-trip wrong (status: $roundtrip_status, reapplied: $reapplied, state gone: $([[ -f "$state_file" ]] && echo no || echo yes))"
+    fi
+}
+
 # configure_filter_driver owns mode exclusivity: writing one mode must unset
 # the other, so filter.local-override.* never claims both drivers at once.
 test_configure_filter_driver_mode_exclusivity() {
@@ -4508,6 +4628,9 @@ main() {
         test_restore_front_door_statuses \
         test_remove_restores_original_with_active_filter \
         test_remove_restores_staged_deletion \
+        test_targets_for_override_in_entries \
+        test_precommit_new_target_leaks \
+        test_record_reapply_state_roundtrip \
         test_configure_filter_driver_mode_exclusivity \
         test_sync_filters_preserves_process_optin \
         test_init_config \

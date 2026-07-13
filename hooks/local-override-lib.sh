@@ -138,6 +138,42 @@ clear_post_commit_state() {
     rm -f "$state_file"
 }
 
+# Writer counterpart of reapply_post_commit_state — the only place the
+# reapply-state record format is produced. For every override in the
+# newline-delimited <overrides> list, records one `target|override` line per
+# target in <entries> (the Group expansion), deduped. Overrides are recorded
+# as ABSOLUTE paths anchored at the resolution root so the reapply runs from
+# the resolution root, not the (possibly fallback) checkout; the reader
+# (reapply_post_commit_state) keeps a legacy relative fallback for state
+# files written by older installs.
+# $1 = repo root (state file location), $2 = resolution root,
+# $3 = override files to record, $4 = `target|override` entries.
+record_reapply_state() {
+    local repo_root="$1"
+    local resolution_root="$2"
+    local overrides="$3"
+    local entries="$4"
+
+    local state_file=""
+    state_file="$(get_post_commit_state_file "$repo_root")" || return 1
+
+    local override_file target state_entry state_entries=""
+    while IFS= read -r override_file || [[ -n "$override_file" ]]; do
+        [[ -z "$override_file" ]] && continue
+
+        while IFS= read -r target || [[ -n "$target" ]]; do
+            [[ -z "$target" ]] && continue
+            state_entry="$target|$resolution_root/$override_file"
+            if [[ $'\n'"$state_entries"$'\n' != *$'\n'"$state_entry"$'\n'* ]]; then
+                state_entries="$state_entries
+$state_entry"
+            fi
+        done < <(targets_for_override_in_entries "$override_file" "$entries")
+    done <<< "$overrides"
+
+    printf '%s\n' "$state_entries" > "$state_file"
+}
+
 # Re-apply overrides recorded by pre-commit, if a state file is present, then
 # clear it. Safe to call when no state file exists (no-op). Used by both
 # post-commit (on commit success) and post-checkout (to heal an aborted commit
