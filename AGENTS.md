@@ -316,6 +316,8 @@ Shared library sourced by all hooks. Key functions:
 - `get_repo_root()` - Get repository root directory
 - `read_pattern()` - Read the `pattern:` field from config file
 - `read_config()` - Parse recursive `.local-overrides.yaml` files, returns effective `target|override` pairs
+- `read_valid_config_entries_for_file()` - Sentinel-free view of the raw per-config parser: every consumer except `validate_config` (the gate that surfaces parse errors) reads through this, so the in-band parse-error sentinel never reaches consumers
+- `override_is_active()` - Active-override predicate (override file exists at the resolution root AND target exists in the checkout); one definition for the CLI's counting and the shell wrapper's enumeration
 - `get_active_overrides()` - Get files with existing override files
 - `get_override_files()` - List unique override files from config
 - `get_targets_for_override()` - Get all target files for a specific override

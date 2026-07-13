@@ -4518,6 +4518,54 @@ test_record_reapply_state_roundtrip() {
     fi
 }
 
+# read_valid_config_entries_for_file is the sentinel-free view of the raw
+# config parser: the raw parser signals a parse error in-band (process
+# substitution swallows return codes), validate_config is the gate that
+# surfaces it, and every other consumer reads through this filter — no
+# consumer ever sees or re-filters the sentinel.
+test_sentinel_free_config_reader() {
+    info "Testing sentinel-free config entry reader..."
+
+    cd "$TEST_REPO"
+
+    # One valid entry, then one whose override escapes its subtree (a parse
+    # error: the raw parser emits the sentinel and stops).
+    cat > .local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: CLAUDE.local.md
+    replaces:
+      - CLAUDE.md
+  - override: ../escape.local.md
+    replaces:
+      - AGENTS.md
+EOF
+
+    local root
+    root="$(git rev-parse --show-toplevel)"
+
+    local entries=""
+    entries="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        read_valid_config_entries_for_file "$root" ".local-overrides.yaml" 2>/dev/null
+    )"
+
+    local validate_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        cache_config_files "$root"
+        validate_config "$root"
+    ) > /dev/null 2>&1 || validate_status=$?
+
+    if [[ "$entries" == "CLAUDE.md|CLAUDE.local.md" && "$validate_status" -ne 0 ]]; then
+        pass "Consumers see valid entries only; the validation gate still refuses"
+    else
+        fail "Sentinel handling wrong (entries: '$entries', validate: $validate_status)"
+    fi
+}
+
 # configure_filter_driver owns mode exclusivity: writing one mode must unset
 # the other, so filter.local-override.* never claims both drivers at once.
 test_configure_filter_driver_mode_exclusivity() {
@@ -4631,6 +4679,7 @@ main() {
         test_targets_for_override_in_entries \
         test_precommit_new_target_leaks \
         test_record_reapply_state_roundtrip \
+        test_sentinel_free_config_reader \
         test_configure_filter_driver_mode_exclusivity \
         test_sync_filters_preserves_process_optin \
         test_init_config \

@@ -1247,6 +1247,38 @@ read_config_entries_for_file() {
     done < "$config_file"
 }
 
+# Sentinel-free view of read_config_entries_for_file. The raw parser signals
+# a parse error IN-BAND (the LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL entry),
+# because process substitution swallows its return code; validate_config is
+# the one gate that inspects the sentinel and surfaces the error. Every other
+# consumer wants "the valid entries, parse errors skipped" — this reader owns
+# that skip so consumers never see the sentinel or re-filter it.
+read_valid_config_entries_for_file() {
+    local repo_root="$1"
+    local config_path="$2"
+
+    local entry
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -n "$entry" ]] || continue
+        [[ "${entry%%|*}" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]] && continue
+        printf '%s\n' "$entry"
+    done < <(read_config_entries_for_file "$repo_root" "$config_path")
+}
+
+# Active-override predicate: a configured pair is active when the override
+# file exists (at the resolution root) and the target file exists (in the
+# checkout). One definition for the CLI's apply/status counting and the
+# shell wrapper's active-target enumeration.
+# $1 = resolution root, $2 = checkout root, $3 = target, $4 = override.
+override_is_active() {
+    local resolution_root="$1"
+    local checkout_root="$2"
+    local target="$3"
+    local override="$4"
+
+    [[ -f "$resolution_root/$override" && -f "$checkout_root/$target" ]]
+}
+
 target_is_shadowed_by_child_config() {
     local repo_root="$1"
     local config_path="$2"
@@ -1385,12 +1417,6 @@ read_config() {
             [[ -n "$entry" ]] || continue
             target="${entry%%|*}"
 
-            # Parse-error sentinel: the authoritative rejection happens in
-            # validate_config; this hot path just skips the marker.
-            if [[ "$target" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]]; then
-                continue
-            fi
-
             if target_is_shadowed_by_child_config "$repo_root" "$config_path" "$target"; then
                 ((shadowed_skip_count++)) || true
                 continue
@@ -1405,7 +1431,7 @@ read_config() {
 $target"
             ((emitted_count++)) || true
             printf '%s\n' "$entry"
-        done < <(read_config_entries_for_file "$repo_root" "$config_path")
+        done < <(read_valid_config_entries_for_file "$repo_root" "$config_path")
     done < <(get_cached_config_files "$repo_root")
 
     local_override_trace_log "read_config emitted=$emitted_count shadowed_skips=$shadowed_skip_count duplicate_skips=$duplicate_skip_count total_ms=$(resolver_elapsed_milliseconds "$read_start_ms")"
@@ -1425,16 +1451,12 @@ get_override_for_target() {
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
         target="${entry%%|*}"
-        # Skip the parse-error sentinel; validate_config is the gate for it.
-        if [[ "$target" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]]; then
-            continue
-        fi
         override="${entry#*|}"
         if [[ "$target" == "$target_path" ]]; then
             printf '%s\n' "$override"
             return 0
         fi
-    done < <(read_config_entries_for_file "$repo_root" "$owner_config")
+    done < <(read_valid_config_entries_for_file "$repo_root" "$owner_config")
 
     return 1
 }
@@ -1452,15 +1474,11 @@ get_config_for_target() {
         while IFS= read -r entry || [[ -n "$entry" ]]; do
             [[ -n "$entry" ]] || continue
             target="${entry%%|*}"
-            # Skip the parse-error sentinel; validate_config is the gate for it.
-            if [[ "$target" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]]; then
-                continue
-            fi
             if [[ "$target" == "$target_path" ]]; then
                 printf '%s\n' "$config_path"
                 return 0
             fi
-        done < <(read_config_entries_for_file "$repo_root" "$config_path")
+        done < <(read_valid_config_entries_for_file "$repo_root" "$config_path")
     done < <(get_cached_config_files "$repo_root")
 
     return 1

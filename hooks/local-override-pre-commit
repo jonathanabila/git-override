@@ -86,12 +86,9 @@ $config_path"
 
         while IFS= read -r config_entry || [[ -n "$config_entry" ]]; do
             [[ -n "$config_entry" ]] || continue
-            # Skip parse-error sentinel entries: they are diagnostics, not
-            # targets; validate_config is the gate that surfaces them.
-            [[ "${config_entry%%|*}" == "$LOCAL_OVERRIDE_PARSE_ERROR_SENTINEL" ]] && continue
             relevant_entries="$relevant_entries
 $config_entry"
-        done < <(read_config_entries_for_file "$resolution_root" "$config_path")
+        done < <(read_valid_config_entries_for_file "$resolution_root" "$config_path")
     done <<< "$relevant_configs"
 
     [[ -n "$relevant_entries" ]] || return 0

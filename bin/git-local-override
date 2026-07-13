@@ -758,8 +758,6 @@ apply_to_checkout() {
     config_entries="$(read_config "$repo_root")"
 
     local entry target override
-    local full_target=""
-    local full_override=""
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
@@ -767,10 +765,8 @@ apply_to_checkout() {
 
         target="${entry%%|*}"
         override="${entry#*|}"
-        full_target="$checkout_root/$target"
-        full_override="$repo_root/$override"
 
-        if [[ -f "$full_override" && -f "$full_target" ]]; then
+        if override_is_active "$repo_root" "$checkout_root" "$target" "$override"; then
             ((active_count++)) || true
         fi
     done <<< "$config_entries"
@@ -1454,7 +1450,7 @@ cmd__get_active_targets() {
         target="${entry%%|*}"
         override="${entry#*|}"
 
-        if [[ -f "$repo_root/$override" && -f "$checkout_root/$target" ]]; then
+        if override_is_active "$repo_root" "$checkout_root" "$target" "$override"; then
             echo "$target"
         fi
     done < <(read_config "$repo_root")
@@ -1485,7 +1481,7 @@ cmd__restore_active_targets() {
         target="${entry%%|*}"
         override="${entry#*|}"
 
-        if [[ -f "$repo_root/$override" && -f "$checkout_root/$target" ]]; then
+        if override_is_active "$repo_root" "$checkout_root" "$target" "$override"; then
             restore_target_to_head "$checkout_root" "$target" full trace || true
         fi
     done < <(read_config "$repo_root")
