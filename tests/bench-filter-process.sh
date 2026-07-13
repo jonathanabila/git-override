@@ -24,7 +24,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOOKS_SRC="$REPO_ROOT/hooks"
 SHARED_SRC="$REPO_ROOT/shared"
 
 SIZES="1 10 50 200"
@@ -51,15 +50,15 @@ now_ms() {
 
 # Copy the filter runtime (lib + resolver + filter scripts) into a repo's
 # .git/hooks so the filters resolve exactly as an installed repo would.
+# Runtime only — the bench never installs entry hooks. The resolver's
+# manifest-driven materializer owns the file set.
 install_runtime() {
     local git_hooks="$1"
-    mkdir -p "$git_hooks"
-    cp "$HOOKS_SRC/local-override-lib.sh" "$git_hooks/"
-    cp "$SHARED_SRC/local-override-resolver.sh" "$git_hooks/"
-    cp "$HOOKS_SRC/local-override-filter-smudge" "$git_hooks/"
-    cp "$HOOKS_SRC/local-override-filter-clean" "$git_hooks/"
-    cp "$HOOKS_SRC/local-override-filter-process" "$git_hooks/"
-    chmod +x "$git_hooks"/local-override-filter-* 2>/dev/null || true
+    (
+        # shellcheck disable=SC1091
+        source "$SHARED_SRC/local-override-resolver.sh"
+        install_managed_runtime_from_checkout "$REPO_ROOT" "$git_hooks" false
+    )
 }
 
 # Remove the managed target files so the next checkout must run the SMUDGE

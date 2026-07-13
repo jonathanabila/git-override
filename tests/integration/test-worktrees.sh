@@ -69,21 +69,8 @@ files:
 EOF
     echo "# Private override content v1" > CLAUDE.private.md
 
-    mkdir -p .git/hooks .git/info
-    cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
-    cp "$PROJECT_DIR/shared/local-override-resolver.sh" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-filter-smudge" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
-    cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
-    cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit
-    cp "$PROJECT_DIR/hooks/local-override-pre-rebase" .git/hooks/pre-rebase
-    chmod +x .git/hooks/local-override-filter-smudge \
-        .git/hooks/local-override-filter-clean \
-        .git/hooks/post-checkout \
-        .git/hooks/pre-commit \
-        .git/hooks/post-commit \
-        .git/hooks/pre-rebase
+    mkdir -p .git/info
+    install_test_hooks "$TEST_DIR" "$PROJECT_DIR"
 
     git config filter.local-override.smudge "$TEST_DIR/.git/hooks/local-override-filter-smudge %f"
     git config filter.local-override.clean "$TEST_DIR/.git/hooks/local-override-filter-clean %f"

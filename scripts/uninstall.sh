@@ -123,16 +123,10 @@ remove_managed_hook_artifacts() {
     local scope_label="$2"
     local artifact
 
-    for artifact in \
-        local-override-lib.sh \
-        local-override-resolver.sh \
-        local-override-filter-smudge \
-        local-override-filter-clean \
-        local-override-filter-process \
-        local-override-post-checkout \
-        local-override-pre-commit \
-        local-override-post-commit \
-        local-override-pre-rebase; do
+    # The removable set derives from the resolver's runtime manifest (only
+    # called when RESOLVER_AVAILABLE=true): the runtime files themselves plus
+    # the prefixed helper-style hook copies older installers left behind.
+    for artifact in $(managed_runtime_files) $(managed_hook_types | sed 's/^/local-override-/'); do
         local artifact_file="$hooks_dir/$artifact"
         if [[ -f "$artifact_file" ]]; then
             rm "$artifact_file"
@@ -162,7 +156,7 @@ remove_repo_managed_state() {
             if [[ -d "$hooks_dir" ]]; then
                 info "Reconciling repository hooks in: $hooks_dir"
                 local hook_type
-                for hook_type in post-checkout pre-commit post-commit pre-rebase; do
+                for hook_type in $(managed_hook_types); do
                     reconcile_wrapper_hook_on_uninstall "$hooks_dir" "$hook_type" "repository"
                 done
                 remove_managed_hook_artifacts "$hooks_dir" "repository"
@@ -250,7 +244,7 @@ remove_template_hooks() {
 
     # Reconcile wrapper hooks safely.
     local hook_type
-    for hook_type in post-checkout pre-commit post-commit pre-rebase; do
+    for hook_type in $(managed_hook_types); do
         reconcile_wrapper_hook_on_uninstall "$TEMPLATE_HOOKS_DIR" "$hook_type" "template"
     done
 

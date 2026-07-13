@@ -80,7 +80,9 @@ via a single fallback ladder.
 
 **Managed artifact**:
 A file the installer owns and the uninstaller may remove — hook wrappers
-carry an exact marker line identifying them as managed.
+carry an exact marker line identifying them as managed. The set of managed
+artifacts is defined once, by the resolver's runtime manifest
+(`managed_hook_types` / `managed_filter_scripts` / `managed_runtime_files`).
 _Avoid_: our hooks, installed files
 
 **Self-heal**:

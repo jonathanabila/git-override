@@ -273,21 +273,17 @@ resolve_ambiguous_hook_state() {
 
 prune_stale_managed_artifacts() {
     local hooks_dir="$1"
-    local artifact
+    local hook_type
 
     # Older installer versions could leave these helper-style artifacts behind.
     # They are not used by the current wrapper model and should be pruned on reinstall.
-    for artifact in \
-        local-override-post-checkout \
-        local-override-pre-commit \
-        local-override-post-commit \
-        local-override-pre-rebase; do
-        local artifact_file="$hooks_dir/$artifact"
+    while IFS= read -r hook_type; do
+        local artifact_file="$hooks_dir/local-override-$hook_type"
         if [[ -f "$artifact_file" ]]; then
             rm "$artifact_file"
-            info "Removed stale managed artifact: $artifact"
+            info "Removed stale managed artifact: local-override-$hook_type"
         fi
-    done
+    done < <(managed_hook_types)
 }
 
 prune_stale_managed_chained_hooks() {
@@ -295,7 +291,7 @@ prune_stale_managed_chained_hooks() {
     local hook_type
     local chained_file
 
-    for hook_type in post-checkout pre-commit post-commit pre-rebase; do
+    for hook_type in $(managed_hook_types); do
         chained_file="$hooks_dir/$hook_type.chained"
         if is_legacy_managed_hook "$chained_file" "$hook_type"; then
             rm "$chained_file"
@@ -328,11 +324,32 @@ install_filter_scripts_to_dir() {
     mkdir -p "$hooks_dir"
 
     local filter_script
-    for filter_script in local-override-filter-smudge local-override-filter-clean local-override-filter-process; do
+    for filter_script in $(managed_filter_scripts); do
         get_project_file_content "hooks/$filter_script" > "$hooks_dir/$filter_script"
         chmod +x "$hooks_dir/$filter_script"
         success "Installed: $hooks_dir/$filter_script"
     done
+}
+
+# The GIT_LOCAL_OVERRIDE_FILTER_PROCESS opt-in decides the filter mode once
+# for both install paths (repo and template).
+resolve_filter_mode() {
+    if [[ "${GIT_LOCAL_OVERRIDE_FILTER_PROCESS:-0}" == "1" ]]; then
+        printf 'process\n'
+    else
+        printf 'scripts\n'
+    fi
+}
+
+report_filter_mode_configured() {
+    local scope_label="$1"
+    local filter_mode="$2"
+
+    if [[ "$filter_mode" == "process" ]]; then
+        success "Configured $scope_label filter.local-override (experimental filter.process, opt-in)"
+    else
+        success "Configured $scope_label filter.local-override"
+    fi
 }
 
 install_shared_resolver_to_dir() {
@@ -377,17 +394,11 @@ install_filters() {
     # Opt-in EXPERIMENTAL long-running filter.process prototype (plan 019).
     # Default stays the per-file %f smudge/clean scripts. The resolver's
     # configure_filter_driver is the single writer of the driver config.
-    local filter_mode="scripts"
-    if [[ "${GIT_LOCAL_OVERRIDE_FILTER_PROCESS:-0}" == "1" ]]; then
-        filter_mode="process"
-    fi
+    local filter_mode
+    filter_mode="$(resolve_filter_mode)"
     configure_filter_driver "$repo_root" "$common_git_dir/hooks" "$filter_mode" \
         || { error "Unable to configure filter.local-override"; exit 1; }
-    if [[ "$filter_mode" == "process" ]]; then
-        success "Configured local filter.local-override (experimental filter.process, opt-in)"
-    else
-        success "Configured local filter.local-override"
-    fi
+    report_filter_mode_configured "local" "$filter_mode"
 
     sync_attributes "$repo_root"
 }
@@ -441,7 +452,7 @@ install_hooks_to_dir() {
     install_shared_resolver_to_dir "$lib_dir"
 
     # Install each hook
-    for hook_type in post-checkout pre-commit post-commit pre-rebase; do
+    for hook_type in $(managed_hook_types); do
         local hook_file="$hooks_dir/$hook_type"
         local our_hook="local-override-$hook_type"
 
@@ -524,17 +535,11 @@ install_to_template() {
     # Opt-in EXPERIMENTAL long-running filter.process prototype (plan 019).
     # Default stays the per-file %f smudge/clean scripts. The resolver's
     # configure_filter_driver is the single writer of the driver config.
-    local filter_mode="scripts"
-    if [[ "${GIT_LOCAL_OVERRIDE_FILTER_PROCESS:-0}" == "1" ]]; then
-        filter_mode="process"
-    fi
+    local filter_mode
+    filter_mode="$(resolve_filter_mode)"
     configure_filter_driver global "$template_dir" "$filter_mode" \
         || { error "Unable to configure global filter.local-override"; exit 1; }
-    if [[ "$filter_mode" == "process" ]]; then
-        success "Configured global filter.local-override (experimental filter.process, opt-in)"
-    else
-        success "Configured global filter.local-override"
-    fi
+    report_filter_mode_configured "global" "$filter_mode"
 
     echo ""
     info "New repositories created with 'git init' or 'git clone' will have hooks installed."

@@ -177,11 +177,17 @@ clone_seed_repo() {
     git -C "$target_repo" config user.email "$user_email"
 }
 
+# Materialize the managed runtime (and by default the entry hooks) into a
+# repo's hooks dir, exactly as the resolver's manifest defines it. Fixtures
+# must never carry their own copy of the file set — the resolver's
+# install_managed_runtime_from_checkout is the one owner of both the list
+# and the copy semantics. Pass "false" as $3 for a runtime-only install
+# (filters + libs, no entry hooks — e.g. the filter bench).
 install_test_hooks() {
     local repo_dir="$1"
     local project_dir="$2"
+    local include_entry_hooks="${3:-true}"
     local common_git_dir
-    local hook_name
 
     git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || \
         test_lib_die "Repository does not exist: $repo_dir"
@@ -191,16 +197,10 @@ install_test_hooks() {
         common_git_dir="$repo_dir/$common_git_dir"
     fi
 
-    mkdir -p "$common_git_dir/hooks"
-
-    cp "$project_dir/hooks/local-override-lib.sh" "$common_git_dir/hooks/"
-    cp "$project_dir/shared/local-override-resolver.sh" "$common_git_dir/hooks/"
-    cp "$project_dir/hooks/local-override-filter-smudge" "$common_git_dir/hooks/"
-    cp "$project_dir/hooks/local-override-filter-clean" "$common_git_dir/hooks/"
-
-    for hook_name in post-checkout pre-commit post-commit pre-rebase; do
-        cp "$project_dir/hooks/local-override-$hook_name" "$common_git_dir/hooks/$hook_name"
-    done
-
-    chmod +x "$common_git_dir/hooks"/*
+    (
+        # shellcheck disable=SC1091
+        source "$project_dir/shared/local-override-resolver.sh"
+        install_managed_runtime_from_checkout "$project_dir" \
+            "$common_git_dir/hooks" "$include_entry_hooks"
+    ) || test_lib_die "Unable to install the managed runtime into $common_git_dir/hooks"
 }

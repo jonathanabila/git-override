@@ -208,6 +208,76 @@ is_managed_wrapper_hook() {
     grep -qxF "$marker" "$hook_file" 2>/dev/null
 }
 
+# The managed-runtime manifest. These lists are the single definition of
+# WHAT the installers materialize and the uninstaller may remove: the git
+# hook types installed as managed wrapper hooks, the filter scripts, and the
+# support libs that must travel together into a hooks dir for the runtime to
+# resolve. install.sh (which may acquire files via curl), uninstall.sh, the
+# test fixtures, and the bench harness all iterate these instead of carrying
+# their own copies of the file set (which had already drifted apart).
+managed_hook_types() {
+    printf '%s\n' post-checkout pre-commit post-commit pre-rebase
+}
+
+managed_filter_scripts() {
+    printf '%s\n' \
+        local-override-filter-smudge \
+        local-override-filter-clean \
+        local-override-filter-process
+}
+
+# Everything that must sit NEXT TO the hook entry points: the filter scripts
+# plus the shared lib and the resolver itself.
+managed_runtime_files() {
+    managed_filter_scripts
+    printf '%s\n' local-override-lib.sh local-override-resolver.sh
+}
+
+# Where a managed runtime file lives in a SOURCE CHECKOUT (the resolver is
+# the one file that ships from shared/, not hooks/). Owns the source-tree
+# layout so copy-based callers don't re-encode it.
+managed_runtime_source_path() {
+    local project_dir="$1"
+    local runtime_file="$2"
+
+    if [[ "$runtime_file" == "local-override-resolver.sh" ]]; then
+        printf '%s\n' "$project_dir/shared/local-override-resolver.sh"
+    else
+        printf '%s\n' "$project_dir/hooks/$runtime_file"
+    fi
+}
+
+# Copy-based materializer for source checkouts: copies the managed runtime
+# into <dest_dir>, and (unless <include_entry_hooks> is "false") the four
+# entry hooks under their bare git hook names. Test fixtures and the bench
+# harness call this; the real installers keep their own acquisition
+# (install.sh can run via curl with no checkout on disk) but iterate the
+# same manifest functions above. Returns non-zero on the first failed copy.
+install_managed_runtime_from_checkout() {
+    local project_dir="$1"
+    local dest_dir="$2"
+    local include_entry_hooks="${3:-true}"
+
+    mkdir -p "$dest_dir" || return 1
+
+    local runtime_file
+    while IFS= read -r runtime_file || [[ -n "$runtime_file" ]]; do
+        [[ -n "$runtime_file" ]] || continue
+        cp "$(managed_runtime_source_path "$project_dir" "$runtime_file")" \
+            "$dest_dir/$runtime_file" || return 1
+        chmod +x "$dest_dir/$runtime_file" || return 1
+    done < <(managed_runtime_files)
+
+    [[ "$include_entry_hooks" == "false" ]] && return 0
+
+    local hook_type
+    while IFS= read -r hook_type || [[ -n "$hook_type" ]]; do
+        [[ -n "$hook_type" ]] || continue
+        cp "$project_dir/hooks/local-override-$hook_type" "$dest_dir/$hook_type" || return 1
+        chmod +x "$dest_dir/$hook_type" || return 1
+    done < <(managed_hook_types)
+}
+
 # Single writer for the filter.local-override.* driver config. Every site
 # that configures the driver — install.sh (repo and template), the CLI's
 # sync-filters, and the hooks' self-heal — goes through here, so the driver

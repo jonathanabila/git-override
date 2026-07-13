@@ -70,17 +70,9 @@ setup_seed_repo() {
     git add .
     git commit -q -m "Initial commit"
 
-    # Install hooks directly (simulating install.sh --repo)
-    mkdir -p .git/hooks
-    cp "$PROJECT_DIR/hooks/local-override-lib.sh" .git/hooks/
-    cp "$PROJECT_DIR/shared/local-override-resolver.sh" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-post-checkout" .git/hooks/post-checkout
-    cp "$PROJECT_DIR/hooks/local-override-pre-commit" .git/hooks/pre-commit
-    cp "$PROJECT_DIR/hooks/local-override-post-commit" .git/hooks/post-commit
-    cp "$PROJECT_DIR/hooks/local-override-pre-rebase" .git/hooks/pre-rebase
-    cp "$PROJECT_DIR/hooks/local-override-filter-smudge" .git/hooks/
-    cp "$PROJECT_DIR/hooks/local-override-filter-clean" .git/hooks/
-    chmod +x .git/hooks/*
+    # Install hooks directly (simulating install.sh --repo) through the
+    # shared fixture, which follows the resolver's runtime manifest.
+    install_test_hooks "$TEST_REPO" "$PROJECT_DIR"
 
     # Create config file
     cat > .local-overrides.yaml << 'EOF'

@@ -4566,6 +4566,52 @@ EOF
     fi
 }
 
+# install_managed_runtime_from_checkout is the copy-based materializer: the
+# resolver's manifest (managed_runtime_files + managed_hook_types) defines
+# the file set once, and this pins the produced layout — runtime files under
+# their own names, entry hooks under bare git hook names, all executable —
+# and the runtime-only mode the bench uses.
+test_managed_runtime_materializer_layout() {
+    info "Testing managed-runtime materializer layout..."
+
+    local full_dir="$CURRENT_TEST_ROOT/artifacts/materialize-full"
+    local runtime_dir="$CURRENT_TEST_ROOT/artifacts/materialize-runtime"
+
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        install_managed_runtime_from_checkout "$PROJECT_DIR" "$full_dir" \
+            && install_managed_runtime_from_checkout "$PROJECT_DIR" "$runtime_dir" false
+    ) || {
+        fail "Materializer returned non-zero"
+        return
+    }
+
+    local missing="" runtime_file hook_type
+    while IFS= read -r runtime_file; do
+        [[ -x "$full_dir/$runtime_file" ]] || missing="$missing full:$runtime_file"
+        [[ -x "$runtime_dir/$runtime_file" ]] || missing="$missing runtime:$runtime_file"
+    done < <(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        managed_runtime_files
+    )
+    while IFS= read -r hook_type; do
+        [[ -x "$full_dir/$hook_type" ]] || missing="$missing full:$hook_type"
+        [[ -e "$runtime_dir/$hook_type" ]] && missing="$missing unexpected-runtime:$hook_type"
+    done < <(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        managed_hook_types
+    )
+
+    if [[ -z "$missing" ]]; then
+        pass "Materializer produces the manifest layout in both modes"
+    else
+        fail "Materializer layout wrong:$missing"
+    fi
+}
+
 # configure_filter_driver owns mode exclusivity: writing one mode must unset
 # the other, so filter.local-override.* never claims both drivers at once.
 test_configure_filter_driver_mode_exclusivity() {
@@ -4680,6 +4726,7 @@ main() {
         test_precommit_new_target_leaks \
         test_record_reapply_state_roundtrip \
         test_sentinel_free_config_reader \
+        test_managed_runtime_materializer_layout \
         test_configure_filter_driver_mode_exclusivity \
         test_sync_filters_preserves_process_optin \
         test_init_config \
