@@ -319,7 +319,7 @@ Shared library sourced by all hooks. Key functions:
 - `get_active_overrides()` - Get files with existing override files
 - `get_override_files()` - List unique override files from config
 - `get_targets_for_override()` - Get all target files for a specific override
-- `get_override_for_file()` - Find the override file for a given target file path; returns an absolute path resolved against the checkout's resolution root
+- `resolve_safe_override_for_file()` - Read-side front door (in the shared resolver): given the checkout repo root and a target path, prints the absolute override path only when a readable, symlink-safe override exists; anchors the containment check on the true resolution root
 - `locate_support_file()` - Canonical dev-vs-installed fallback ladder for support files (VERSION, shell-init); lives in the shared resolver, anchored on the resolver's own location
 - `configure_filter_driver()` - Single writer of the `filter.local-override.*` config (in the shared resolver): explicit scope (repo root or `global`), script dir, and mode (`scripts`|`process`); owns mode exclusivity and reads no env switches
 - `apply_override_to_target()` - Write-side front door (in the shared resolver): owns both symlink gates, resolution-root anchoring for absolute override paths, the copy, and refusal logging (`loud`|`trace`); returns 0 applied / 1 skipped / 2 refused / 3 copy-failed

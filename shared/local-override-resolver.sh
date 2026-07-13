@@ -1521,22 +1521,6 @@ get_resolution_root() {
     printf '%s\n' "$main_root"
 }
 
-# Returns the ABSOLUTE path of the override file for a managed target, or
-# nothing. Resolves against the checkout's resolution root, so linked
-# worktrees without their own config inherit the main worktree's overrides.
-get_override_for_file() {
-    local repo_root="$1"
-    local file_path="$2"
-    local resolution_root=""
-    local override=""
-
-    resolution_root="$(get_resolution_root "$repo_root")"
-    override="$(get_override_for_target "$file_path" "$resolution_root" 2>/dev/null || true)"
-    [[ -n "$override" ]] || return 0
-
-    printf '%s/%s\n' "$resolution_root" "$override"
-}
-
 # Safe front door for the filter cores and reapply path. Given the checkout
 # repo root and a managed target path, prints the ABSOLUTE override path and
 # returns 0 only when a readable, symlink-safe override exists — otherwise
