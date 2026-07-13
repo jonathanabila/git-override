@@ -620,6 +620,67 @@ test_status_reports_fallback_in_worktree() {
     fi
 }
 
+test_config_stamp_isolated_per_worktree() {
+    info "Testing linked worktrees keep isolated config stamps and target sets..."
+
+    cd "$TEST_DIR"
+    local wt="$CURRENT_TEST_ROOT/wt-stamp"
+    git worktree add -q -b wt-stamp "$wt" >/dev/null 2>&1
+
+    # Divergent config set: the worktree-local config manages README.md only,
+    # while the main checkout's config manages AGENTS.md only.
+    cat > "$wt/.local-overrides.yaml" << 'EOF'
+pattern: ".private"
+files:
+  - override: README.private.md
+    replaces:
+      - README.md
+EOF
+    echo "# Worktree README override" > "$wt/README.private.md"
+
+    # A full-discovery pass in each checkout writes each checkout's stamp.
+    "$PROJECT_DIR/bin/git-local-override" sync-filters >/dev/null 2>&1
+    (cd "$wt" && "$PROJECT_DIR/bin/git-local-override" sync-filters >/dev/null 2>&1)
+
+    local main_git_dir wt_git_dir
+    main_git_dir="$(git rev-parse --absolute-git-dir)"
+    wt_git_dir="$(git -C "$wt" rev-parse --absolute-git-dir)"
+
+    local main_stamp="$main_git_dir/local-override-config-stamp"
+    local wt_stamp="$wt_git_dir/local-override-config-stamp"
+
+    if [[ "$main_git_dir" != "$wt_git_dir" && -s "$main_stamp" && -s "$wt_stamp" ]]; then
+        pass "Each checkout has its own non-empty stamp under its own git dir"
+    else
+        fail "Stamps not isolated (main: $main_stamp, wt: $wt_stamp)"
+        return 1
+    fi
+
+    if ! diff -q "$main_stamp" "$wt_stamp" >/dev/null 2>&1; then
+        pass "Stamps record divergent config sets"
+    else
+        fail "Stamps identical across worktrees: $(cat "$main_stamp")"
+        return 1
+    fi
+
+    # Read-only commands must see their own checkout's targets, not the
+    # sibling's — a shared/stale stamp would leak one worktree's config set
+    # into the other.
+    local main_list wt_list
+    main_list="$("$PROJECT_DIR/bin/git-local-override" list 2>&1 || true)"
+    wt_list="$( (cd "$wt" && "$PROJECT_DIR/bin/git-local-override" list 2>&1) || true)"
+
+    if echo "$main_list" | grep -q "AGENTS.md" \
+        && ! echo "$main_list" | grep -q "README.md" \
+        && echo "$wt_list" | grep -q "README.md" \
+        && ! echo "$wt_list" | grep -q "AGENTS.md"; then
+        pass "list in each worktree reports only that worktree's targets"
+    else
+        fail "Cross-worktree target leak (main list: $main_list | wt list: $wt_list)"
+        return 1
+    fi
+}
+
 test_legacy_cli_filters_match_hook_behavior() {
     info "Testing legacy CLI filter subcommands (fallback smudge, cmp-gated clean)..."
 
@@ -903,6 +964,7 @@ main() {
         test_pre_rebase_repairs_skip_worktree_in_fallback_worktree \
         test_status_caches_discovery \
         test_status_reports_fallback_in_worktree \
+        test_config_stamp_isolated_per_worktree \
         test_legacy_cli_filters_match_hook_behavior \
         test_apply_all_worktrees \
         test_apply_all_worktrees_with_space_path \

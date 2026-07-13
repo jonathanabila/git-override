@@ -1096,6 +1096,47 @@ EOF
     fi
 }
 
+test_readonly_cli_falls_back_to_full_on_stamp_deletion() {
+    info "Testing a read-only CLI command falls back to full discovery when a stamped config is deleted..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+    echo "# ROOT LOCAL" > CLAUDE.local.md
+
+    # A gitignored config managing a tracked target, registered via the
+    # sync-filters full walk so the stamp records it.
+    mkdir -p sub
+    echo "# original notes" > sub/notes.md
+    git add sub/notes.md
+    git commit -q -m "Add tracked subdir target"
+    cat > sub/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    echo "sub/.local-overrides.yaml" >> .gitignore
+    echo "# SUB LOCAL notes" > sub/notes.local.md
+    git-local-override sync-filters >/dev/null 2>&1
+
+    # Deletion is a distinct drift branch from the cksum-edit case: a stamped
+    # path is now missing entirely from the hot set.
+    rm sub/.local-overrides.yaml
+
+    local output
+    output=$(GIT_LOCAL_OVERRIDE_TRACE=1 git-local-override list 2>&1)
+
+    if [[ "$output" == *"strategy=full"* ]] &&
+       [[ "$output" != *"sub/notes.md"* ]]; then
+        pass "Read-only list falls back to full discovery on stamped-config deletion and drops its targets"
+    else
+        fail "Expected full-discovery fallback without the deleted config's target (output: $output)"
+    fi
+}
+
 test_readonly_cli_full_discovery_without_stamp() {
     info "Testing a read-only CLI command uses full discovery without a stamp and never writes one..."
 
@@ -4083,6 +4124,7 @@ main() {
         test_new_gitignored_config_registered_by_sync_filters \
         test_readonly_cli_hot_discovery_on_matching_stamp \
         test_readonly_cli_falls_back_to_full_on_stamp_mismatch \
+        test_readonly_cli_falls_back_to_full_on_stamp_deletion \
         test_readonly_cli_full_discovery_without_stamp \
         test_discover_config_files_hot_then_full \
         test_apply_writes_config_stamp \

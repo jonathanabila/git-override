@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tests pinning two config-stamp correctness properties**: a linked-worktree integration test proves each checkout keeps its own config stamp under its own git dir with divergent config sets staying isolated (`list` in each worktree reports only that worktree's targets — a shared/stale stamp would leak one checkout's config set into the other), and a unit test proves *deleting* a stamped gitignored config triggers the full-discovery fallback and drops its targets (only the cksum-edit drift case was covered before; deletion is a distinct branch). Both characterize existing behavior — no product change (unit 127→128, worktrees 23→24)
+
 ### Changed
 
 - **`doctor --fix` now repairs all three states it diagnoses as fixable**: `--fix` only actually repaired a *missing* filter driver; the other two states doctor detects with a wired remedy — attributes out of sync with the effective config, and legacy skip-worktree bits left by pre-filter installs — still printed a manual "Run 'git-local-override sync-filters'" hint even under `--fix`, despite the repair being the very `sync-filters` delegation `--fix` already used. Checks 5 and 6 now report "repairing via sync-filters" under `--fix` and trigger one shared `cmd_sync_filters` run after both checks (never in read-only mode, which is unchanged); repaired states are not counted as warnings/failures, so the exit code reflects the post-fix state, matching the missing-driver repair (unit 124→127)
