@@ -780,6 +780,68 @@ classify_symlinked_override() {
     fi
 }
 
+# Write-side front door for applying an override onto a target — the
+# counterpart of the read-side resolve_safe_override_for_file. Every cp of
+# override content into the working tree goes through here, so the write-side
+# safety invariant (both symlink gates, anchored on the TRUE resolution root)
+# lives in one place.
+#
+#   checkout_root:   worktree whose target file is written
+#   resolution_root: root that configs/overrides resolve against (the main
+#                    checkout for fallback worktrees). The override
+#                    containment check anchors HERE — never the override's
+#                    own (possibly symlinked) parent dir.
+#   target:          checkout-relative target path
+#   override:        resolution-root-relative override path, or an absolute
+#                    path that must sit under the resolution root (the
+#                    post-commit reapply state records absolute paths)
+#   verbosity:       "loud" (default) — refusals print one stderr line;
+#                    "trace" — refusals log only under GIT_LOCAL_OVERRIDE_TRACE=1
+#                    (routine refusals, e.g. an ignored symlinked override,
+#                    must not print on every commit)
+#
+# Returns: 0 applied, 1 skipped (target or override file missing), 2 refused
+# (symlink gate or anchoring failure), 3 copy failed. Never dies.
+apply_override_to_target() {
+    local checkout_root="$1"
+    local resolution_root="$2"
+    local target="$3"
+    local override="$4"
+    local verbosity="${5:-loud}"
+
+    local refusal=""
+    local override_rel="$override"
+    if [[ "$override" == /* ]]; then
+        override_rel="${override#"$resolution_root"/}"
+        if [[ "$override_rel" == "$override" ]]; then
+            refusal="refusing symlinked override for $target"
+        fi
+    fi
+
+    if [[ -z "$refusal" ]]; then
+        local full_target="$checkout_root/$target"
+        local full_override="$resolution_root/$override_rel"
+
+        [[ -f "$full_override" && -f "$full_target" ]] || return 1
+
+        if ! path_is_symlink_safe "$checkout_root" "$target"; then
+            refusal="refusing symlinked path for $target"
+        elif ! override_path_is_symlink_safe "$resolution_root" "$override_rel" "$checkout_root"; then
+            refusal="refusing symlinked override for $target"
+        else
+            cp "$full_override" "$full_target" 2>/dev/null || return 3
+            return 0
+        fi
+    fi
+
+    if [[ "$verbosity" == "trace" ]]; then
+        local_override_trace_log "apply" "$refusal"
+    else
+        printf 'git-local-override: %s\n' "$refusal" >&2
+    fi
+    return 2
+}
+
 # Emit `git worktree list --porcelain` records NUL-terminated. `-z` (git >=
 # 2.36) is preferred: it is the only form that survives newlines in worktree
 # paths. Older gits fall back to converting the newline-terminated porcelain

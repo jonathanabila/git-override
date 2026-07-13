@@ -145,38 +145,33 @@ clear_post_commit_state() {
 reapply_post_commit_state() {
     local repo_root="$1"
     local state_file=""
-    local entry target override
+    local resolution_root=""
+    local entry target override apply_status
     state_file="$(get_post_commit_state_file "$repo_root" 2>/dev/null || true)"
     [[ -n "$state_file" && -f "$state_file" ]] || return 0
+
+    resolution_root="$(get_resolution_root "$repo_root")"
 
     while IFS= read -r entry || [[ -n "$entry" ]]; do
         [[ -z "$entry" ]] && continue
 
-        # Parse entry: "target|override" (override may be absolute — anchored
-        # at the resolution root by pre-commit)
+        # Parse entry: "target|override" (override is absolute — anchored at
+        # the resolution root by pre-commit; legacy relative entries anchor
+        # at the checkout). The resolver's write-side front door recovers the
+        # resolution-root-relative form so the symlink containment check
+        # anchors on the TRUE root, and logs refusals at trace level only:
+        # refusing is correct but routine here (e.g. an ignored symlinked
+        # override exists), and must not print on every commit.
         target="${entry%%|*}"
         override="${entry#*|}"
         [[ "$override" == /* ]] || override="$repo_root/$override"
 
-        if [[ -f "$override" && -f "$repo_root/$target" ]]; then
-            # $override is absolute (anchored at the resolution root by
-            # pre-commit). Recover the resolution root + relative override so the
-            # symlink containment check anchors on the TRUE root, never the
-            # override's own (possibly symlinked) parent dir.
-            local reapply_resolution_root reapply_override_rel
-            reapply_resolution_root="$(get_resolution_root "$repo_root")"
-            reapply_override_rel="${override#"$reapply_resolution_root"/}"
-            if ! path_is_symlink_safe "$repo_root" "$target" \
-               || [[ "$reapply_override_rel" == "$override" ]] \
-               || ! override_path_is_symlink_safe "$reapply_resolution_root" "$reapply_override_rel" "$repo_root"; then
-                # Refusing is correct but routine (e.g. an ignored symlinked
-                # override exists); log at trace level so every commit does
-                # not print a scary stderr line.
-                local_override_trace_log "reapply" "refusing symlinked override for $target"
-                continue
-            fi
-            cp "$override" "$repo_root/$target"
-        fi
+        apply_status=0
+        apply_override_to_target "$repo_root" "$resolution_root" "$target" "$override" trace \
+            || apply_status=$?
+        # A failed copy aborts (leaving the state file for the next heal);
+        # skips and refusals fall through to the next entry.
+        [[ "$apply_status" -eq 3 ]] && return 1
     done < "$state_file"
 
     rm -f "$state_file"

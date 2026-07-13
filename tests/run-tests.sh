@@ -2949,12 +2949,13 @@ test_post_checkout_applies_optin_symlinked_override() {
     local original="$artifacts/claude-original.txt"
     cp CLAUDE.md "$original"
 
-    # Opt-in OFF: the symlinked override must NOT be applied.
+    # Opt-in OFF: the symlinked override must NOT be applied. (The write-side
+    # front door distinguishes override refusals from target refusals.)
     local output_off
     output_off=$(.git/hooks/post-checkout "" "" "1" 2>&1) || true
     local off_ok=""
     if cmp -s CLAUDE.md "$original" \
-       && [[ "$output_off" == *"refusing symlinked path"* ]]; then
+       && [[ "$output_off" == *"refusing symlinked override"* ]]; then
         off_ok="yes"
     fi
 
@@ -4126,6 +4127,67 @@ test_locate_support_file_ladder() {
     fi
 }
 
+# apply_override_to_target is the write-side front door: one function owns
+# the existence checks, both symlink gates, the resolution-root anchoring for
+# absolute override paths, the copy, and the refusal logging. Pin its status
+# contract: 0 applied, 1 skipped, 2 refused, plus loud-vs-trace verbosity.
+test_apply_override_front_door_statuses() {
+    info "Testing apply_override_to_target status contract..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local root
+    root="$(git rev-parse --show-toplevel)"
+
+    echo "# FRONT DOOR CONTENT" > CLAUDE.local.md
+
+    # 0: active override applies.
+    local applied_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        apply_override_to_target "$root" "$root" CLAUDE.md CLAUDE.local.md loud
+    ) || applied_status=$?
+
+    # 1: missing override file is the normal inactive skip.
+    local skipped_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        apply_override_to_target "$root" "$root" CLAUDE.md no-such.local.md loud
+    ) || skipped_status=$?
+
+    # 2 (loud): an absolute override outside the resolution root refuses on
+    # anchoring, with one stderr line.
+    local refused_status=0 refused_output=""
+    refused_output="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        apply_override_to_target "$root" "$root" CLAUDE.md "$CURRENT_TEST_ROOT/outside.local.md" loud 2>&1
+    )" || refused_status=$?
+
+    # 2 (trace): the same refusal stays silent without GIT_LOCAL_OVERRIDE_TRACE.
+    local quiet_status=0 quiet_output=""
+    quiet_output="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        apply_override_to_target "$root" "$root" CLAUDE.md "$CURRENT_TEST_ROOT/outside.local.md" trace 2>&1
+    )" || quiet_status=$?
+
+    if [[ "$applied_status" -eq 0 ]] && grep -q "FRONT DOOR CONTENT" CLAUDE.md \
+       && [[ "$skipped_status" -eq 1 ]] \
+       && [[ "$refused_status" -eq 2 && "$refused_output" == *"refusing symlinked override"* ]] \
+       && [[ "$quiet_status" -eq 2 && -z "$quiet_output" ]]; then
+        pass "Front door statuses and verbosity behave as specified"
+    else
+        fail "Front door contract wrong (applied: $applied_status, skipped: $skipped_status, refused: $refused_status '$refused_output', quiet: $quiet_status '$quiet_output')"
+    fi
+
+    # Restore the tracked target for any later assertions.
+    git checkout -q HEAD -- CLAUDE.md 2>/dev/null || true
+}
+
 # configure_filter_driver owns mode exclusivity: writing one mode must unset
 # the other, so filter.local-override.* never claims both drivers at once.
 test_configure_filter_driver_mode_exclusivity() {
@@ -4230,6 +4292,7 @@ main() {
         test_cli_version \
         test_cli_version_flag \
         test_locate_support_file_ladder \
+        test_apply_override_front_door_statuses \
         test_configure_filter_driver_mode_exclusivity \
         test_sync_filters_preserves_process_optin \
         test_init_config \

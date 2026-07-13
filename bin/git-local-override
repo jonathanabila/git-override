@@ -784,54 +784,45 @@ apply_to_checkout() {
         target="${entry%%|*}"
         override="${entry#*|}"
 
-        full_target="$checkout_root/$target"
-        full_override="$repo_root/$override"
+        local apply_target_start_ms
+        local copy_start_ms
+        local git_add_start_ms
+        local copy_ms
+        local git_add_ms
+        local apply_status
 
-        if [[ -f "$full_override" && -f "$full_target" ]]; then
-            local apply_target_start_ms
-            local copy_start_ms
-            local git_add_start_ms
-            local copy_ms
-            local git_add_ms
+        apply_target_start_ms="$(resolver_now_milliseconds)"
+        copy_start_ms="$apply_target_start_ms"
+        # The resolver's write-side front door owns the symlink gates and the
+        # copy. A refused entry is a benign skip (matching post-checkout and
+        # the filters, with the refusal already printed loud), so later
+        # entries still apply and sync_attributes below keeps attributes
+        # consistent; a missing target/override is the normal inactive case.
+        apply_status=0
+        apply_override_to_target "$checkout_root" "$repo_root" "$target" "$override" loud \
+            || apply_status=$?
+        if [[ "$apply_status" -eq 3 ]]; then
+            die "Failed to apply $override -> $target"
+        elif [[ "$apply_status" -ne 0 ]]; then
+            continue
+        fi
+        copy_ms="$(resolver_elapsed_milliseconds "$copy_start_ms")"
+        # Update index via clean filter so git status sees file as clean
+        git_add_start_ms="$(resolver_now_milliseconds)"
+        git -C "$checkout_root" add -- "$target" 2>/dev/null || true
+        git_add_ms="$(resolver_elapsed_milliseconds "$git_add_start_ms")"
+        ((count++)) || true
 
-            apply_target_start_ms="$(resolver_now_milliseconds)"
-            copy_start_ms="$apply_target_start_ms"
-            # Refuse symlinked targets before cp follows the link (write
-            # side). Overrides are read-side: user-created symlinks pass
-            # behind the local opt-in. A refused entry is a benign skip
-            # (matching post-checkout and the filters), so later entries
-            # still apply and sync_attributes below keeps attributes
-            # consistent.
-            if ! path_is_symlink_safe "$checkout_root" "$target"; then
-                printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
-                continue
-            fi
-            if ! override_path_is_symlink_safe "$repo_root" "$override" "$repo_root"; then
-                printf 'git-local-override: refusing symlinked override for %s\n' "$target" >&2
-                continue
-            fi
-            # Explicit guard: inside `if (subshell)` errexit is suppressed, so
-            # a bare cp failure would be silently absorbed by the caller.
-            cp "$full_override" "$full_target" \
-                || die "Failed to apply $override -> $target"
-            copy_ms="$(resolver_elapsed_milliseconds "$copy_start_ms")"
-            # Update index via clean filter so git status sees file as clean
-            git_add_start_ms="$(resolver_now_milliseconds)"
-            git -C "$checkout_root" add -- "$target" 2>/dev/null || true
-            git_add_ms="$(resolver_elapsed_milliseconds "$git_add_start_ms")"
-            ((count++)) || true
+        local display_target
+        local display_override
+        display_target="$(display_relative_path "$target")"
+        display_override="$(display_relative_path "$override")"
 
-            local display_target
-            local display_override
-            display_target="$(display_relative_path "$target")"
-            display_override="$(display_relative_path "$override")"
-
-            if local_override_trace_enabled; then
-                info "Applied $count/$active_count: $display_target <- $display_override"
-                local_override_trace "Apply timing for $display_target <- $display_override: cp=${copy_ms}ms, git_add=${git_add_ms}ms, total=$(resolver_elapsed_milliseconds "$apply_target_start_ms")ms"
-            else
-                echo "  Applied $count/$active_count: $display_target <- $display_override"
-            fi
+        if local_override_trace_enabled; then
+            info "Applied $count/$active_count: $display_target <- $display_override"
+            local_override_trace "Apply timing for $display_target <- $display_override: cp=${copy_ms}ms, git_add=${git_add_ms}ms, total=$(resolver_elapsed_milliseconds "$apply_target_start_ms")ms"
+        else
+            echo "  Applied $count/$active_count: $display_target <- $display_override"
         fi
     done <<< "$config_entries"
     log_step_duration "Applied overrides" "$step_start_ms"
