@@ -321,6 +321,7 @@ Shared library sourced by all hooks. Key functions:
 - `get_targets_for_override()` - Get all target files for a specific override
 - `get_override_for_file()` - Find the override file for a given target file path; returns an absolute path resolved against the checkout's resolution root
 - `locate_support_file()` - Canonical dev-vs-installed fallback ladder for support files (VERSION, shell-init); lives in the shared resolver, anchored on the resolver's own location
+- `configure_filter_driver()` - Single writer of the `filter.local-override.*` config (in the shared resolver): explicit scope (repo root or `global`), script dir, and mode (`scripts`|`process`); owns mode exclusivity and reads no env switches
 - `override_path_is_symlink_safe()` - Read-side symlink gate for override files (in the shared resolver): delegates to `path_is_symlink_safe` for regular paths; follows a symlinked override only when the user set `git config --local local-override.followSymlinkedOverrides true` AND the symlink is untracked AND it resolves to a regular file. Targets (write side) never use it.
 - `validate_config()` - Validate config format and check for duplicate targets
 

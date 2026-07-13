@@ -1020,22 +1020,39 @@ cmd_sync_filters() {
 
     info "Syncing filter driver configuration..."
 
-    # Configure git filter if missing or legacy relative path
+    # Configure git filter if missing or legacy relative path. The resolver's
+    # configure_filter_driver is the single writer of the driver config. An
+    # existing local filter.process opt-in (experimental, plan 019) is
+    # preserved — refreshed if its path drifted — instead of being silently
+    # reverted to scripts mode with process left dangling in the config.
     common_git_dir="$(get_common_git_dir "$checkout_root")" || die "Unable to resolve git common directory"
-    expected_smudge="$common_git_dir/hooks/local-override-filter-smudge %f"
-    expected_clean="$common_git_dir/hooks/local-override-filter-clean %f"
 
-    filter_smudge="$(git -C "$checkout_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
-    filter_clean="$(git -C "$checkout_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
-
-    if [[ "$filter_smudge" != "$expected_smudge" || "$filter_clean" != "$expected_clean" ]]; then
-        info "Configuring filter driver..."
-        git -C "$checkout_root" config --local filter.local-override.smudge "$expected_smudge"
-        git -C "$checkout_root" config --local filter.local-override.clean "$expected_clean"
-        git -C "$checkout_root" config --local filter.local-override.required false
-        success "Filter driver configured"
+    local existing_process
+    existing_process="$(git -C "$checkout_root" config --local filter.local-override.process 2>/dev/null || echo "")"
+    if [[ -n "$existing_process" ]]; then
+        if [[ "$existing_process" != "$common_git_dir/hooks/local-override-filter-process" ]]; then
+            info "Configuring filter driver (preserving filter.process opt-in)..."
+            configure_filter_driver "$checkout_root" "$common_git_dir/hooks" process \
+                || die "Unable to configure filter driver"
+            success "Filter driver configured (filter.process)"
+        else
+            info "Filter driver already configured (filter.process opt-in)"
+        fi
     else
-        info "Filter driver already configured"
+        expected_smudge="$common_git_dir/hooks/local-override-filter-smudge %f"
+        expected_clean="$common_git_dir/hooks/local-override-filter-clean %f"
+
+        filter_smudge="$(git -C "$checkout_root" config --local filter.local-override.smudge 2>/dev/null || echo "")"
+        filter_clean="$(git -C "$checkout_root" config --local filter.local-override.clean 2>/dev/null || echo "")"
+
+        if [[ "$filter_smudge" != "$expected_smudge" || "$filter_clean" != "$expected_clean" ]]; then
+            info "Configuring filter driver..."
+            configure_filter_driver "$checkout_root" "$common_git_dir/hooks" scripts \
+                || die "Unable to configure filter driver"
+            success "Filter driver configured"
+        else
+            info "Filter driver already configured"
+        fi
     fi
 
     # Read config once for sync_attributes and clear_legacy_skip_worktree

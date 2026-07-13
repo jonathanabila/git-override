@@ -4126,6 +4126,87 @@ test_locate_support_file_ladder() {
     fi
 }
 
+# configure_filter_driver owns mode exclusivity: writing one mode must unset
+# the other, so filter.local-override.* never claims both drivers at once.
+test_configure_filter_driver_mode_exclusivity() {
+    info "Testing configure_filter_driver mode exclusivity..."
+
+    cd "$TEST_REPO"
+
+    local checkout_root drv_dir
+    checkout_root="$(git rev-parse --show-toplevel)"
+    drv_dir="$(git rev-parse --git-common-dir)"
+    [[ "$drv_dir" == /* ]] || drv_dir="$checkout_root/$drv_dir"
+    drv_dir="$drv_dir/hooks"
+
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        configure_filter_driver "$checkout_root" "$drv_dir" process
+    )
+    local p_process p_smudge
+    p_process="$(git config --local filter.local-override.process 2>/dev/null || echo "")"
+    p_smudge="$(git config --local filter.local-override.smudge 2>/dev/null || echo "")"
+
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        configure_filter_driver "$checkout_root" "$drv_dir" scripts
+    )
+    local s_process s_smudge s_clean s_required
+    s_process="$(git config --local filter.local-override.process 2>/dev/null || echo "")"
+    s_smudge="$(git config --local filter.local-override.smudge 2>/dev/null || echo "")"
+    s_clean="$(git config --local filter.local-override.clean 2>/dev/null || echo "")"
+    s_required="$(git config --local filter.local-override.required 2>/dev/null || echo "")"
+
+    if [[ "$p_process" == "$drv_dir/local-override-filter-process" && -z "$p_smudge" \
+       && -z "$s_process" \
+       && "$s_smudge" == "$drv_dir/local-override-filter-smudge %f" \
+       && "$s_clean" == "$drv_dir/local-override-filter-clean %f" \
+       && "$s_required" == "false" ]]; then
+        pass "configure_filter_driver keeps the two modes mutually exclusive"
+    else
+        fail "Mode exclusivity wrong (process round: process='$p_process' smudge='$p_smudge'; scripts round: process='$s_process' smudge='$s_smudge' clean='$s_clean' required='$s_required')"
+    fi
+}
+
+# sync-filters must preserve an existing local filter.process opt-in instead
+# of writing scripts-mode config over it (which used to leave BOTH modes in
+# the config, with process silently winning).
+test_sync_filters_preserves_process_optin() {
+    info "Testing sync-filters preserves the filter.process opt-in..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local checkout_root drv_dir
+    checkout_root="$(git rev-parse --show-toplevel)"
+    drv_dir="$(git rev-parse --git-common-dir)"
+    [[ "$drv_dir" == /* ]] || drv_dir="$checkout_root/$drv_dir"
+    drv_dir="$drv_dir/hooks"
+
+    git config --local filter.local-override.process "$drv_dir/local-override-filter-process"
+    git config --local --unset-all filter.local-override.smudge 2>/dev/null || true
+    git config --local --unset-all filter.local-override.clean 2>/dev/null || true
+
+    local output
+    output="$(git-local-override sync-filters 2>&1)" || {
+        fail "sync-filters failed with a process opt-in configured: $output"
+        return
+    }
+
+    local process smudge
+    process="$(git config --local filter.local-override.process 2>/dev/null || echo "")"
+    smudge="$(git config --local filter.local-override.smudge 2>/dev/null || echo "")"
+
+    if [[ "$process" == "$drv_dir/local-override-filter-process" && -z "$smudge" \
+       && "$output" == *"filter.process opt-in"* ]]; then
+        pass "sync-filters preserved the process opt-in without adding scripts config"
+    else
+        fail "Process opt-in not preserved (process: '$process', smudge: '$smudge', output: $output)"
+    fi
+}
+
 main() {
     local test_fn
     local test_exit
@@ -4149,6 +4230,8 @@ main() {
         test_cli_version \
         test_cli_version_flag \
         test_locate_support_file_ladder \
+        test_configure_filter_driver_mode_exclusivity \
+        test_sync_filters_preserves_process_optin \
         test_init_config \
         test_list_no_config \
         test_add_override \

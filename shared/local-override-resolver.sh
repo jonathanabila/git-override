@@ -208,6 +208,51 @@ is_managed_wrapper_hook() {
     grep -qxF "$marker" "$hook_file" 2>/dev/null
 }
 
+# Single writer for the filter.local-override.* driver config. Every site
+# that configures the driver — install.sh (repo and template), the CLI's
+# sync-filters, and the hooks' self-heal — goes through here, so the driver
+# contract (script names, the %f convention, required=false, and which mode
+# is active) lives in one place.
+#
+#   scope_target: a repo checkout root (written with `--local` there), or the
+#                 literal string "global" (written with `--global`)
+#   script_dir:   absolute directory holding the filter scripts
+#   mode:         "scripts" (per-file %f smudge/clean, the default) or
+#                 "process" (the experimental long-running filter, plan 019)
+#
+# Owns mode exclusivity: configuring one mode unsets the other, so the config
+# never claims both drivers at once. Reads no environment switches — callers
+# resolve the GIT_LOCAL_OVERRIDE_FILTER_PROCESS opt-in themselves. Prints
+# nothing; returns non-zero on the first failed write (return-non-zero
+# contract: callers choose fatal vs skip).
+configure_filter_driver() {
+    local scope_target="$1"
+    local script_dir="$2"
+    local mode="${3:-scripts}"
+
+    local git_cfg
+    if [[ "$scope_target" == "global" ]]; then
+        git_cfg=(git config --global)
+    else
+        git_cfg=(git -C "$scope_target" config --local)
+    fi
+
+    if [[ "$mode" == "process" ]]; then
+        "${git_cfg[@]}" --unset-all filter.local-override.smudge 2>/dev/null || true
+        "${git_cfg[@]}" --unset-all filter.local-override.clean 2>/dev/null || true
+        "${git_cfg[@]}" filter.local-override.process \
+            "$script_dir/local-override-filter-process" || return 1
+    else
+        "${git_cfg[@]}" --unset-all filter.local-override.process 2>/dev/null || true
+        "${git_cfg[@]}" filter.local-override.smudge \
+            "$script_dir/local-override-filter-smudge %f" || return 1
+        "${git_cfg[@]}" filter.local-override.clean \
+            "$script_dir/local-override-filter-clean %f" || return 1
+    fi
+
+    "${git_cfg[@]}" filter.local-override.required false || return 1
+}
+
 # Canonical attributes-rewrite core. Preserves foreign lines in
 # .git/info/attributes, drops the managed `filter=local-override` block, and
 # regenerates it from the given `target|override` config entries (deduped).

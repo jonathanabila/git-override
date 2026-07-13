@@ -281,15 +281,11 @@ maybe_self_heal_filter_driver() {
         chmod +x "$dest_dir/$heal_file" 2>/dev/null || true
     done
 
-    # Same config cmd_sync_filters and install.sh write. Config not yet set
-    # (partial failure above returns before this), so the gate retries the
-    # heal on the next hook run if anything here fails.
-    if ! git -C "$repo_root" config --local filter.local-override.smudge \
-            "$dest_dir/local-override-filter-smudge %f" 2>/dev/null \
-       || ! git -C "$repo_root" config --local filter.local-override.clean \
-            "$dest_dir/local-override-filter-clean %f" 2>/dev/null \
-       || ! git -C "$repo_root" config --local filter.local-override.required \
-            false 2>/dev/null; then
+    # The resolver's configure_filter_driver is the single writer of the
+    # driver config (same layout install.sh and sync-filters produce). Config
+    # not yet set (partial failure above returns before this), so the gate
+    # retries the heal on the next hook run if anything here fails.
+    if ! configure_filter_driver "$repo_root" "$dest_dir" scripts 2>/dev/null; then
         local_override_trace_log "self-heal" "unable to write filter driver config; skipping"
         return 0
     fi
