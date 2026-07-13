@@ -1125,6 +1125,69 @@ test_readonly_cli_full_discovery_without_stamp() {
     fi
 }
 
+test_discover_config_files_hot_then_full() {
+    info "Testing the resolver hot-then-full discovery kernel directly..."
+
+    cd "$TEST_REPO"
+    create_config
+    git add .local-overrides.yaml
+    git commit -q -m "Add override config"
+
+    # sync-filters runs full discovery and writes the stamp the kernel trusts.
+    git-local-override sync-filters >/dev/null 2>&1
+
+    # Runs the kernel in a fresh subshell against the sourced resolver, then
+    # prints the cache it left populated. Trace + cache listing share stdout.
+    run_kernel() (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        export GIT_LOCAL_OVERRIDE_TRACE=1
+        discover_config_files_hot_then_full "$TEST_REPO" "$TEST_REPO" 2>&1
+        GIT_LOCAL_OVERRIDE_TRACE="" get_cached_config_files "$TEST_REPO" 2>/dev/null
+        clear_config_files_cache
+    )
+
+    local failures=""
+    local output=""
+
+    # (a) Matching stamp: one hot pass, no full fallback.
+    output="$(run_kernel)"
+    if [[ "$output" != *"strategy=hot"* ]] || [[ "$output" == *"strategy=full"* ]]; then
+        failures="$failures matching-stamp-not-hot-only"
+    fi
+
+    # (b) Stamp drift: a new gitignored config the hot walk cannot see, plus a
+    # stamp-busting edit to the tracked root config, must trigger the full
+    # fallback and leave the full result cached.
+    mkdir -p sub
+    echo "# original notes" > sub/notes.md
+    git add sub/notes.md
+    git commit -q -m "Add tracked subdir target"
+    cat > sub/.local-overrides.yaml << 'EOF'
+pattern: ".local"
+files:
+  - override: notes.local.md
+    replaces:
+      - notes.md
+EOF
+    echo "sub/.local-overrides.yaml" >> .gitignore
+    printf '\n# stamp-busting comment\n' >> .local-overrides.yaml
+
+    output="$(run_kernel)"
+    if [[ "$output" != *"strategy=full"* ]]; then
+        failures="$failures drift-no-full-fallback"
+    fi
+    if [[ "$output" != *"sub/.local-overrides.yaml"* ]]; then
+        failures="$failures drift-cache-missing-new-config"
+    fi
+
+    if [[ -z "$failures" ]]; then
+        pass "Kernel serves hot on a matching stamp and falls back to a full cache on drift"
+    else
+        fail "Kernel behavior mismatches:$failures (last output: $output)"
+    fi
+}
+
 test_apply_writes_config_stamp() {
     info "Testing apply writes the config stamp so the hot path can trust it..."
 
@@ -3937,6 +4000,7 @@ main() {
         test_readonly_cli_hot_discovery_on_matching_stamp \
         test_readonly_cli_falls_back_to_full_on_stamp_mismatch \
         test_readonly_cli_full_discovery_without_stamp \
+        test_discover_config_files_hot_then_full \
         test_apply_writes_config_stamp \
         test_status_command \
         test_status_recognizes_filter_process_mode \

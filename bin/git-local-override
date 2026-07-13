@@ -266,13 +266,7 @@ cache_config_files_readonly() {
         return 0
     fi
 
-    # Hot first so config_stamp_matches's compute_config_stamp reads the hot
-    # cache (cache=hit) instead of triggering a throwaway uncached discovery.
-    cache_config_files "$resolution_root" hot "$(get_stamped_config_paths "$checkout_root")"
-    if ! config_stamp_matches "$checkout_root" "$resolution_root"; then
-        clear_config_files_cache
-        cache_config_files "$resolution_root"
-    fi
+    discover_config_files_hot_then_full "$checkout_root" "$resolution_root"
 }
 
 cmd_version() {

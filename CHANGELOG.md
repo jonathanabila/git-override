@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The hot-then-full discovery kernel now lives in the shared resolver**: the "cache hot with stamped paths → re-check the config stamp → fall back to a full walk on drift" sequence read-only CLI commands use was implemented inline in the CLI's `cache_config_files_readonly`. It is now a resolver helper, `discover_config_files_hot_then_full`, that the CLI delegates to — behavior-identical (same trace lines, same walk counts), making the resolver the documented home of the pattern; the post-checkout hook deliberately keeps its own woven-in variant because its drift path also re-syncs attributes and writes the stamp (unit 123→124)
+
 - **`list` and `doctor` now share one symlinked-override classifier**: the two commands each re-derived the followed / ignored / tracked-refused / dangling state of a symlinked override independently and had already begun to drift. A new resolver helper, `classify_symlinked_override`, returns a single state token that both commands map onto their existing display strings — output is byte-identical to before; this is a pure extraction so future states are added once and reach both commands (unit 122→123)
 
 ### Fixed

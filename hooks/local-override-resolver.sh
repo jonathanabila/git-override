@@ -450,6 +450,25 @@ get_stamped_config_paths() {
     done < "$stamp_file"
 }
 
+# Populate the discovery cache for a read-only consumer: hot mode (non-ignored
+# tree ∪ stamped gitignored configs) first, then fall back to a full walk if the
+# config stamp no longer matches. Leaves the cache populated. Callers that mutate
+# config files must NOT use this (they need an unconditional full walk).
+# Hot first so config_stamp_matches's compute_config_stamp reads the hot
+# cache (cache=hit) instead of triggering a throwaway uncached discovery.
+# $1 = checkout root (stamp location), $2 = resolution root (config content).
+# NOTE: post-checkout deliberately does NOT use this — its drift path also
+# re-syncs attributes and writes the stamp, which this kernel does not do.
+discover_config_files_hot_then_full() {
+    local checkout_root="$1"
+    local resolution_root="$2"
+    cache_config_files "$resolution_root" hot "$(get_stamped_config_paths "$checkout_root")"
+    if ! config_stamp_matches "$checkout_root" "$resolution_root"; then
+        clear_config_files_cache
+        cache_config_files "$resolution_root"
+    fi
+}
+
 trim_config_value() {
     local value="$1"
 
