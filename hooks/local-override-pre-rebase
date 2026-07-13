@@ -51,11 +51,11 @@ main() {
         [[ -z "$entry" ]] && continue
         target="${entry%%|*}"
 
-        # Restore tracked HEAD content in both index and working tree.
-        # Updating only the working tree can still leave index/worktree mismatches.
-        if git -C "$repo_root" cat-file -e "HEAD:$target" 2>/dev/null; then
-            git -C "$repo_root" -c filter.local-override.smudge= checkout -q HEAD -- "$target" 2>/dev/null || true
-        fi
+        # Restore tracked HEAD content in both index and working tree through
+        # the shared front door (updating only the working tree can still
+        # leave index/worktree mismatches). A refused or failed target does
+        # not block the rebase; the front door prints the refusal.
+        restore_target_to_head "$repo_root" "$target" full loud || true
     done <<< "$config_entries"
 
     return 0

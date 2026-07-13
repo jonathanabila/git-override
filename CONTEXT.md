@@ -68,9 +68,10 @@ The git smudge/clean (or experimental process) configuration that makes git
 consider targets clean while overrides are applied.
 
 **Front door**:
-The one resolver function a read (serve override content) or write (apply
-override to target) must pass through; owns the symlink gates and
-resolution-root anchoring.
+The one resolver function a read (serve override content), write (apply
+override to target), or restore (put tracked HEAD content back) must pass
+through; owns the symlink gates, resolution-root anchoring, and — on the
+restore side — filter suppression that works in both filter modes.
 
 **Support file**:
 A shared data file an entry point must locate at runtime (resolver,

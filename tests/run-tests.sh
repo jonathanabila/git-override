@@ -4263,6 +4263,141 @@ test_apply_override_front_door_statuses() {
     git checkout -q HEAD -- CLAUDE.md 2>/dev/null || true
 }
 
+# restore_target_to_head is the restore-side front door: one function owns
+# the HEAD-existence guard, the target symlink gate, mode-proof filter
+# suppression, and the unconditional worktree write (a blob redirect, never
+# `git checkout`, which no-ops on stat-clean applied overrides). Pin its
+# status contract: 0 restored, 1 skipped (not in HEAD), 2 refused, plus the
+# worktree-vs-full mode split and loud-vs-trace verbosity.
+test_restore_front_door_statuses() {
+    info "Testing restore_target_to_head status contract..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    local root
+    root="$(git rev-parse --show-toplevel)"
+
+    # 0 (full): override bytes on disk and staged; restore puts HEAD bytes in
+    # both the working tree and the index.
+    echo "# OVERRIDE BYTES" > CLAUDE.md
+    git add CLAUDE.md
+    local full_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        restore_target_to_head "$root" CLAUDE.md full loud
+    ) || full_status=$?
+    local full_staged_drift=""
+    full_staged_drift="$(git diff --cached --name-only -- CLAUDE.md)"
+
+    # 0 (worktree): HEAD bytes land on disk but a staged change survives.
+    echo "# STAGED CANONICAL EDIT" > AGENTS.md
+    git add AGENTS.md
+    echo "# OVERRIDE BYTES" > AGENTS.md
+    local wt_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        restore_target_to_head "$root" AGENTS.md worktree loud
+    ) || wt_status=$?
+    local wt_staged_kept=1
+    git show :AGENTS.md | grep -q "STAGED CANONICAL EDIT" || wt_staged_kept=0
+
+    # 1: a target absent from HEAD has nothing to restore from.
+    echo "new" > brand-new.md
+    local skipped_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        restore_target_to_head "$root" brand-new.md full loud
+    ) || skipped_status=$?
+
+    # 2 (loud/trace): a symlinked target is refused — the redirect write
+    # would follow the link, so this gate is load-bearing.
+    rm CLAUDE.md
+    ln -s AGENTS.md CLAUDE.md
+    local refused_status=0 refused_output=""
+    refused_output="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        restore_target_to_head "$root" CLAUDE.md full loud 2>&1
+    )" || refused_status=$?
+    local quiet_status=0 quiet_output=""
+    quiet_output="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        restore_target_to_head "$root" CLAUDE.md full trace 2>&1
+    )" || quiet_status=$?
+
+    # Clean up the symlink and scratch files for later assertions.
+    rm -f CLAUDE.md brand-new.md
+    git checkout -q HEAD -- CLAUDE.md AGENTS.md 2>/dev/null || true
+    git add CLAUDE.md AGENTS.md 2>/dev/null || true
+
+    if [[ "$full_status" -eq 0 ]] && grep -q "Original CLAUDE.md content" CLAUDE.md \
+       && [[ -z "$full_staged_drift" ]] \
+       && [[ "$wt_status" -eq 0 && "$wt_staged_kept" -eq 1 ]] \
+       && [[ "$skipped_status" -eq 1 ]] \
+       && [[ "$refused_status" -eq 2 && "$refused_output" == *"refusing symlinked path"* ]] \
+       && [[ "$quiet_status" -eq 2 && -z "$quiet_output" ]]; then
+        pass "Restore front door statuses, modes, and verbosity behave as specified"
+    else
+        fail "Restore front door contract wrong (full: $full_status drift='$full_staged_drift', worktree: $wt_status kept=$wt_staged_kept, skipped: $skipped_status, refused: $refused_status '$refused_output', quiet: $quiet_status '$quiet_output')"
+    fi
+}
+
+# Regression: remove used `git checkout HEAD --` with no filter suppression,
+# so with an active filter driver the smudge filter served the override right
+# back into the "restored" file — remove printed "Restored original content"
+# while override bytes stayed on disk.
+test_remove_restores_original_with_active_filter() {
+    info "Testing remove restores the original under an active filter driver..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# LOCAL FILTER CONTENT" > CLAUDE.local.md
+    git-local-override sync-filters > /dev/null 2>&1
+    git-local-override apply > /dev/null 2>&1
+
+    if ! grep -q "LOCAL FILTER CONTENT" CLAUDE.md; then
+        fail "Setup failed: override was not applied"
+        return
+    fi
+
+    git-local-override remove CLAUDE.md > /dev/null 2>&1
+
+    if grep -q "Original CLAUDE.md content" CLAUDE.md && [[ -f CLAUDE.local.md ]]; then
+        pass "remove restores tracked content even with an active smudge filter"
+    else
+        fail "remove left override content in the working tree (content: $(head -1 CLAUDE.md))"
+    fi
+}
+
+# The restore front door's HEAD-existence guard replaced remove's index
+# (ls-files) guard: a staged deletion of a managed target no longer skips the
+# restore — remove now puts the tracked content back (remove means "stop
+# overriding, restore the original"), undoing the staged deletion.
+test_remove_restores_staged_deletion() {
+    info "Testing remove restores a target whose deletion was staged..."
+
+    cd "$TEST_REPO"
+    create_config
+
+    echo "# LOCAL" > CLAUDE.local.md
+    git rm -q CLAUDE.md
+
+    git-local-override remove CLAUDE.md > /dev/null 2>&1
+
+    if [[ -f CLAUDE.md ]] && grep -q "Original CLAUDE.md content" CLAUDE.md \
+       && git ls-files --error-unmatch CLAUDE.md > /dev/null 2>&1; then
+        pass "remove resurrects a staged-deleted target with tracked content"
+    else
+        fail "remove did not restore the staged-deleted target"
+    fi
+}
+
 # configure_filter_driver owns mode exclusivity: writing one mode must unset
 # the other, so filter.local-override.* never claims both drivers at once.
 test_configure_filter_driver_mode_exclusivity() {
@@ -4370,6 +4505,9 @@ main() {
         test_precommit_plan_restores_grouping \
         test_staged_blob_matches_override_predicate \
         test_apply_override_front_door_statuses \
+        test_restore_front_door_statuses \
+        test_remove_restores_original_with_active_filter \
+        test_remove_restores_staged_deletion \
         test_configure_filter_driver_mode_exclusivity \
         test_sync_filters_preserves_process_optin \
         test_init_config \

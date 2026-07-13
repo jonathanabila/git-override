@@ -150,35 +150,44 @@ $config_entry"
         [[ -z "$override_file" ]] && continue
 
         # Get all targets for this override file
-        local target_file
+        local target_file restore_status
         while IFS= read -r target_file || [[ -n "$target_file" ]]; do
             [[ -z "$target_file" ]] && continue
 
-            # Check if file exists in HEAD (not a new file)
-            if git -C "$repo_root" cat-file -e "HEAD:$target_file" 2>/dev/null; then
-                if ! path_is_symlink_safe "$repo_root" "$target_file"; then
-                    printf 'git-local-override: refusing symlinked path for %s\n' "$target_file" >&2
-                    continue
-                fi
-                # Restore original from git
-                git -C "$repo_root" show "HEAD:$target_file" > "$repo_root/$target_file"
+            # Restore original content (working tree + index) through the
+            # shared front door: it owns the HEAD-existence guard, the
+            # symlink gate, and mode-proof filter suppression.
+            restore_status=0
+            restore_target_to_head "$repo_root" "$target_file" full loud \
+                || restore_status=$?
 
-                # Re-stage the restored file
-                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" add -- "$target_file"
-            elif git -C "$repo_root" cat-file -e ":$target_file" 2>/dev/null; then
-                # New target: staged but with no HEAD canonical content. There
-                # is no tracked blob to restore from, so if what's staged is the
-                # local override, committing it would leak local content into
-                # history — refuse. (git add always creates a stage-0 index blob,
-                # so the leak is detected by comparing that blob to the override,
-                # not by the index being absent.)
-                if staged_blob_matches_override "$repo_root" "$target_file" "$resolution_root/$override_file"; then
-                    printf 'git-local-override: refusing to commit new managed target %s: it holds local override content and has no tracked canonical version. Provide canonical content (git add the intended tracked file) before committing, or remove it from .local-overrides.yaml.\n' "$target_file" >&2
+            case "$restore_status" in
+                0|2)
+                    # Restored, or refused with the message already printed
+                    # (the refused target is skipped, matching the old gate).
+                    ;;
+                1)
+                    # Absent from HEAD: a new target with no canonical content
+                    # to restore. If what's staged is the local override,
+                    # committing it would leak local content into history —
+                    # refuse. (git add always creates a stage-0 index blob, so
+                    # the leak is detected by comparing that blob to the
+                    # override, not by the index being absent.)
+                    if git -C "$repo_root" cat-file -e ":$target_file" 2>/dev/null \
+                        && staged_blob_matches_override "$repo_root" "$target_file" "$resolution_root/$override_file"; then
+                        printf 'git-local-override: refusing to commit new managed target %s: it holds local override content and has no tracked canonical version. Provide canonical content (git add the intended tracked file) before committing, or remove it from .local-overrides.yaml.\n' "$target_file" >&2
+                        return 1
+                    fi
+                    # A new target's genuine canonical content is committed
+                    # as-is.
+                    ;;
+                *)
+                    # Restore failed mid-commit: fail closed. Continuing would
+                    # commit staged override content for this target.
+                    printf 'git-local-override: failed to restore %s from HEAD; aborting commit\n' "$target_file" >&2
                     return 1
-                fi
-            fi
-            # If a new target's staged content is genuine canonical content
-            # (not the override), it is committed as-is.
+                    ;;
+            esac
         done < <(while IFS= read -r entry || [[ -n "$entry" ]]; do
             [[ -z "$entry" ]] && continue
             target="${entry%%|*}"

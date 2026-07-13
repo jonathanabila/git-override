@@ -842,6 +842,67 @@ apply_override_to_target() {
     return 2
 }
 
+# Restore-side front door — the counterpart of apply_override_to_target for
+# putting tracked HEAD content back onto a target. Every HEAD-restore of a
+# managed target goes through here, so the restore invariants (the target
+# symlink gate, filter suppression that works in BOTH filter modes, and an
+# unconditional worktree write) live in one place.
+#
+# The worktree write is a blob redirect (`git show`), never `git checkout`:
+# an applied override is stat-clean by construction (the clean-filter
+# roundtrip), and checkout trusts the stat cache — it exits 0 without
+# rewriting the file, leaving override bytes in place. The redirect writes
+# unconditionally; that is also why the symlink gate is load-bearing here
+# (a redirect writes THROUGH a symlinked target where checkout would
+# replace it).
+#
+#   checkout_root: worktree whose target is restored
+#   target:        checkout-relative target path
+#   mode:          "worktree" — write HEAD bytes to the working tree only,
+#                  leaving index state (e.g. a user's staged change) intact;
+#                  "full" — working tree AND index. The re-stage runs under
+#                  GIT_LOCAL_OVERRIDE_DISABLE=1, which both filter modes
+#                  honor (a `-c filter.local-override.smudge=` override
+#                  suppresses nothing in process mode — git never consults
+#                  the smudge key when filter.<driver>.process is set)
+#   verbosity:     "loud" (default) — refusals print one stderr line;
+#                  "trace" — refusals log only under GIT_LOCAL_OVERRIDE_TRACE=1
+#
+# Returns: 0 restored, 1 skipped (target absent from HEAD — nothing to
+# restore from), 2 refused (symlink gate), 3 restore failed. Never dies.
+restore_target_to_head() {
+    local checkout_root="$1"
+    local target="$2"
+    local mode="$3"
+    local verbosity="${4:-loud}"
+
+    git -C "$checkout_root" cat-file -e "HEAD:$target" 2>/dev/null || return 1
+
+    if ! path_is_symlink_safe "$checkout_root" "$target"; then
+        if [[ "$verbosity" == "trace" ]]; then
+            local_override_trace_log "restore" "refusing symlinked path for $target"
+        else
+            printf 'git-local-override: refusing symlinked path for %s\n' "$target" >&2
+        fi
+        return 2
+    fi
+
+    local full_target="$checkout_root/$target"
+    local parent_dir=""
+    parent_dir="$(dirname "$full_target")"
+    if [[ ! -d "$parent_dir" ]]; then
+        mkdir -p "$parent_dir" 2>/dev/null || return 3
+    fi
+
+    git -C "$checkout_root" show "HEAD:$target" > "$full_target" 2>/dev/null || return 3
+
+    if [[ "$mode" == "full" ]]; then
+        GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$checkout_root" add -- "$target" 2>/dev/null || return 3
+    fi
+
+    return 0
+}
+
 # Emit `git worktree list --porcelain` records NUL-terminated. `-z` (git >=
 # 2.36) is preferred: it is the only form that survives newlines in worktree
 # paths. Older gits fall back to converting the newline-terminated porcelain

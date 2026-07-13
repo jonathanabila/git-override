@@ -28,7 +28,7 @@ README="README.md"
 
 # Internal/undocumented dispatch cases that are intentionally NOT in the README
 # command table (help lists the two filters; the README omits them by design).
-INTERNAL_COMMANDS="_get-active-targets filter-smudge filter-clean"
+INTERNAL_COMMANDS="_get-active-targets _restore-active-targets filter-smudge filter-clean"
 
 fail=0
 

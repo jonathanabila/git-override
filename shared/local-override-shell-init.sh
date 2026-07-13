@@ -34,12 +34,7 @@ git() {
         return $?
     fi
 
-    if [[ -z "$(git-local-override _get-active-targets 2>/dev/null)" ]]; then
-        command git "$@"
-        return $?
-    fi
-
-    # Get active override targets
+    # Get active override targets (one call; empty means nothing to intercept)
     local targets
     targets="$(git-local-override _get-active-targets 2>/dev/null)"
 
@@ -48,12 +43,12 @@ git() {
         return $?
     fi
 
-    # Before checkout: restore originals for each active override target
-    local target
-    while IFS= read -r target; do
-        [[ -z "$target" ]] && continue
-        command git -c filter.local-override.smudge= checkout HEAD -- "$target" 2>/dev/null || true
-    done <<< "$targets"
+    # Before checkout: restore originals for all active targets via the CLI's
+    # restore front door. One anchored call — the old per-target
+    # `git checkout HEAD --` loop resolved pathspecs against the user's cwd
+    # (silently failing from subdirectories) and its smudge suppression did
+    # not cover the experimental process filter mode.
+    git-local-override _restore-active-targets 2>/dev/null || true
 
     # Run the actual git command
     local git_status=0
