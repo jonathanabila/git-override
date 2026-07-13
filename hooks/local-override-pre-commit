@@ -22,18 +22,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=local-override-lib.sh
 source "$SCRIPT_DIR/local-override-lib.sh"
 
-# Usage: staged_contains <needle> <staged-path>...
-# True when <needle> exactly matches one of the staged paths.
-staged_contains() {
-    local needle="$1"
-    shift
-    local staged_path=""
-    for staged_path in "$@"; do
-        [[ "$staged_path" == "$needle" ]] && return 0
-    done
-    return 1
-}
-
 main() {
     local repo_root
     local resolution_root
@@ -132,52 +120,23 @@ $config_entry"
     # for post-commit to undo (same shape as the rebase bail above); the
     # override remains a .local file and post-checkout/apply/smudge re-serve it.
     if is_merge_or_cherry_pick_in_progress "$repo_root"; then
-        local mcp_entry mcp_target mcp_override mcp_override_abs mcp_staged_tmp
-        while IFS= read -r mcp_entry || [[ -n "$mcp_entry" ]]; do
-            [[ -z "$mcp_entry" ]] && continue
-            mcp_target="${mcp_entry%%|*}"
-            mcp_override="${mcp_entry#*|}"
-
-            staged_contains "$mcp_target" "${staged_files[@]}" || continue
-
-            mcp_override_abs="$resolution_root/$mcp_override"
-            [[ -f "$mcp_override_abs" ]] || continue
-
-            mcp_staged_tmp="$(mktemp)"
-            GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" show ":$mcp_target" > "$mcp_staged_tmp" 2>/dev/null || true
-            if cmp -s "$mcp_staged_tmp" "$mcp_override_abs"; then
-                rm -f "$mcp_staged_tmp"
-                printf 'git-local-override: refusing to commit managed target %s during a merge/cherry-pick: its staged content is byte-identical to the local override %s. The conflicted file likely still held override content when it was added. Write the intended resolution into %s, `git add` it, then retry the commit.\n' "$mcp_target" "$mcp_override" "$mcp_target" >&2
-                return 1
-            fi
-            rm -f "$mcp_staged_tmp"
-        done <<< "$relevant_entries"
+        local leak_entry=""
+        leak_entry="$(precommit_find_merge_leak "$repo_root" "$resolution_root" \
+            "$relevant_entries" "${staged_files[@]}" || true)"
+        if [[ -n "$leak_entry" ]]; then
+            printf 'git-local-override: refusing to commit managed target %s during a merge/cherry-pick: its staged content is byte-identical to the local override %s. The conflicted file likely still held override content when it was added. Write the intended resolution into %s, `git add` it, then retry the commit.\n' \
+                "${leak_entry%%|*}" "${leak_entry#*|}" "${leak_entry%%|*}" >&2
+            return 1
+        fi
 
         return 0
     fi
 
-    # First pass: find which override files have staged targets
-    # We need to restore ALL targets for each such override file
+    # First pass: the resolver's grouped-restore decider picks which override
+    # files have staged targets; ALL targets of each are restored below.
     local entry override
-
-    while IFS= read -r entry || [[ -n "$entry" ]]; do
-        [[ -z "$entry" ]] && continue
-
-        target="${entry%%|*}"
-        override="${entry#*|}"
-
-        # Check if this target is staged
-        if staged_contains "$target" "${staged_files[@]}"; then
-            # Check if override file exists
-            if [[ -f "$resolution_root/$override" ]]; then
-                # Add to list if not already present
-                if [[ $'\n'"$overrides_to_restore"$'\n' != *$'\n'"$override"$'\n'* ]]; then
-                    overrides_to_restore="$overrides_to_restore
-$override"
-                fi
-            fi
-        fi
-    done <<< "$relevant_entries"
+    overrides_to_restore="$(precommit_plan_restores "$resolution_root" \
+        "$relevant_entries" "${staged_files[@]}")"
 
     # Quick exit if no overrides need restoring
     [[ -z "$overrides_to_restore" ]] && return 0
@@ -213,16 +172,10 @@ $override"
                 # history — refuse. (git add always creates a stage-0 index blob,
                 # so the leak is detected by comparing that blob to the override,
                 # not by the index being absent.)
-                local override_abs="$resolution_root/$override_file"
-                local staged_tmp=""
-                staged_tmp="$(mktemp)"
-                GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" show ":$target_file" > "$staged_tmp" 2>/dev/null || true
-                if [[ -f "$override_abs" ]] && cmp -s "$staged_tmp" "$override_abs"; then
-                    rm -f "$staged_tmp"
+                if staged_blob_matches_override "$repo_root" "$target_file" "$resolution_root/$override_file"; then
                     printf 'git-local-override: refusing to commit new managed target %s: it holds local override content and has no tracked canonical version. Provide canonical content (git add the intended tracked file) before committing, or remove it from .local-overrides.yaml.\n' "$target_file" >&2
                     return 1
                 fi
-                rm -f "$staged_tmp"
             fi
             # If a new target's staged content is genuine canonical content
             # (not the override), it is committed as-is.

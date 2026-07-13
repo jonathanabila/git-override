@@ -1618,6 +1618,103 @@ is_merge_or_cherry_pick_in_progress() {
     return 1
 }
 
+# Pre-commit deciders. The pre-commit hook's branching — which overrides get
+# a grouped restore, and whether a staged managed target is leaking override
+# bytes — lives here as directly callable functions (same split as the
+# smudge/clean filter cores); the hook keeps only git mutations and
+# user-facing messages.
+
+# Usage: staged_contains <needle> <staged-path>...
+# True when <needle> exactly matches one of the staged paths.
+staged_contains() {
+    local needle="$1"
+    shift
+    local staged_path=""
+    for staged_path in "$@"; do
+        [[ "$staged_path" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+# Byte-exact leak predicate: is the stage-0 blob of <target> identical to the
+# override file? While a path is unmerged (or has no HEAD version), the clean
+# filter passes working-tree bytes through during `git add`, so a blind add
+# of an unedited conflicted/new file stages override bytes verbatim — this is
+# how pre-commit detects it. File-based cmp, never $(...): command
+# substitution strips trailing newlines and cannot carry NUL. Returns 1 when
+# the override file does not exist.
+staged_blob_matches_override() {
+    local repo_root="$1"
+    local target="$2"
+    local override_abs="$3"
+    local staged_tmp=""
+
+    [[ -f "$override_abs" ]] || return 1
+
+    staged_tmp="$(mktemp)"
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git -C "$repo_root" show ":$target" > "$staged_tmp" 2>/dev/null || true
+    if cmp -s "$staged_tmp" "$override_abs"; then
+        rm -f "$staged_tmp"
+        return 0
+    fi
+    rm -f "$staged_tmp"
+    return 1
+}
+
+# Grouped-restore decider: given the effective `target|override` entries and
+# the staged paths, print the unique override files (resolution-root-relative)
+# that have at least one staged target and an existing override file. If ANY
+# target in a group is staged, ALL its targets are restored — callers expand
+# each printed override back to its targets via the entries.
+# Usage: precommit_plan_restores <resolution_root> <entries> <staged-path>...
+precommit_plan_restores() {
+    local resolution_root="$1"
+    local entries="$2"
+    shift 2
+
+    local entry target override seen=""
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+        target="${entry%%|*}"
+        override="${entry#*|}"
+
+        staged_contains "$target" "$@" || continue
+        [[ -f "$resolution_root/$override" ]] || continue
+        if [[ $'\n'"$seen"$'\n' != *$'\n'"$override"$'\n'* ]]; then
+            seen="$seen
+$override"
+            printf '%s\n' "$override"
+        fi
+    done <<< "$entries"
+}
+
+# Merge/cherry-pick backstop decider: print `target|override` for the first
+# staged managed target whose staged blob is byte-identical to its override
+# (the blind-`git add`-of-override-content case); print nothing and return 1
+# when no staged target leaks. The caller owns the refusal message.
+# Usage: precommit_find_merge_leak <repo_root> <resolution_root> <entries> <staged-path>...
+precommit_find_merge_leak() {
+    local repo_root="$1"
+    local resolution_root="$2"
+    local entries="$3"
+    shift 3
+
+    local entry target override
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -z "$entry" ]] && continue
+        target="${entry%%|*}"
+        override="${entry#*|}"
+
+        staged_contains "$target" "$@" || continue
+        if staged_blob_matches_override "$repo_root" "$target" "$resolution_root/$override"; then
+            printf '%s|%s\n' "$target" "$override"
+            return 0
+        fi
+    done <<< "$entries"
+
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Smudge/clean filter cores.
 #

@@ -340,6 +340,7 @@ Called before commit. Key behavior:
 
 - Checks if staged files have local overrides
 - **Grouped restore**: If ANY target in a group is staged, ALL targets in that group are restored
+- The decisions live in the shared resolver as directly testable functions — `precommit_plan_restores` (grouped-restore plan), `staged_blob_matches_override` (byte-exact leak predicate), `precommit_find_merge_leak` (merge/cherry-pick backstop) — the hook keeps only git mutations and messages
 - Restores original content from git
 - Re-stages the restored content
 - **Merge/cherry-pick guard**: during an in-progress merge or cherry-pick (MERGE_HEAD / CHERRY_PICK_HEAD present — `is_merge_or_cherry_pick_in_progress` in the shared resolver), the HEAD-restore is skipped so genuine conflict resolutions and `merge --no-commit` changes survive into the commit; instead, a byte-exact backstop refuses the commit if a staged managed target's blob is identical to its override file (the blind-`git add`-of-override-content case: unmerged paths make the clean filter pass bytes through). No reapply state is written on this path (nothing was restored)

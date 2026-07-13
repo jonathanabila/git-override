@@ -4127,6 +4127,81 @@ test_locate_support_file_ladder() {
     fi
 }
 
+# precommit_plan_restores is a pure decider: entries + staged paths in,
+# unique override files needing a grouped restore out. No git required.
+test_precommit_plan_restores_grouping() {
+    info "Testing precommit_plan_restores grouped-restore decider..."
+
+    local fixtures="$CURRENT_TEST_ROOT/plan-restores"
+    mkdir -p "$fixtures"
+    echo "shared local" > "$fixtures/shared.local.md"
+    echo "other local" > "$fixtures/other.local.md"
+
+    local entries plan
+    entries="docA.md|shared.local.md
+docB.md|shared.local.md
+other.md|other.local.md
+missing.md|nope.local.md"
+
+    plan="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        precommit_plan_restores "$fixtures" "$entries" docB.md missing.md unrelated.md
+    )"
+
+    # docB.md staged -> shared.local.md planned exactly once (its group also
+    # covers the unstaged docA.md); missing.md staged but its override file
+    # does not exist -> skipped; other.md not staged -> skipped.
+    if [[ "$plan" == "shared.local.md" ]]; then
+        pass "Plan groups by override; skips absent overrides and unstaged targets"
+    else
+        fail "Restore plan wrong: '$plan'"
+    fi
+}
+
+# staged_blob_matches_override is the shared leak predicate used by both the
+# merge/cherry-pick backstop and the new-target refusal.
+test_staged_blob_matches_override_predicate() {
+    info "Testing staged_blob_matches_override leak predicate..."
+
+    cd "$TEST_REPO"
+    local root
+    root="$(git rev-parse --show-toplevel)"
+
+    printf 'leak bytes\n' > leak-check.md
+    printf 'leak bytes\n' > leak-check.local.md
+    GIT_LOCAL_OVERRIDE_DISABLE=1 git add -- leak-check.md
+
+    local match_status=0 differ_status=0 missing_status=0
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        staged_blob_matches_override "$root" leak-check.md "$root/leak-check.local.md"
+    ) || match_status=$?
+
+    printf 'different bytes\n' > leak-check.local.md
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        staged_blob_matches_override "$root" leak-check.md "$root/leak-check.local.md"
+    ) || differ_status=$?
+
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        staged_blob_matches_override "$root" leak-check.md "$root/absent.local.md"
+    ) || missing_status=$?
+
+    git rm -q --cached leak-check.md 2>/dev/null || true
+    rm -f leak-check.md leak-check.local.md
+
+    if [[ "$match_status" -eq 0 && "$differ_status" -ne 0 && "$missing_status" -ne 0 ]]; then
+        pass "Leak predicate matches identical bytes only, and never a missing override"
+    else
+        fail "Leak predicate wrong (match: $match_status, differ: $differ_status, missing: $missing_status)"
+    fi
+}
+
 # apply_override_to_target is the write-side front door: one function owns
 # the existence checks, both symlink gates, the resolution-root anchoring for
 # absolute override paths, the copy, and the refusal logging. Pin its status
@@ -4292,6 +4367,8 @@ main() {
         test_cli_version \
         test_cli_version_flag \
         test_locate_support_file_ladder \
+        test_precommit_plan_restores_grouping \
+        test_staged_blob_matches_override_predicate \
         test_apply_override_front_door_statuses \
         test_configure_filter_driver_mode_exclusivity \
         test_sync_filters_preserves_process_optin \
