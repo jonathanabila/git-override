@@ -1148,7 +1148,11 @@ test_readonly_cli_full_discovery_without_stamp() {
 
     # No sync-filters/post-checkout slow path has run, so there is no stamp.
     local stamp_file
-    stamp_file="$(git rev-parse --absolute-git-dir)/local-override-config-stamp"
+    stamp_file="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        get_config_stamp_file "$(git rev-parse --show-toplevel)"
+    )"
     rm -f "$stamp_file"
 
     local output
@@ -1240,7 +1244,11 @@ test_apply_writes_config_stamp() {
 
     # Start without a stamp so only apply itself can have written it.
     local stamp_file
-    stamp_file="$(git rev-parse --absolute-git-dir)/local-override-config-stamp"
+    stamp_file="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        get_config_stamp_file "$(git rev-parse --show-toplevel)"
+    )"
     rm -f "$stamp_file"
 
     git-local-override apply >/dev/null 2>&1
@@ -4495,7 +4503,11 @@ test_record_reapply_state_roundtrip() {
     echo "# ROUNDTRIP OVERRIDE" > CLAUDE.local.md
 
     local roundtrip_status=0 state_file=""
-    state_file="$(git rev-parse --absolute-git-dir)/local-override-post-commit-state"
+    state_file="$(
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/hooks/local-override-lib.sh"
+        get_post_commit_state_file "$root"
+    )"
     (
         # shellcheck disable=SC1091
         source "$PROJECT_DIR/hooks/local-override-lib.sh"
@@ -4711,144 +4723,16 @@ main() {
     echo "Running tests..."
     echo ""
 
-    for test_fn in \
-        test_cli_help \
-        test_cli_version \
-        test_cli_version_flag \
-        test_locate_support_file_ladder \
-        test_precommit_plan_restores_grouping \
-        test_staged_blob_matches_override_predicate \
-        test_apply_override_front_door_statuses \
-        test_restore_front_door_statuses \
-        test_remove_restores_original_with_active_filter \
-        test_remove_restores_staged_deletion \
-        test_targets_for_override_in_entries \
-        test_precommit_new_target_leaks \
-        test_record_reapply_state_roundtrip \
-        test_sentinel_free_config_reader \
-        test_managed_runtime_materializer_layout \
-        test_configure_filter_driver_mode_exclusivity \
-        test_sync_filters_preserves_process_optin \
-        test_init_config \
-        test_list_no_config \
-        test_add_override \
-        test_override_is_applied \
-        test_apply_shows_progress_output \
-        test_apply_shows_nested_paths \
-        test_apply_reports_no_active_overrides \
-        test_apply_with_ignored_config_file \
-        test_git_status_after_override \
-        test_restore_originals \
-        test_list_overrides \
-        test_remove_override \
-        test_remove_with_delete \
-        test_nested_override \
-        test_post_checkout_hook \
-        test_post_checkout_hook_logs_lifecycle \
-        test_pre_commit_hook \
-        test_pre_commit_hook_restores_special_char_target \
-        test_post_commit_hook \
-        test_post_commit_hook_exits_without_state \
-        test_pre_commit_trace_avoids_global_config_discovery \
-        test_sync_attributes_entries_preserves_foreign_lines \
-        test_sync_attributes_quotes_space_target \
-        test_post_checkout_trace_falls_back_when_attributes_missing \
-        test_post_checkout_trace_single_discovery_when_config_unchanged \
-        test_post_checkout_falls_back_and_refreshes_attributes_when_config_changes \
-        test_pre_rebase_trace_reuses_config_discovery_cache \
-        test_discovery_full_finds_directly_ignored_config \
-        test_discovery_skips_config_inside_ignored_dir \
-        test_discovery_hot_mode_unions_stamped_paths \
-        test_discovery_never_reads_git_dir_configs \
-        test_new_gitignored_config_registered_by_sync_filters \
-        test_readonly_cli_hot_discovery_on_matching_stamp \
-        test_readonly_cli_falls_back_to_full_on_stamp_mismatch \
-        test_readonly_cli_falls_back_to_full_on_stamp_deletion \
-        test_readonly_cli_full_discovery_without_stamp \
-        test_discover_config_files_hot_then_full \
-        test_apply_writes_config_stamp \
-        test_status_command \
-        test_status_recognizes_filter_process_mode \
-        test_status_in_worktree \
-        test_status_detects_precommit_framework_hooks \
-        test_status_shim_without_local_override_ids \
-        test_status_empty_attributes_no_arithmetic_error \
-        test_no_override_when_no_local_file \
-        test_file_not_in_config_error \
-        test_hooks_check_for_config \
-        test_custom_pattern \
-        test_recursive_child_config_overrides_parent_subtree \
-        test_recursive_parent_targeting_child_subtree_errors \
-        test_recursive_add_uses_nearest_config_pattern \
-        test_recursive_child_inherits_parent_pattern \
-        test_recursive_grandchild_overrides_inherited_pattern \
-        test_recursive_add_uses_inherited_pattern \
-        test_recursive_override_path_escape_errors \
-        test_recursive_target_path_escape_errors \
-        test_recursive_escape_is_rejected_by_hook_validation \
-        test_invalid_path_entry_fails_whole_config \
-        test_valid_multi_entry_config_parses_fully \
-        test_symlink_target_refused_on_apply \
-        test_symlink_override_refused_on_smudge \
-        test_symlink_guard_allows_regular_files \
-        test_override_symlink_helper_decision_table \
-        test_classify_symlinked_override \
-        test_symlink_override_refused_without_optin_cli \
-        test_symlink_override_followed_with_optin \
-        test_tracked_symlink_override_refused_with_optin \
-        test_dangling_symlink_override_treated_missing \
-        test_symlink_target_still_refused_with_optin \
-        test_apply_skips_refused_symlink_and_applies_rest \
-        test_add_preserves_existing_symlink_override_with_optin \
-        test_symlink_override_filter_roundtrip_with_optin \
-        test_symlink_override_post_commit_reapply_with_optin \
-        test_smudge_refuses_parent_symlinked_override \
-        test_clean_refuses_parent_symlinked_override \
-        test_post_commit_reapply_refuses_parent_symlinked_override \
-        test_post_checkout_applies_optin_symlinked_override \
-        test_list_marks_symlinked_override \
-        test_doctor_warns_symlinked_override_without_optin \
-        test_recursive_three_level_nearest_config_wins \
-        test_recursive_three_level_add_uses_nearest_pattern \
-        test_recursive_empty_child_blocks_parent_targets \
-        test_recursive_empty_child_still_allows_deeper_config \
-        test_missing_pattern_error \
-        test_init_config_has_pattern \
-        test_list_shows_pattern \
-        test_multi_target_override \
-        test_multi_target_pre_commit_restores_all \
-        test_duplicate_target_error \
-        test_validate_valid_config_passes \
-        test_validate_duplicate_target_fails \
-        test_validate_subtree_escape_rejected \
-        test_validate_rejects_attr_macro_target \
-        test_validate_rejects_wildcard_target \
-        test_validate_no_config_dies \
-        test_unknown_command_dies \
-        test_outside_repo_dies \
-        test_list_shows_grouped_targets \
-        test_filter_smudge_applies_override \
-        test_filter_smudge_passthrough \
-        test_filter_smudge_single_git_spawn \
-        test_filter_smudge_trace_env_var \
-        test_filter_clean_returns_original \
-        test_filter_clean_passthrough \
-        test_filter_roundtrip \
-        test_filter_roundtrip_content_variants \
-        test_filter_cli_matches_hook \
-        test_filter_disable_env_var \
-        test_filter_no_head_passthrough \
-        test_filter_non_configured_file_passthrough \
-        test_sync_filters_migrates_legacy_hook_paths \
-        test_doctor_reports_healthy \
-        test_doctor_detects_missing_filter \
-        test_doctor_fix_repairs_filter \
-        test_doctor_fix_resyncs_drifted_attributes \
-        test_doctor_fix_clears_legacy_skip_worktree \
-        test_doctor_readonly_leaves_drift_unrepaired \
-        test_dash_prefixed_target_not_option \
-        test_glob_char_repo_path_normalizes \
-        test_die_does_not_leak_cache_temp_file; do
+    # Auto-discover tests in definition order: every `test_*()` function in
+    # this file IS the registry, so defining a test registers it (the old
+    # hand-maintained list meant a defined-but-unregistered test silently
+    # never ran; the two sets had to be diffed to prove they matched).
+    # STRICT_PASS_COUNT still enforces one pass() per discovered test.
+    local discovered_tests
+    discovered_tests="$(grep -E '^test_[A-Za-z0-9_]+\(\)' "$TESTS_DIR/run-tests.sh" | sed 's/().*//')"
+
+    while IFS= read -r test_fn || [[ -n "$test_fn" ]]; do
+        [[ -n "$test_fn" ]] || continue
         CURRENT_TEST_NAME="$test_fn"
         setup_test_case
 
@@ -4862,7 +4746,7 @@ main() {
         fi
 
         finalize_current_test_root "$CURRENT_TEST_STATUS"
-    done
+    done <<< "$discovered_tests"
 
     finish_suite
 }

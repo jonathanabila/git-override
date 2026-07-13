@@ -73,10 +73,9 @@ jobs:
       - name: Run integration tests
         run: |
           chmod +x tests/integration/*.sh
-          tests/integration/test-install.sh
-          tests/integration/test-git-ops.sh
-          tests/integration/test-precommit.sh
-          tests/integration/test-worktrees.sh
+          for suite in tests/integration/test-*.sh; do
+            "$suite"
+          done
 
   # Shellcheck linting
   lint:

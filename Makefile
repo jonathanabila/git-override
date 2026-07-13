@@ -90,24 +90,18 @@ docker-build-bash3: ## Build the bash 3.2 compatibility test image
 	@echo "Building bash 3.2 compatibility test image..."
 	@docker build -t $(DOCKER_IMAGE_BASH3) -f $(SRC_TESTS)/docker/Dockerfile.bash3 .
 
+# The entrypoint owns the suite table; `all` runs every suite in one
+# container, so adding a suite touches the entrypoint only.
 test-docker: docker-build ## Run all tests in Docker
 	@echo "Running all tests in Docker..."
-	@docker run --rm $(DOCKER_IMAGE) unit
-	@docker run --rm $(DOCKER_IMAGE) install
-	@docker run --rm $(DOCKER_IMAGE) gitops
-	@docker run --rm -e CI=true $(DOCKER_IMAGE) worktree
-	@docker run --rm $(DOCKER_IMAGE) precommit
-	@docker run --rm $(DOCKER_IMAGE) filterprocess
+	@docker run --rm -e CI=true $(DOCKER_IMAGE) all
 
 test-docker-filter-process: docker-build ## Run filter.process roundtrip verification in Docker
 	@docker run --rm $(DOCKER_IMAGE) filterprocess
 
 test-docker-bash3: docker-build-bash3 ## Run tests under genuine bash 3.2.57 (bash-version compatibility)
 	@echo "Running tests under genuine bash 3.2.57..."
-	@docker run --rm $(DOCKER_IMAGE_BASH3) unit
-	@docker run --rm $(DOCKER_IMAGE_BASH3) install
-	@docker run --rm $(DOCKER_IMAGE_BASH3) gitops
-	@docker run --rm -e CI=true $(DOCKER_IMAGE_BASH3) worktree
+	@docker run --rm -e CI=true $(DOCKER_IMAGE_BASH3) unit install gitops worktree
 
 test-docker-unit: docker-build ## Run unit tests in Docker
 	@docker run --rm $(DOCKER_IMAGE) unit

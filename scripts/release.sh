@@ -90,10 +90,13 @@ printf '%s\n' "$VERSION" > "$VERSION_FILE"
 # Bump hardcoded documentation version pins from the previous release to this one.
 # release.sh otherwise only updates CHANGELOG.md and VERSION, leaving the pinned
 # install/pre-commit snippets stale (they had to be re-bumped by hand for v0.6.0
-# and v0.7.0). Each of these files pins `v<prev>` in a `rev:` line or a
+# and v0.7.0). Each pinned file carries `v<prev>` in a `rev:` line or a
 # `/v<prev>/scripts/install.sh` URL; a global literal replace is safe because no
-# other `v<prev>` string occurs in them. `make check-docs-sync` guards the result.
-PIN_FILES="README.md SECURITY.md .pre-commit-hooks.yaml bin/git-local-override"
+# other `v<prev>` string occurs in them. The pin-file list is shared with the
+# `make check-docs-sync` gate via scripts/pin-manifest.sh, so the releaser and
+# the checker can never disagree about which files hold pins.
+# shellcheck source=pin-manifest.sh
+source "$(dirname "${BASH_SOURCE[0]}")/pin-manifest.sh"
 PREV_PIN_ESC=$(printf '%s' "$PREV_VERSION" | sed 's/[.]/\\./g')
 UPDATED_PINS=""
 for pin_file in $PIN_FILES; do

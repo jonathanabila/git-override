@@ -72,10 +72,14 @@ EOF
     mkdir -p .git/info
     install_test_hooks "$TEST_DIR" "$PROJECT_DIR"
 
-    git config filter.local-override.smudge "$TEST_DIR/.git/hooks/local-override-filter-smudge %f"
-    git config filter.local-override.clean "$TEST_DIR/.git/hooks/local-override-filter-clean %f"
-    git config filter.local-override.required false
-    echo "AGENTS.md filter=local-override" > .git/info/attributes
+    # Configure the driver and arm attributes through the resolver's real
+    # writers — the fixture must not re-encode the config/attributes formats.
+    (
+        # shellcheck disable=SC1091
+        source "$PROJECT_DIR/shared/local-override-resolver.sh"
+        configure_filter_driver "$TEST_DIR" "$TEST_DIR/.git/hooks" scripts \
+            && sync_attributes_entries "$TEST_DIR" "AGENTS.md|CLAUDE.private.md"
+    ) || test_lib_die "Unable to configure the filter driver for the worktree fixture"
 }
 
 #------------------------------------------------------------------------------

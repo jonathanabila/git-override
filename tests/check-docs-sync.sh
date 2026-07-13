@@ -37,11 +37,13 @@ fail=0
 #------------------------------------------------------------------------------
 
 expected="v$(cat VERSION)"
-pin_files="README.md SECURITY.md .pre-commit-hooks.yaml bin/git-local-override"
 
-# Two pin shapes: `rev: vX.Y.Z` snippet lines and `/vX.Y.Z/scripts/install.sh`
-# URLs. Scoping to these avoids flagging CHANGELOG-style historical versions.
-pin_re='(rev: v[0-9]+\.[0-9]+\.[0-9]+|/v[0-9]+\.[0-9]+\.[0-9]+/scripts/install\.sh)'
+# The pin-file list and pin shapes are shared with scripts/release.sh (the
+# writer) via the pin manifest, so checker and releaser can never diverge.
+# shellcheck source=../scripts/pin-manifest.sh
+source "$REPO_ROOT/scripts/pin-manifest.sh"
+pin_files="$PIN_FILES"
+pin_re="$PIN_RE"
 
 pin_count=0
 while IFS= read -r match; do

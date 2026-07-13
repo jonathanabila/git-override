@@ -26,6 +26,7 @@ git-local-override/
 ├── scripts/                      # Installation and release scripts
 │   ├── install.sh
 │   ├── uninstall.sh
+│   ├── pin-manifest.sh           # Shared pin-file list (release.sh + check-docs-sync.sh)
 │   └── release.sh                # Changelog release prep helper
 ├── tests/                        # Test suite
 │   ├── run-tests.sh              # Main test runner (unit suite)
@@ -276,13 +277,12 @@ test_my_feature() {
         fail "Feature did not work"
     fi
 }
-
-# Don't forget to add to main():
-main() {
-    # ...existing tests...
-    test_my_feature
-}
 ```
+
+Defining the function IS the registration: `main()` auto-discovers every
+top-level `test_*()` function in the file and runs them in definition order
+(each test gets a fresh cloned repo via `setup_test_case`). There is no
+hand-maintained test list to update.
 
 The assertion harness — `info`/`pass`/`fail`, the terminal color vars, the
 `TESTS_RUN`/`TESTS_PASSED`/`TESTS_FAILED` counters, and the `finish_suite`
