@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-13
+
 ### Removed
 
 - **The `make install-manual` and `make uninstall-manual` targets are deleted**: install-manual was a second installer that had silently drifted into being broken — it copied the hook scripts into the git template directory under their `local-override-*` source names (git only runs hooks named `post-checkout` etc., so the installed hooks never fired), never installed managed wrapper hooks, and configured no filter driver, leaving a template install that looked successful but did nothing. `make install` / `make uninstall` (which delegate to the canonical `scripts/install.sh` / `scripts/uninstall.sh`) are the supported paths
@@ -747,6 +749,7 @@ files:
 - **0.0.2** - Config-driven architecture
 - **0.0.1** - Initial release with full feature set
 
+[0.10.0]: https://github.com/jonathanabila/git-override/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jonathanabila/git-override/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/jonathanabila/git-override/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/jonathanabila/git-override/compare/v0.6.0...v0.7.0
