@@ -4068,6 +4068,64 @@ EOF
 # Main
 #------------------------------------------------------------------------------
 
+# locate_support_file: the resolver-anchored fallback ladder must serve every
+# layout — source checkout (shared/ sibling + checkout-root files), installed
+# hooks dir (CLI data dir fallback) — and fail cleanly when a file is nowhere.
+test_locate_support_file_ladder() {
+    info "Testing locate_support_file fallback ladder..."
+
+    local scratch="$CURRENT_TEST_ROOT/locate-support"
+    mkdir -p "$scratch/devtree/shared" "$scratch/fakegit/hooks" \
+        "$scratch/xdg/git-local-override"
+    # The resolver canonicalizes its own directory (cd && pwd); canonicalize
+    # the scratch root too so the expected paths compare byte-for-byte.
+    scratch="$(cd "$scratch" && pwd)"
+
+    cp "$PROJECT_DIR/shared/local-override-resolver.sh" "$scratch/devtree/shared/"
+    cp "$PROJECT_DIR/shared/local-override-resolver.sh" "$scratch/fakegit/hooks/"
+    echo "9.9.9-dev" > "$scratch/devtree/VERSION"
+    echo "# dev shell init" > "$scratch/devtree/shared/local-override-shell-init.sh"
+    echo "8.8.8-installed" > "$scratch/xdg/git-local-override/VERSION"
+
+    # Source-checkout layout: VERSION resolves to the checkout root (ladder
+    # step 2), shell-init to the shared/ sibling (step 1) — even when an
+    # installed data-dir copy also exists, the checkout wins.
+    local dev_version dev_shell_init
+    dev_version="$(
+        # shellcheck disable=SC1091
+        source "$scratch/devtree/shared/local-override-resolver.sh"
+        XDG_DATA_HOME="$scratch/xdg" locate_support_file VERSION
+    )"
+    dev_shell_init="$(
+        # shellcheck disable=SC1091
+        source "$scratch/devtree/shared/local-override-resolver.sh"
+        locate_support_file local-override-shell-init.sh
+    )"
+
+    # Installed-hooks layout: nothing next to the resolver, so VERSION falls
+    # through to the CLI data dir (step 3); a missing file returns 1.
+    local hooks_version missing_status=0
+    hooks_version="$(
+        # shellcheck disable=SC1091
+        source "$scratch/fakegit/hooks/local-override-resolver.sh"
+        XDG_DATA_HOME="$scratch/xdg" locate_support_file VERSION
+    )"
+    (
+        # shellcheck disable=SC1091
+        source "$scratch/fakegit/hooks/local-override-resolver.sh"
+        XDG_DATA_HOME="$scratch/xdg" locate_support_file no-such-file
+    ) > /dev/null 2>&1 || missing_status=$?
+
+    if [[ "$dev_version" == "$scratch/devtree/VERSION" \
+       && "$dev_shell_init" == "$scratch/devtree/shared/local-override-shell-init.sh" \
+       && "$hooks_version" == "$scratch/xdg/git-local-override/VERSION" \
+       && "$missing_status" -ne 0 ]]; then
+        pass "locate_support_file resolves each layout and fails cleanly"
+    else
+        fail "locate_support_file ladder wrong (dev VERSION: '$dev_version', dev shell-init: '$dev_shell_init', hooks VERSION: '$hooks_version', missing status: $missing_status)"
+    fi
+}
+
 main() {
     local test_fn
     local test_exit
@@ -4090,6 +4148,7 @@ main() {
         test_cli_help \
         test_cli_version \
         test_cli_version_flag \
+        test_locate_support_file_ladder \
         test_init_config \
         test_list_no_config \
         test_add_override \

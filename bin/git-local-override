@@ -191,27 +191,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_SUPPORT_DIR_DEFAULT="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override"
 SHARED_RESOLVER_PATH=""
 
-get_version_path() {
-    local repo_version_path="$SCRIPT_DIR/../$VERSION_FILE_NAME"
-    local installed_version_path="$CLI_SUPPORT_DIR_DEFAULT/$VERSION_FILE_NAME"
-
-    if [[ -f "$repo_version_path" ]]; then
-        printf '%s\n' "$repo_version_path"
-        return 0
-    fi
-
-    if [[ -f "$installed_version_path" ]]; then
-        printf '%s\n' "$installed_version_path"
-        return 0
-    fi
-
-    return 1
-}
-
 get_version() {
     local version_path
 
-    version_path="$(get_version_path 2>/dev/null || true)"
+    version_path="$(locate_support_file "$VERSION_FILE_NAME" 2>/dev/null || true)"
     if [[ -n "$version_path" && -f "$version_path" ]]; then
         tr -d '\r' < "$version_path"
         return 0
@@ -1460,16 +1443,11 @@ cmd__get_active_targets() {
 
 cmd_shell_init() {
     # The shell-init snippet lives in its own data module so this god-file need
-    # not embed it as a heredoc. Locate it with the same dev-or-installed
-    # fallback used for the shared resolver above (PoC for plan 017).
+    # not embed it as a heredoc. The resolver's locate_support_file owns the
+    # dev-or-installed fallback ladder.
     local shell_init_path
-    if [[ -f "$SCRIPT_DIR/../shared/local-override-shell-init.sh" ]]; then
-        shell_init_path="$SCRIPT_DIR/../shared/local-override-shell-init.sh"
-    elif [[ -f "$CLI_SUPPORT_DIR_DEFAULT/local-override-shell-init.sh" ]]; then
-        shell_init_path="$CLI_SUPPORT_DIR_DEFAULT/local-override-shell-init.sh"
-    else
-        die "Unable to locate local-override-shell-init.sh"
-    fi
+    shell_init_path="$(locate_support_file local-override-shell-init.sh)" \
+        || die "Unable to locate local-override-shell-init.sh"
 
     cat "$shell_init_path"
 }

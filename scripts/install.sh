@@ -71,6 +71,30 @@ get_project_file_content() {
     fi
 }
 
+# Path to a sourceable copy of the shared resolver: the checkout's file when
+# running from a clone, else a memoized temp copy fetched once (curl-pipe
+# path). The temp copy is cleaned up by the EXIT trap below; callers must
+# never delete the returned path themselves.
+RESOLVER_LIB_FILE=""
+RESOLVER_LIB_TEMP=""
+get_resolver_lib_file() {
+    if [[ -n "$RESOLVER_LIB_FILE" ]]; then
+        printf '%s\n' "$RESOLVER_LIB_FILE"
+        return 0
+    fi
+
+    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
+        RESOLVER_LIB_FILE="$PROJECT_DIR/shared/local-override-resolver.sh"
+    else
+        RESOLVER_LIB_TEMP="$(mktemp)"
+        get_project_file_content "shared/local-override-resolver.sh" > "$RESOLVER_LIB_TEMP"
+        RESOLVER_LIB_FILE="$RESOLVER_LIB_TEMP"
+    fi
+
+    printf '%s\n' "$RESOLVER_LIB_FILE"
+}
+trap '[[ -n "$RESOLVER_LIB_TEMP" ]] && rm -f "$RESOLVER_LIB_TEMP"' EXIT
+
 managed_hook_marker_line() {
     local hook_type="$1"
     printf '%s %s' "$MANAGED_HOOK_MARKER_PREFIX" "$hook_type"
@@ -315,20 +339,11 @@ read_config_pairs() {
     local repo_root="$1"
     local lib_file=""
 
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
-        lib_file="$PROJECT_DIR/shared/local-override-resolver.sh"
-    else
-        lib_file="$(mktemp)"
-        get_project_file_content "shared/local-override-resolver.sh" > "$lib_file"
-    fi
+    lib_file="$(get_resolver_lib_file)"
 
     # shellcheck disable=SC1090
     source "$lib_file"
     read_config "$repo_root"
-
-    if [[ -z "$PROJECT_DIR" || "$lib_file" != "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
-        rm -f "$lib_file"
-    fi
 }
 
 install_filter_scripts_to_dir() {
@@ -362,15 +377,8 @@ install_shared_resolver_to_dir() {
 sync_attributes() {
     local repo_root="$1"
     local lib_file=""
-    local cleanup_lib=false
 
-    if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/shared/local-override-resolver.sh" ]]; then
-        lib_file="$PROJECT_DIR/shared/local-override-resolver.sh"
-    else
-        lib_file="$(mktemp)"
-        cleanup_lib=true
-        get_project_file_content "shared/local-override-resolver.sh" > "$lib_file"
-    fi
+    lib_file="$(get_resolver_lib_file)"
 
     (
         # shellcheck disable=SC1090
@@ -382,7 +390,6 @@ sync_attributes() {
         sync_attributes_entries "$repo_root" "$entries"
     ) || { error "Unable to sync git attributes"; exit 1; }
 
-    [[ "$cleanup_lib" == true ]] && rm -f "$lib_file"
     success "Synced git attributes: $repo_root"
 }
 

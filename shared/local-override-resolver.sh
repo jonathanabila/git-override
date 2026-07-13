@@ -42,6 +42,46 @@ local_override_trace_log() {
     fi
 }
 
+# Where the resolver file itself lives, captured at source time. This is the
+# anchor for locate_support_file: in a source checkout the resolver sits in
+# shared/; installed, it sits in the CLI data dir or a git hooks dir.
+LOCAL_OVERRIDE_RESOLVER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+
+# Locate a support file (VERSION, local-override-shell-init.sh, ...) via the
+# single canonical fallback ladder:
+#   1. next to the resolver itself (source-checkout shared/ files, and every
+#      file in a CLI data-dir install)
+#   2. the checkout root, only when the resolver runs from a source tree
+#      (its directory is named shared/) — e.g. the repo-root VERSION file
+#   3. the CLI data dir (hooks running from .git/hooks alongside an
+#      installed CLI)
+# Prints the absolute path; returns 1 when not found (never dies — callers
+# that want fatal behavior die at the call site).
+locate_support_file() {
+    local name="$1"
+    local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/git-local-override"
+
+    if [[ -n "$LOCAL_OVERRIDE_RESOLVER_DIR" && -f "$LOCAL_OVERRIDE_RESOLVER_DIR/$name" ]]; then
+        printf '%s\n' "$LOCAL_OVERRIDE_RESOLVER_DIR/$name"
+        return 0
+    fi
+
+    if [[ "${LOCAL_OVERRIDE_RESOLVER_DIR##*/}" == "shared" ]]; then
+        local checkout_root="${LOCAL_OVERRIDE_RESOLVER_DIR%/*}"
+        if [[ -n "$checkout_root" && -f "$checkout_root/$name" ]]; then
+            printf '%s\n' "$checkout_root/$name"
+            return 0
+        fi
+    fi
+
+    if [[ -f "$data_dir/$name" ]]; then
+        printf '%s\n' "$data_dir/$name"
+        return 0
+    fi
+
+    return 1
+}
+
 resolver_now_milliseconds() {
     if command -v perl >/dev/null 2>&1; then
         perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'
