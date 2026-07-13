@@ -275,7 +275,7 @@ non-zero on any failure:
 
 ```bash
 git-local-override doctor        # diagnose (read-only)
-git-local-override doctor --fix  # apply the safe repair (missing filter driver)
+git-local-override doctor --fix  # repair missing filter driver, attribute drift, legacy skip-worktree bits
 ```
 
 **Overrides not appearing.** Re-apply manually with `git-local-override apply`.

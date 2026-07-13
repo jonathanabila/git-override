@@ -1263,6 +1263,10 @@ cmd_doctor() {
     fi
 
     if [[ "$skip_post_fix_checks" == false ]]; then
+        # Both checks below are repaired by the same cmd_sync_filters delegation;
+        # collect one signal and repair once after both have reported.
+        local needs_sync_fix=false
+
         # Check 5: attributes in sync with the effective config.
         local attributes_file
         local filter_count
@@ -1274,6 +1278,9 @@ cmd_doctor() {
         if [[ "$filter_count" -eq "$config_target_count" ]]; then
             doctor_line pass "Attributes" "in sync ($filter_count file(s))"
             ((pass_count++)) || true
+        elif [[ "$fix" == true ]]; then
+            doctor_line fail "Attributes" "out of sync (config: $config_target_count, filtered: $filter_count) — repairing via sync-filters"
+            needs_sync_fix=true
         else
             doctor_line warn "Attributes" "out of sync (config: $config_target_count, filtered: $filter_count)"
             echo "  -> Run 'git-local-override sync-filters' to resync attributes"
@@ -1307,10 +1314,24 @@ $target"
         if [[ "$skip_worktree_count" -eq 0 ]]; then
             doctor_line pass "Skip-worktree" "no legacy bits"
             ((pass_count++)) || true
+        elif [[ "$fix" == true ]]; then
+            doctor_line fail "Skip-worktree" "$skip_worktree_count legacy bit(s) present — repairing via sync-filters"
+            needs_sync_fix=true
         else
             doctor_line warn "Skip-worktree" "$skip_worktree_count legacy bit(s) present"
             echo "  -> Run 'git-local-override sync-filters' to clear them"
             ((warn_count++)) || true
+        fi
+
+        # Repaired states were not counted as warns/fails, so the exit code
+        # reflects the post-fix state (same contract as the check-4 repair).
+        # needs_sync_fix is only ever set under --fix, so a plain doctor run
+        # never mutates anything.
+        if [[ "$needs_sync_fix" == true ]]; then
+            echo ""
+            cmd_sync_filters
+            echo ""
+            info "Re-run 'git-local-override doctor' to confirm the repair"
         fi
     fi
 

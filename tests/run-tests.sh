@@ -3827,6 +3827,90 @@ test_doctor_fix_repairs_filter() {
     fi
 }
 
+test_doctor_fix_resyncs_drifted_attributes() {
+    info "Testing doctor --fix resyncs drifted attributes..."
+    cd "$TEST_REPO"
+    create_config
+    git-local-override sync-filters >/dev/null
+
+    # Drift: driver stays configured, but the managed attribute lines vanish.
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+    : > "$attributes_file"
+
+    local output
+    local exit_code=0
+    output=$(git-local-override doctor --fix 2>&1) || exit_code=$?
+
+    if [[ $exit_code -eq 0 \
+        && "$output" == *"out of sync"*"repairing via sync-filters"* \
+        && "$(grep -c "filter=local-override" "$attributes_file")" -eq 3 ]]; then
+        pass "doctor --fix resynced attributes with exit 0"
+    else
+        fail "doctor --fix did not resync attributes (exit: $exit_code, lines: $(grep -c "filter=local-override" "$attributes_file" || true), output: $output)"
+    fi
+}
+
+test_doctor_fix_clears_legacy_skip_worktree() {
+    info "Testing doctor --fix clears legacy skip-worktree bits..."
+    cd "$TEST_REPO"
+    create_config
+    git-local-override sync-filters >/dev/null
+
+    # Plant a legacy skip-worktree bit on a tracked managed target.
+    git update-index --skip-worktree CLAUDE.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override doctor --fix 2>&1) || exit_code=$?
+
+    local ls_state
+    ls_state="$(git ls-files -v -- CLAUDE.md)"
+
+    if [[ $exit_code -eq 0 \
+        && "$output" == *"legacy bit(s) present"*"repairing via sync-filters"* \
+        && "${ls_state:0:1}" != "S" ]]; then
+        pass "doctor --fix cleared the legacy skip-worktree bit with exit 0"
+    else
+        fail "doctor --fix did not clear skip-worktree (exit: $exit_code, ls-files: $ls_state, output: $output)"
+    fi
+}
+
+test_doctor_readonly_leaves_drift_unrepaired() {
+    info "Testing plain doctor warns but does not repair attribute/skip-worktree drift..."
+    cd "$TEST_REPO"
+    create_config
+    git-local-override sync-filters >/dev/null
+
+    # Both fixable states at once: drifted attributes + a legacy bit.
+    local attributes_file
+    attributes_file="$(git rev-parse --git-path info/attributes)"
+    : > "$attributes_file"
+    git update-index --skip-worktree CLAUDE.md
+
+    local output
+    local exit_code=0
+    output=$(git-local-override doctor 2>&1) || exit_code=$?
+
+    local ls_state
+    ls_state="$(git ls-files -v -- CLAUDE.md)"
+
+    # Warns only (exit 0 = no FAIL), hints printed, and nothing mutated:
+    # attributes stay empty and the skip-worktree bit stays set.
+    if [[ $exit_code -eq 0 \
+        && "$output" == *"[WARN] Attributes"* \
+        && "$output" == *"[WARN] Skip-worktree"* \
+        && "$output" == *"Run 'git-local-override sync-filters'"* \
+        && ! -s "$attributes_file" \
+        && "${ls_state:0:1}" == "S" ]]; then
+        git update-index --no-skip-worktree CLAUDE.md
+        pass "plain doctor warned for both states and repaired nothing"
+    else
+        git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+        fail "plain doctor changed state or missed a warn (exit: $exit_code, ls-files: $ls_state, output: $output)"
+    fi
+}
+
 test_dash_prefixed_target_not_option() {
     info "Testing dash-prefixed target is passed as a pathspec, not an option..."
     cd "$TEST_REPO"
@@ -4078,6 +4162,9 @@ main() {
         test_doctor_reports_healthy \
         test_doctor_detects_missing_filter \
         test_doctor_fix_repairs_filter \
+        test_doctor_fix_resyncs_drifted_attributes \
+        test_doctor_fix_clears_legacy_skip_worktree \
+        test_doctor_readonly_leaves_drift_unrepaired \
         test_dash_prefixed_target_not_option \
         test_glob_char_repo_path_normalizes \
         test_die_does_not_leak_cache_temp_file; do
